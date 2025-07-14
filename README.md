@@ -1,3 +1,33 @@
+# Theori Finals Release
+This repository contains a snapshot of the finals release of Theori's CRS.
+This was written from August 2024 - June 2025. This contains the entirety of the code
+that was submitted and run for the final round of the DARPA AI Cyber Challenge held from
+July - August 2025. However, it does not necessarily contain all code used in development,
+such as internal code used by Theori for testing, evaluation, and so on.
+
+More information about this CRS (including blog posts, information about the previous version, and
+some agent traces produced by running this software) can be found
+[here](https://theori-io.github.io/aixcc-public/index.html).
+
+Note that some things may have bugs, be wrong/out-dated, or rely on permissioned data (such as using
+Docker images from the Theori repository). These contents are left in to keep this repository an accurate
+representation of our CRS at the time of submission.
+
+In general this expects that API keys are present in a folder named `tokens_etc`.
+⚠️ Note that the AIxCC finals competition afforded a large budget for LLMs, and that this
+system is tuned for that environment. This code can easily spend $1,000 or more in under an hour ⚠️
+
+There are several model configuration files in the [configs](./configs/) folder, and using
+one with less expensive models can help to reduce the spending for testing purposes.
+
+This repository will NOT be supported, or updated with bug fixes, features, etc. Information is
+provided for archival/historical purposes only.
+
+If you are interested in running such a system commercially, you may want to
+[reach out](https://theori.io/contact) to us at Theori directly.
+
+The contents below the next heading detail the original contents of the README file.
+
 # AIxCC AFC CRS - "Robo Duck"
 
 This repository contains Theori's CRS for the AIxCC AFC. You may also want to check out our [docs](./docs). In particular, you may want to start with the [architecture diagram](./docs/crs-architecture.md).
