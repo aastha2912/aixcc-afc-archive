@@ -1,0 +1,105 @@
+diff --git a/facebook-clang-plugins/clang/src/pp.patch b/facebook-clang-plugins/clang/src/pp.patch
+new file mode 100644
+index 0000000000..dcd718bbec
+--- /dev/null
++++ b/facebook-clang-plugins/clang/src/pp.patch
+@@ -0,0 +1,54 @@
++--- a/llvm-project/clang-tools-extra/pp-trace/PPCallbacksTracker.cpp   2025-02-04 15:09:06.070496402 -0800
+++++ b/llvm-project/clang-tools-extra/pp-trace/PPCallbacksTracker.cpp   2025-02-04 15:13:56.571950557 -0800
++@@ -322,6 +322,50 @@
++   appendArgument("MacroDefinition", MacroDefinition);
++   appendArgument("Range", Range);
++   appendArgument("Args", Args);
+++
+++  SourceManager &SM = PP.getSourceManager();
+++
+++  // Get the source location information
+++  SourceLocation ExpansionLoc = Range.getBegin();
+++  std::string FileName = SM.getFilename(ExpansionLoc).str();
+++
+++  // Get the original text
+++  llvm::StringRef text = Lexer::getSourceText(CharSourceRange::getTokenRange(Range), SM, PP.getLangOpts());
+++
+++  std::string ExpandedText;
+++  if (const MacroInfo *MI = MacroDefinition.getMacroInfo()) {
+++    if (Args) {
+++      // For each token in the macro definition
+++      for (const auto &Tok : MI->tokens()) {
+++        // Check if this token is a parameter reference
+++        if (Tok.is(tok::identifier)) {
+++          // If it matches one of the macro parameters, substitute
+++          if (IdentifierInfo *II = Tok.getIdentifierInfo()) {
+++            // Find which parameter index (p) it corresponds to
+++            int p = MI->getParameterNum(II);
+++
+++            // If it's one of the parameters, we pull the tokens from Args
+++            if (p >= 0) {
+++              // MacroArgs::getUnexpArgument() gives the argument tokens
+++              ExpandedText += PP.getSpelling(*(Args->getUnexpArgument(p)));
+++              continue; // go on to the next definition token
+++            }
+++          }
+++        }
+++
+++        // If not a parameter, just spell this token out
+++        ExpandedText += PP.getSpelling(Tok);
+++      }
+++    } else {
+++      // If there are no Args (object-like macros), just do the naive approach
+++      for (const auto &Tok : MI->tokens()) {
+++        ExpandedText += PP.getSpelling(Tok);
+++      }
+++    }
+++  }
+++
+++  appendArgument("Orig", text.str());
+++  appendArgument("Expanded", ExpandedText);
++ }
++ 
++ // Hook called whenever a macro definition is seen.
++
+
+diff --git a/facebook-clang-plugins/clang/src/prepare_clang_src.sh b/facebook-clang-plugins/clang/src/prepare_clang_src.sh
+index 2d026a0636..ed735ad05a 100755
+--- a/facebook-clang-plugins/clang/src/prepare_clang_src.sh
++++ b/facebook-clang-plugins/clang/src/prepare_clang_src.sh
+@@ -21,6 +21,7 @@ CLANG_PREBUILD_PATCHES=(
+     "$SCRIPT_DIR/err_ret_local_block.patch"
+     "$SCRIPT_DIR/mangle_suppress_errors.patch"
+     "$SCRIPT_DIR/AArch64SVEACLETypes.patch"
++    "$SCRIPT_DIR/pp.patch"
+ )
+
+ mkdir -p "${SCRIPT_DIR}/download"
+diff --git a/facebook-clang-plugins/clang/setup.sh b/facebook-clang-plugins/clang/setup.sh
+index f0f46908e5..0e2c3208da 100755
+--- a/facebook-clang-plugins/clang/setup.sh
++++ b/facebook-clang-plugins/clang/setup.sh
+@@ -197,7 +197,7 @@ fi
+ if [[ "$PLATFORM" = "Linux" ]] && [[ -n "${PLATFORM_ENV}" ]] ; then
+     # Please note that this case only applies to infer/master platform builds
+     CMAKE_ARGS+=(
+-        -DLLVM_ENABLE_PROJECTS="clang"
++        -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra"
+         -DLLVM_ENABLE_RUNTIMES="compiler-rt;libcxx;libcxxabi;libunwind"
+         -DZLIB_INCLUDE_DIR="$ZLIB/include"
+         # We disable some tools to avoid adding -isystem /usr/include in platform builds. It is good
+@@ -210,7 +210,7 @@ if [[ "$PLATFORM" = "Linux" ]] && [[ -n "${PLATFORM_ENV}" ]] ; then
+     )
+ else
+     CMAKE_ARGS+=(
+-        -DLLVM_ENABLE_PROJECTS="clang;openmp"
++        -DLLVM_ENABLE_PROJECTS="clang;openmp;clang-tools-extra"
+         -DLLVM_ENABLE_RUNTIMES="compiler-rt;libcxx;libcxxabi;libunwind"
+     )
+ fi
+@@ -269,7 +269,7 @@ echo "testing clang build"
+ # "uninstall" previous clang
+ rm -fr "$CLANG_PREFIX"
+ 
+-$BUILD_BIN $BUILD_ARGS install
++$BUILD_BIN $BUILD_ARGS pp-trace install
+ 
+ popd # build
+ popd # $TMP
+

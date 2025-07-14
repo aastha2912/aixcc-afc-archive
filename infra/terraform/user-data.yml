@@ -1,0 +1,556 @@
+#cloud-config
+
+package_update: true
+apt:
+  sources:
+    deadsnakes.list:
+      source: "ppa:deadsnakes/ppa"
+
+packages:
+  - atop
+  - build-essential
+  - caddy
+  - docker-buildx
+  - docker.io
+  - git
+  - git-lfs
+  - libssl-dev
+  - musl-tools
+  - openjdk-17-jdk-headless
+  - patchutils
+  - pkg-config
+  - protobuf-compiler
+  - python3.13
+  - python3.13-dev
+  - python3.13-venv
+  - ripgrep
+  - rustup
+  - skopeo
+  - sqlite3
+  - unzip
+  - zfsutils-linux
+  - zip
+
+users:
+  - default
+  - name: crs
+    shell: /bin/bash
+    groups:
+      - docker
+
+write_files:
+  - path: /etc/sysctl.d/99-crs.conf
+    content: |
+      vm.mmap_rnd_bits=28
+
+  - path: /etc/systemd/system/docker.service.d/90-docker.conf
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=/usr/bin/dockerd
+
+  - path: /etc/security/limits.d/99-nofile.conf
+    content: |
+      * soft nofile 1048576
+      * hard nofile 1048576
+
+  - path: /etc/systemd/system.conf
+    append: true
+    content: |
+      DefaultLimitNOFILE=1048576
+
+  - path: /etc/systemd/user.conf
+    append: true
+    content: |
+      DefaultLimitNOFILE=1048576
+
+  - path: /etc/docker/daemon.json
+    content: |
+      {
+          "containerd": "/run/containerd/containerd.sock",
+          "data-root": "/data/docker",
+          "hosts": ["fd://", "tcp://0.0.0.0:2375"]
+      }
+
+  - path: /etc/systemd/system/tailscale-logout.service
+    content: |
+      [Unit]
+      Description=Tailscale logout on shutdown
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=true
+      ExecStop=/usr/bin/tailscale logout
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/environment
+    content: |
+      AZCOPY_AUTO_LOGIN_TYPE=MSI
+      AZURE_RESOURCE_GROUP="${CRS_RESOURCE_GROUP}"
+      AZURE_STORAGE_ACCOUNT="${CRS_STORAGE_ACCOUNT}"
+      CRS_BLOB_ENDPOINT="${CRS_BLOB_ENDPOINT}"
+      CRS_STORAGE_ACCOUNT="${CRS_STORAGE_ACCOUNT}"
+      CRS_BUILDER_COUNT="${CRS_BUILDER_COUNT}"
+      CRS_FUZZER_COUNT="${CRS_FUZZER_COUNT}"
+      CRS_REGISTRY_NAME="${CRS_REGISTRY_NAME}"
+      CRS_REGISTRY_DOMAIN="${CRS_REGISTRY_DOMAIN}"
+      CRS_REPO_HASH="${CRS_REPO_HASH}"
+      CRS_DEV_BLOB_URL="${CRS_DEV_BLOB_URL}"
+      CRS_DEV_SAS_KEY="${CRS_DEV_SAS_KEY}"
+      CAPI_URL="${CAPI_URL}"
+      CAPI_ID="${CAPI_ID}"
+      CAPI_TOKEN="${CAPI_TOKEN}"
+      API_KEY_ID="${API_KEY_ID}"
+      API_KEY_TOKEN="${API_KEY_TOKEN}"
+      INFLUXDB_ENDPOINT="http://10.0.0.10:8087"
+      OTEL_TELEGRAF_ENDPOINT="grpc://127.0.0.1:4317"
+      OTEL_EXPORTER_OTLP_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT}"
+      OTEL_EXPORTER_OTLP_HEADERS="${OTEL_EXPORTER_OTLP_HEADERS}"
+      OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      CACHE_DIR=/data/cache
+      DATA_DIR=/data/data
+      LOGS_DIR=/data/logs
+      MODEL="${CRS_MODEL}"
+      MODEL_MAP="${CRS_MODEL_MAP}"
+    append: true
+
+  - path: /etc/nginx/sites-enabled/default
+    content: |
+      server {
+          listen 8087;
+          access_log off;
+          location / {
+              proxy_pass http://localhost:8086/;
+              proxy_set_header Authorization "Token TOKEN_GOES_HERE";
+          }
+      }
+
+  - path: /etc/default/chronograf
+    content: |
+      INFLUXDB_URL=http://localhost:8087
+      HOST=localhost
+
+  - path: /etc/default/influxdb2
+    content: |
+      INFLUXD_CONFIG_PATH=/etc/influxdb/config.toml
+      INFLUXD_HTTP_BIND_ADDRESS=0.0.0.0:8086
+
+  - path: /etc/influxdb/config.toml
+    content: |
+      bolt-path = "/data/influxdb/influxd.bolt"
+      engine-path = "/data/influxdb/engine"
+
+  - path: /etc/rsyslog.d/30-telegraf.conf
+    content: |
+      $ActionQueueType LinkedList # use asynchronous processing
+      $ActionQueueFileName srvrfwd # set file name, also enables disk mode
+      $ActionResumeRetryCount -1 # infinite retries on insert failure
+      $ActionQueueSaveOnShutdown on # save in-memory data if rsyslog shuts down
+
+      # use udp according to RFC 5424
+      *.* @127.0.0.1:6514;RSYSLOG_SyslogProtocol23Format
+
+  - path: /etc/telegraf/telegraf.conf
+    content: |
+      [global_tags]
+
+      [agent]
+        interval = "10s"
+        round_interval = true
+        metric_batch_size = 10000
+        metric_buffer_limit = 100000
+        collection_jitter = "0s"
+        flush_interval = "10s"
+        flush_jitter = "0s"
+        precision = "0s"
+        omit_hostname = false
+
+      [[outputs.influxdb_v2]]
+         urls = ["http://10.0.0.10:8087"]
+         organization = "theori"
+         token = "TOKEN_PLACEHOLDER"
+         bucket = "telegraf"
+         influx_uint_support = true
+         content_encoding = "gzip"
+         [outputs.influxdb_v2.tagdrop]
+           otel = ["1"]
+
+      [[outputs.influxdb_v2]]
+         urls = ["http://10.0.0.10:8087"]
+         organization = "theori"
+         token = "TOKEN_PLACEHOLDER"
+         bucket = "otel"
+         influx_uint_support = true
+         content_encoding = "gzip"
+         [outputs.influxdb_v2.tagpass]
+           otel = ["1"]
+
+      [[inputs.cpu]]
+        percpu = true
+        totalcpu = true
+        collect_cpu_time = false
+        report_active = false
+        core_tags = false
+
+      [[inputs.disk]]
+        # mount_points = ["/"]
+        ## Ignore mount points by filesystem type.
+        ignore_fs = ["tmpfs", "devtmpfs", "devfs", "iso9660", "overlay", "aufs", "squashfs"]
+
+      [[inputs.diskio]]
+
+      [[inputs.kernel]]
+
+      [[inputs.mem]]
+
+      [[inputs.processes]]
+        use_sudo = false
+
+      [[inputs.swap]]
+
+      [[inputs.system]]
+
+      [[inputs.cgroup]]
+
+      [[inputs.iptables]]
+        use_sudo = true
+        table = "filter"
+
+      ## Users must configure sudo to allow telegraf user to run iptables with no password.
+      [[inputs.iptables]]
+        use_sudo = true
+        table = "nat"
+        # chains = [ "INPUT " ]
+
+      [[inputs.linux_sysctl_fs]]
+
+      [[inputs.net]]
+
+      [[inputs.netstat]]
+
+      [[inputs.ping]]
+        urls = ["10.0.0.10"]
+        method = "native"
+        ping_interval = 10.0
+
+      [[inputs.syslog]]
+        server = "udp://localhost:6514"
+
+      [inputs.syslog.tagdrop]
+        appname = ["chronograf", "influxd-systemd-start.sh"]
+
+      [[inputs.systemd_units]]
+
+      [[inputs.temp]]
+
+      [[inputs.docker]]
+        endpoint = "unix:///var/run/docker.sock"
+        source_tag = true
+        timeout = "10s"
+
+      [[inputs.opentelemetry]]
+        service_address = "127.0.0.1:4317"
+        max_msg_size = "64MB"
+        [inputs.opentelemetry.tags]
+          otel = "1"
+
+runcmd:
+  # env setup
+  - set -ex
+  - cat /etc/environment
+  - . /etc/environment
+  - export AZCOPY_AUTO_LOGIN_TYPE
+  # azure tools write to ~/.cache, which ends up in the cwd if we don't have HOME
+  - export HOME=/root
+
+  # add admin user to docker group
+  - usermod -aG docker ${ADMIN_USERNAME}
+
+  # stop docker until we have a disk set up
+  - systemctl stop docker
+  - rm -rf /data/docker
+
+  # apply our sysctl.d changes
+  - sysctl --system
+
+  # set up ramdisk
+  - mkdir -p /tmp/ram && mount -t tmpfs none /tmp/ram && chmod 1777 /tmp/ram
+
+  # rust toolchain
+  - sudo -u crs rustup default stable
+
+  # install azure and other tools
+  - cd /tmp/ram
+  - . /etc/os-release
+  - wget "https://packages.microsoft.com/config/ubuntu/$VERSION_ID/packages-microsoft-prod.deb" -O packages-microsoft-prod.deb
+  - dpkg -i packages-microsoft-prod.deb
+  - rm -f packages-microsoft-prod.deb
+  - apt-get -y update
+  - apt-get -y install azcopy
+  - curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+
+  # install kaitai
+  - cd /tmp/ram
+  - curl -LO https://github.com/kaitai-io/kaitai_struct_compiler/releases/download/0.10/kaitai-struct-compiler_0.10_all.deb
+  - apt-get install ./kaitai-struct-compiler_0.10_all.deb
+  - rm -rf ./kaitai-struct-compiler_0.10_all.deb
+
+  # disk setup
+  - |
+    (
+      set -e
+      # find unpartitioned, unmounted disks
+      disks=""
+      for disk in $(lsblk -dno PATH -I8,259); do
+        if [ -z "$(lsblk "$disk" -no PARTTYPE,MOUNTPOINT)" ]; then
+          disks="$disks $disk"
+        fi
+      done
+
+      # sort disks by size and get the largest disk
+      disks_size_desc=$(lsblk -dn $disks -bo PATH,SIZE | sort -nrk2 | awk '{print $1}')
+
+      disks="$disks_size_desc"
+      # if there are any available nvme disks, only use nvme disks
+      # otherwise, use the first disk
+      if echo "$disks" | grep /nvme >/dev/null 2>&1; then
+        disks=$(echo "$disks" | grep /nvme)
+      else
+        disks=$(echo $disks | awk '{print $1}')
+      fi
+
+      # zfs setup
+      zpool create \
+          -O compression=off \
+          -O relatime=on \
+          -O xattr=sa \
+          -O acltype=posixacl \
+          -O dnodesize=auto \
+          data $disks
+
+      # put docker on ext4 for now due to this: https://github.com/openzfs/zfs/issues/15581
+      zfs create -s -V 1tb data/dockervol
+      dockervol=/dev/zvol/data/dockervol
+      while ! [ -e "$dockervol" ]; do sleep 0.1; done
+      mkfs.ext4 "$dockervol"
+      uuid=$(blkid -p "$dockervol" -s UUID -o value)
+      /bin/echo -e "UUID=$uuid\t/data/docker\tauto" >> /etc/fstab
+
+      # mount: (hint) your fstab has been modified, but systemd still uses the old version; use 'systemctl daemon-reload' to reload.
+      systemctl daemon-reload
+
+      mkdir -p /data/docker
+      mount /data/docker
+      chmod 775 /data
+    )
+
+  # populate /tmp/ram/infra
+  - azcopy copy --recursive "${CRS_BLOB_ENDPOINT}/infra/*" /tmp/ram/infra/
+
+  # crs clone
+  - mkdir -p /crs/.git
+  - cd /crs
+  - tar -xf /tmp/ram/infra/repo.tar.gz -C .git
+  - git reset --hard
+  - git apply --allow-empty < /tmp/ram/infra/repo.diff
+
+  # grab infer
+  - '[ ! -e /tmp/ram/infra/infer.tar.xz ] && [ -n "${CRS_INFER_URL}" ] && wget --progress=dot:giga "${CRS_INFER_URL}" -O - | tar -xJf - -C /crs/external/infer/'
+  - '[ -e /tmp/ram/infra/infer.tar.xz ] && tar -C /crs/external/infer/ -xf /tmp/ram/infra/infer.tar.xz'
+  # grab llvm-cov
+  - azcopy copy "${CRS_DEV_BLOB_URL}/files/llvm-cov?${CRS_DEV_SAS_KEY}" /crs/external/llvm-cov/llvm-cov
+  - chmod +x /crs/external/llvm-cov/llvm-cov
+
+  # crs setup
+  - chown -R crs:crs /crs
+  - sudo -u crs ./build.sh
+  - sudo -u crs python3.13 -m venv .venv
+  - sudo -u crs .venv/bin/pip install .
+  - cd /data
+  - mkdir -p cache data logs tmp trace
+  - chown crs:crs cache data logs tmp trace
+
+  # az/acr logins
+  - az login --identity
+  - az acr login --name "${CRS_REGISTRY_NAME}"
+
+  # python_sandbox/joern image setup
+  - |
+    (
+      if [ "$(hostname)" = "crs" ]; then
+        DOCKERHUB_IMAGE_PYTHON="tjbecker/python_sandbox:0.3.1"
+        DOCKERHUB_IMAGE_JOERN="konenattheori/joern@sha256:0870a6c899229d88a434d53b26c7439d6d15f2cee1b6d01d6f79a8f2735a863f"
+        ACR_IMAGE_PYTHON="${CRS_REGISTRY_DOMAIN}/python_sandbox:latest"
+        ACR_IMAGE_JOERN="${CRS_REGISTRY_DOMAIN}/joern:latest"
+
+        skopeo copy "docker://$DOCKERHUB_IMAGE_PYTHON" "docker://$ACR_IMAGE_PYTHON"
+        skopeo copy "docker://$DOCKERHUB_IMAGE_JOERN" "docker://$ACR_IMAGE_JOERN"
+        # pre-copy these images so we don't waste time pushing the early layers during parallel builds
+        skopeo copy "docker://ghcr.io/aixcc-finals/base-builder:v1.2.1" "docker://${CRS_REGISTRY_DOMAIN}/base-builder:v1.2.1"
+        skopeo copy "docker://ghcr.io/aixcc-finals/base-builder-jvm:v1.2.1" "docker://${CRS_REGISTRY_DOMAIN}/base-builder-jvm:v1.2.1"
+        skopeo copy "docker://ghcr.io/aixcc-finals/base-runner-debug:v1.2.1" "docker://${CRS_REGISTRY_DOMAIN}/base-runner-debug:v1.2.1"
+        skopeo copy "docker://alpine:latest" "docker://${CRS_REGISTRY_DOMAIN}/alpine:latest"
+      fi
+    )
+
+  # influxdb telegraf install for all hosts
+  - |
+    (
+      cd /tmp/ram
+      wget -q https://repos.influxdata.com/influxdata-archive_compat.key
+      echo '393e8779c89ac8d958f81f942f9ad7fb82a25e133faddaf92e15b16e6ac9ce4c influxdata-archive_compat.key' | sha256sum -c && cat influxdata-archive_compat.key | gpg --dearmor > /etc/apt/trusted.gpg.d/influxdata-archive_compat.gpg
+      echo 'deb [signed-by=/etc/apt/trusted.gpg.d/influxdata-archive_compat.gpg] https://repos.influxdata.com/debian stable main' > /etc/apt/sources.list.d/influxdata.list
+      apt-get update
+      apt-get install -y telegraf
+      usermod -aG docker telegraf
+      setcap cap_net_raw,cap_net_admin+epi "$(which telegraf)"
+      apt-mark hold telegraf
+      systemctl restart telegraf
+    )
+
+  # crs entrypoint
+  - |
+    (
+      if [ "$(hostname)" = crs ]; then
+        azcopy copy --recursive "${CRS_BLOB_ENDPOINT}/secrets/*" /tmp/ram/secrets/
+
+        mkdir -p /crs/tokens_etc
+        tar -C /crs/tokens_etc -xf /tmp/ram/secrets/tokens.tar.gz
+        chown -R crs:crs /crs/tokens_etc
+        echo ${CRS_AZ_OAI_ENDPOINT} > /crs/tokens_etc/azure-api
+        echo ${CRS_AZ_OAI_KEY} > /crs/tokens_etc/azure-token
+
+        # team user ssh key setup
+        cd /home/team
+        mkdir -p .ssh
+        mv /tmp/ram/secrets/ssh_privkey .ssh/id_ed25519
+        chown -R team:team .ssh
+        chmod 700 .ssh
+        chmod 600 .ssh/id_ed25519
+
+        # team .bash_profile
+        echo > .bash_profile '. ~/.bashrc'
+        echo >>.bash_profile "alias speedscope='sudo /crs/.venv/bin/py-spy record -p \`pgrep -f \"main.py crs\"\` -f speedscope'"
+        chown team:team .bash_profile
+
+        # ssh key copy for root
+        mkdir -p /root/.ssh
+        chmod 700 /root/.ssh
+        cp /home/team/.ssh/id_ed25519 /root/.ssh/
+        chmod 600 /root/.ssh/id_ed25519
+
+        # tailscale setup
+        (
+          if [ -n "${TAILSCALE_HOSTNAME}" ]; then
+            tailscale_secret=$(cat /tmp/ram/secrets/tailscale_secret)
+            if [ -n "$tailscale_secret" ]; then
+              curl -fsSL https://tailscale.com/install.sh | sh
+              sudo tailscale up --auth-key="$tailscale_secret" --advertise-tags="${TAILSCALE_TAGS}" --hostname "${TAILSCALE_HOSTNAME}"
+              # set up caddy https stuff
+              domain=$(tailscale status --json | jq -r '.CertDomains[0]')
+              # echo from sh, not bash...
+              echo "$domain {\nreverse_proxy localhost:1324\ntls aixcc@theori.io\n}" > /etc/caddy/Caddyfile
+              echo TS_PERMIT_CERT_UID=caddy >> /etc/default/tailscaled
+              service tailscaled restart
+              service caddy restart
+            fi
+          fi
+        )
+
+        # snapshot blobs from dev account
+        azcopy copy "${CRS_DEV_BLOB_URL}/files?${CRS_DEV_SAS_KEY}" "${CRS_BLOB_ENDPOINT}/crs" --recursive
+        # download the samples (we need the file to index them)
+        azcopy copy "${CRS_BLOB_ENDPOINT}/crs/sample.tar.xz" /crs/external/corpus/
+
+        # influxdb setup
+        apt-get install -y influxdb2 influxdb2-cli chronograf kapacitor nginx
+
+        ADMIN_PASS=$(head -c8 /dev/urandom | xxd -ps)
+        VIEW_PASS=$(head -c8 /dev/urandom | xxd -ps)
+
+        INFLUX_ORG="theori"
+        INFLUX_BUCKET="aixcc"
+        ADMIN_USER=admin
+        VIEW_USER=readonly
+
+        echo "InfluxDB users:"
+        echo "  $ADMIN_USER : $ADMIN_PASS"
+        echo "  $VIEW_USER : $VIEW_PASS"
+        echo
+
+        mkdir -p /data/influxdb
+        chown influxdb:influxdb /data/influxdb
+
+        systemctl enable chronograf influxdb
+        systemctl start chronograf influxdb
+
+        influx setup --org "$INFLUX_ORG" --bucket telegraf --username "$ADMIN_USER" --password "$ADMIN_PASS" --force || true
+        influx user create -o "$INFLUX_ORG" -n "$VIEW_USER" -p "$VIEW_PASS" || true
+        influx bucket create -n aixcc
+        influx bucket create -n otel
+
+        influx auth create --org "$INFLUX_ORG" --read-buckets  --json | jq -r '.token' > /etc/influxdb/ro_token
+        influx auth create --org "$INFLUX_ORG" --write-buckets --json | jq -r '.token' > /etc/influxdb/wo_token
+        influx auth create --org "$INFLUX_ORG" --read-buckets --write-buckets --json | jq -r '.token' > /etc/influxdb/rw_token
+        influx auth create --operator --json | jq -r '.token' > /etc/influxdb/operator_token
+
+        rw_token="$(cat /etc/influxdb/rw_token)"
+        sed -i "s@TOKEN_GOES_HERE@$rw_token@" /etc/nginx/sites-enabled/default
+        systemctl restart nginx
+
+        # wait for docker hosts
+        docker_hosts=""
+        if [ "${CRS_BUILDER_COUNT}" -gt 0 ]; then
+          CRS_BUILDER_CORES=$(ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no team@10.0.2.10 -- nproc </dev/null)
+          echo "CRS_BUILDER_CORES=$CRS_BUILDER_CORES" >> /etc/environment
+
+          for i in $(seq 1 ${CRS_BUILDER_COUNT}); do
+            host="10.0.2.$((i + 9))"
+            docker_hosts="$docker_hosts $host"
+          done
+        fi
+        if [ "${CRS_FUZZER_COUNT}" -gt 0 ]; then
+          CRS_FUZZER_CORES=$(ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no team@10.0.3.10 -- nproc </dev/null)
+          echo "CRS_FUZZER_CORES=$CRS_FUZZER_CORES" >> /etc/environment
+
+          for i in $(seq 1 ${CRS_FUZZER_COUNT}); do
+            host="10.0.3.$((i + 9))"
+            docker_hosts="$docker_hosts $host"
+          done
+        fi
+        pids=""
+        for host in $docker_hosts; do
+          # run this as "team" to prefill known-hosts
+          sudo -u team ssh -o StrictHostKeyChecking=no "team@$host" -- cloud-init status --wait </dev/null &
+          pids="$pids $!"
+        done
+        for pid in $pids; do
+            rc=0
+            wait "$pid" || rc=$?
+            [ "$rc" = 0 ] || [ "$rc" = 2 ] || {
+                echo "PID $pid failed with status $rc" >&2
+                exit "$rc"
+            }
+        done
+
+        # start crs service
+        cp /crs/infra/*.service /crs/infra/*.timer /etc/systemd/system/
+        systemctl daemon-reload
+        systemctl enable crs-task-server crs crs-copy-logs.timer
+        systemctl start crs-task-server crs crs-copy-logs.timer
+      fi
+    )
+
+  # disable /var/log/syslog (it's in journald and influxdb via rsyslog)
+  - sed -i '/\/var\/log\/syslog/s/^/#/' /etc/rsyslog.d/50-default.conf
+  - systemctl restart rsyslog
+
+  # cleanup
+  - rm -rf /tmp/ram/infra /tmp/ram/secrets
+  - umount /tmp/ram
+  - systemctl daemon-reload
+  - systemctl enable tailscale-logout
+  - systemctl start tailscale-logout
+  - systemctl restart docker

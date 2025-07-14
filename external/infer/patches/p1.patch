@@ -1,0 +1,69 @@
+diff --git a/infer/src/base/Config.ml b/infer/src/base/Config.ml
+index 5312ffdb56..98b08a1ed4 100644
+--- a/infer/src/base/Config.ml
++++ b/infer/src/base/Config.ml
+@@ -2318,6 +2318,10 @@ and procedures_attributes =
+     ~in_help:InferCommand.[(Debug, manual_debug_procedures)]
+     "Print the attributes of each procedure in the output of $(b,--procedures)"
+ 
++and procedures_defsites_json =
++  CLOpt.mk_bool ~long:"procedures-defsites-json"
++    ~in_help:InferCommand.[(Debug, manual_debug_procedures)]
++    "Print the defsites of each procedure in the output of $(b,--procedures)"
+ 
+ and procedures_callees =
+   CLOpt.mk_bool ~long:"procedures-callees"
+@@ -4435,6 +4439,8 @@ and procedures = !procedures
+ 
+ and procedures_attributes = !procedures_attributes
+ 
++and procedures_defsites_json = !procedures_defsites_json
++
+ and procedures_call_graph = !procedures_call_graph
+ 
+ and procedures_callees = !procedures_callees
+diff --git a/infer/src/base/Config.mli b/infer/src/base/Config.mli
+index ded40d535a..92964646db 100644
+--- a/infer/src/base/Config.mli
++++ b/infer/src/base/Config.mli
+@@ -599,6 +599,8 @@ val procedures : bool
+ 
+ val procedures_attributes : bool
+ 
++val procedures_defsites_json : bool
++
+ val procedures_call_graph : bool
+ 
+ val procedures_callees : bool
+diff --git a/infer/src/integration/InferCommandImplementation.ml b/infer/src/integration/InferCommandImplementation.ml
+index 19a8f4c1a5..def35a1643 100644
+--- a/infer/src/integration/InferCommandImplementation.ml
++++ b/infer/src/integration/InferCommandImplementation.ml
+@@ -62,6 +62,27 @@ let debug () =
+                 SourceFiles.get_all ~filter:(fun _ -> true) ()
+           in
+           SyntacticCallGraph.(build_from_sources files_to_graph |> to_dotty)
++        else if Config.procedures_defsites_json then
++          let filter = Lazy.force Filtering.procedures_filter in
++            Option.iter
++           (Procedures.select_proc_names_interactive ~filter)
++              ~f:(fun proc_names ->
++                        let data =
++                          List.filter_map proc_names ~f:(fun pname ->
++                                match Attributes.load pname with
++                                | None ->
++                                  None
++                                | Some attrs ->
++                                  Some
++                                    (`Assoc
++                                      [ ("name", `String (Procname.to_string pname))
++                                      ; ("file", `String (SourceFile.to_string attrs.loc.file))
++                                      ; ("line", `Int attrs.loc.line)
++                                      ]) )
++                        in
++                        Yojson.Safe.to_channel stdout (`List data) ;
++                        Out_channel.newline stdout ;
++                        Out_channel.flush stdout )
+         else
+           L.result "%a"
+             Config.(

@@ -1,0 +1,149 @@
+diff --git a/lib/compress/zstd_compress.c b/lib/compress/zstd_compress.c
+index eda38480..b9358fa0 100644
+--- a/lib/compress/zstd_compress.c
++++ b/lib/compress/zstd_compress.c
+@@ -2595,7 +2595,7 @@ ZSTD_entropyCompressSeqStore_internal(seqStore_t* seqStorePtr,
+     entropyWorkspace = count + (MaxSeq + 1);
+     entropyWkspSize -= (MaxSeq + 1) * sizeof(*count);
+ 
+-    DEBUGLOG(5, "ZSTD_entropyCompressSeqStore_internal (nbSeq=%zu, dstCapacity=%zu)", nbSeq, dstCapacity);
++    DEBUGLOG(5, "ZSTD_entropyCompressSeqStore_internal (nbSeq=%zu)", nbSeq);
+     ZSTD_STATIC_ASSERT(HUF_WORKSPACE_SIZE >= (1<<MAX(MLFSELog,LLFSELog)));
+     assert(entropyWkspSize >= HUF_WORKSPACE_SIZE);
+ 
+@@ -2639,7 +2639,7 @@ ZSTD_entropyCompressSeqStore_internal(seqStore_t* seqStorePtr,
+         ZSTD_memcpy(&nextEntropy->fse, &prevEntropy->fse, sizeof(prevEntropy->fse));
+         return (size_t)(op - ostart);
+     }
+-    {   BYTE* const seqHead = op++;
++    {   BYTE* seqHead = op++;
+         /* build stats for sequences */
+         const ZSTD_symbolEncodingTypeStats_t stats =
+                 ZSTD_buildSequencesStatistics(seqStorePtr, nbSeq,
+@@ -2702,17 +2702,15 @@ ZSTD_entropyCompressSeqStore(seqStore_t* seqStorePtr,
+     /* When srcSize <= dstCapacity, there is enough space to write a raw uncompressed block.
+      * Since we ran out of space, block must be not compressible, so fall back to raw uncompressed block.
+      */
+-    if ((cSize == ERROR(dstSize_tooSmall)) & (srcSize <= dstCapacity)) {
+-        DEBUGLOG(4, "not enough dstCapacity (%zu) for ZSTD_entropyCompressSeqStore_internal()=> do not compress block", dstCapacity);
++    if ((cSize == ERROR(dstSize_tooSmall)) & (srcSize <= dstCapacity))
+         return 0;  /* block not compressed */
+-    }
+     FORWARD_IF_ERROR(cSize, "ZSTD_entropyCompressSeqStore_internal failed");
+ 
+     /* Check compressibility */
+     {   size_t const maxCSize = srcSize - ZSTD_minGain(srcSize, cctxParams->cParams.strategy);
+         if (cSize >= maxCSize) return 0;  /* block not compressed */
+     }
+-    DEBUGLOG(5, "ZSTD_entropyCompressSeqStore() cSize: %zu", cSize);
++    DEBUGLOG(4, "ZSTD_entropyCompressSeqStore() cSize: %zu", cSize);
+     return cSize;
+ }
+ 
+@@ -6161,7 +6159,6 @@ ZSTD_compressSequences_internal(ZSTD_CCtx* cctx,
+             continue;
+         }
+ 
+-        RETURN_ERROR_IF(dstCapacity < ZSTD_blockHeaderSize, dstSize_tooSmall, "not enough dstCapacity to write a new compressed block");
+         compressedSeqsSize = ZSTD_entropyCompressSeqStore(&cctx->seqStore,
+                                 &cctx->blockState.prevCBlock->entropy, &cctx->blockState.nextCBlock->entropy,
+                                 &cctx->appliedParams,
+@@ -6185,11 +6182,11 @@ ZSTD_compressSequences_internal(ZSTD_CCtx* cctx,
+         if (compressedSeqsSize == 0) {
+             /* ZSTD_noCompressBlock writes the block header as well */
+             cBlockSize = ZSTD_noCompressBlock(op, dstCapacity, ip, blockSize, lastBlock);
+-            FORWARD_IF_ERROR(cBlockSize, "ZSTD_noCompressBlock failed");
++            FORWARD_IF_ERROR(cBlockSize, "Nocompress block failed");
+             DEBUGLOG(5, "Writing out nocompress block, size: %zu", cBlockSize);
+         } else if (compressedSeqsSize == 1) {
+             cBlockSize = ZSTD_rleCompressBlock(op, dstCapacity, *ip, blockSize, lastBlock);
+-            FORWARD_IF_ERROR(cBlockSize, "ZSTD_rleCompressBlock failed");
++            FORWARD_IF_ERROR(cBlockSize, "RLE compress block failed");
+             DEBUGLOG(5, "Writing out RLE block, size: %zu", cBlockSize);
+         } else {
+             U32 cBlockHeader;
+@@ -6206,6 +6203,7 @@ ZSTD_compressSequences_internal(ZSTD_CCtx* cctx,
+         }
+ 
+         cSize += cBlockSize;
++        DEBUGLOG(5, "cSize running total: %zu", cSize);
+ 
+         if (lastBlock) {
+             break;
+@@ -6216,7 +6214,6 @@ ZSTD_compressSequences_internal(ZSTD_CCtx* cctx,
+             dstCapacity -= cBlockSize;
+             cctx->isFirstBlock = 0;
+         }
+-        DEBUGLOG(5, "cSize running total: %zu (remaining dstCapacity=%zu)", cSize, dstCapacity);
+     }
+ 
+     DEBUGLOG(4, "cSize final total: %zu", cSize);
+@@ -6234,7 +6231,7 @@ size_t ZSTD_compressSequences(ZSTD_CCtx* cctx,
+     size_t frameHeaderSize = 0;
+ 
+     /* Transparent initialization stage, same as compressStream2() */
+-    DEBUGLOG(4, "ZSTD_compressSequences (dstCapacity=%zu)", dstCapacity);
++    DEBUGLOG(3, "ZSTD_compressSequences()");
+     assert(cctx != NULL);
+     FORWARD_IF_ERROR(ZSTD_CCtx_init_compressStream2(cctx, ZSTD_e_end, srcSize), "CCtx initialization failed");
+     /* Begin writing output, starting with frame header */
+@@ -6262,7 +6259,7 @@ size_t ZSTD_compressSequences(ZSTD_CCtx* cctx,
+         cSize += 4;
+     }
+ 
+-    DEBUGLOG(4, "Final compressed size: %zu", cSize);
++    DEBUGLOG(3, "Final compressed size: %zu", cSize);
+     return cSize;
+ }
+ 
+diff --git a/lib/compress/zstd_compress_internal.h b/lib/compress/zstd_compress_internal.h
+index f027f461..ddd5d029 100644
+--- a/lib/compress/zstd_compress_internal.h
++++ b/lib/compress/zstd_compress_internal.h
+@@ -513,11 +513,9 @@ MEM_STATIC int ZSTD_cParam_withinBounds(ZSTD_cParameter cParam, int value)
+ /* ZSTD_noCompressBlock() :
+  * Writes uncompressed block to dst buffer from given src.
+  * Returns the size of the block */
+-MEM_STATIC size_t
+-ZSTD_noCompressBlock(void* dst, size_t dstCapacity, const void* src, size_t srcSize, U32 lastBlock)
++MEM_STATIC size_t ZSTD_noCompressBlock (void* dst, size_t dstCapacity, const void* src, size_t srcSize, U32 lastBlock)
+ {
+     U32 const cBlockHeader24 = lastBlock + (((U32)bt_raw)<<1) + (U32)(srcSize << 3);
+-    DEBUGLOG(5, "ZSTD_noCompressBlock (srcSize=%zu, dstCapacity=%zu)", srcSize, dstCapacity);
+     RETURN_ERROR_IF(srcSize + ZSTD_blockHeaderSize > dstCapacity,
+                     dstSize_tooSmall, "dst buf too small for uncompressed block");
+     MEM_writeLE24(dst, cBlockHeader24);
+@@ -525,8 +523,7 @@ ZSTD_noCompressBlock(void* dst, size_t dstCapacity, const void* src, size_t srcS
+     return ZSTD_blockHeaderSize + srcSize;
+ }
+ 
+-MEM_STATIC size_t
+-ZSTD_rleCompressBlock(void* dst, size_t dstCapacity, BYTE src, size_t srcSize, U32 lastBlock)
++MEM_STATIC size_t ZSTD_rleCompressBlock (void* dst, size_t dstCapacity, BYTE src, size_t srcSize, U32 lastBlock)
+ {
+     BYTE* const op = (BYTE*)dst;
+     U32 const cBlockHeader = lastBlock + (((U32)bt_rle)<<1) + (U32)(srcSize << 3);
+diff --git a/lib/compress/zstd_compress_literals.c b/lib/compress/zstd_compress_literals.c
+index 15bde09e..83f91164 100644
+--- a/lib/compress/zstd_compress_literals.c
++++ b/lib/compress/zstd_compress_literals.c
+@@ -41,8 +41,6 @@ size_t ZSTD_noCompressLiterals (void* dst, size_t dstCapacity, const void* src,
+     BYTE* const ostart = (BYTE*)dst;
+     U32   const flSize = 1 + (srcSize>31) + (srcSize>4095);
+ 
+-    DEBUGLOG(5, "ZSTD_noCompressLiterals: srcSize=%zu, dstCapacity=%zu", srcSize, dstCapacity);
+-
+     RETURN_ERROR_IF(srcSize + flSize > dstCapacity, dstSize_tooSmall, "");
+ 
+     switch(flSize)
+@@ -108,8 +106,8 @@ size_t ZSTD_compressLiterals (ZSTD_hufCTables_t const* prevHuf,
+     symbolEncodingType_e hType = set_compressed;
+     size_t cLitSize;
+ 
+-    DEBUGLOG(5,"ZSTD_compressLiterals (disableLiteralCompression=%i, srcSize=%u, dstCapacity=%zu)",
+-                disableLiteralCompression, (U32)srcSize, dstCapacity);
++    DEBUGLOG(5,"ZSTD_compressLiterals (disableLiteralCompression=%i srcSize=%u)",
++                disableLiteralCompression, (U32)srcSize);
+ 
+     DEBUGLOG(6, "Completed literals listing (%zu bytes)", showHexa(src, srcSize));
+ 

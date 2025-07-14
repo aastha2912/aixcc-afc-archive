@@ -1,0 +1,35 @@
+#!/bin/bash -eu
+set -o pipefail
+
+basedir=$(cd "$(dirname "$(readlink "$0")")" && pwd)
+resource_group="$1"
+shift 1
+
+# az login -t aixcc.tech
+mkdir -p "$basedir/keys"
+ip=$(az network public-ip list -g "$resource_group" | jq -r '.[0].ipAddress')
+keypath="${basedir}/keys/${resource_group}-${ip}.key"
+if [[ ! -e "$keypath" ]]; then
+    storage_account=$(az storage account list -g "$resource_group" | jq -r '.[0].name')
+    storage_endpoint="https://${storage_account}.blob.core.windows.net"
+
+    account_info=$(az account show)
+    user_type=$(echo "$account_info" | jq -r .user.type)
+    if [[ "$user_type" == "user" ]]; then
+        assignee=$(az ad signed-in-user show | jq -r .id)
+    elif [[ "$user_type" == "servicePrincipal" ]]; then
+        assignee=$(az ad sp show --id $(echo "$account_info" | jq -r .user.name) | jq -r .id)
+    else
+        echo "error: unknown az user type: $user_type"
+        exit 1
+    fi
+
+    az role assignment create \
+        --assignee "$assignee" \
+        --role "Storage Blob Data Contributor" \
+        --scope "$(az storage account show --name "$storage_account" | jq -r .id)"
+    az storage blob download --auth-mode login --blob-url "$storage_endpoint/secrets/ssh_privkey" -f "$keypath"
+    chmod 600 "$keypath"
+    echo
+fi
+ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$keypath" "team@$ip" "$@"

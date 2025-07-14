@@ -1,0 +1,57 @@
+// Called by Preprocessor::HandleMacroExpandedIdentifier when a
+// macro invocation is found.
+void PPCallbacksTracker::MacroExpands(const Token &MacroNameTok,
+                                      const MacroDefinition &MacroDefinition,
+                                      SourceRange Range,
+                                      const MacroArgs *Args) {
+  beginCallback("MacroExpands");
+  appendArgument("MacroNameTok", MacroNameTok);
+  appendArgument("MacroDefinition", MacroDefinition);
+  appendArgument("Range", Range);
+  appendArgument("Args", Args);
+
+  SourceManager &SM = PP.getSourceManager();
+
+  // Get the source location information
+  SourceLocation ExpansionLoc = Range.getBegin();
+  std::string FileName = SM.getFilename(ExpansionLoc).str();
+
+  // Get the original text
+  llvm::StringRef text = Lexer::getSourceText(CharSourceRange::getTokenRange(Range), SM, PP.getLangOpts());
+
+  std::string ExpandedText;
+  if (const MacroInfo *MI = MacroDefinition.getMacroInfo()) { 
+    if (Args) { 
+      // For each token in the macro definition
+      for (const auto &Tok : MI->tokens()) { 
+        // Check if this token is a parameter reference
+        if (Tok.is(tok::identifier)) { 
+          // If it matches one of the macro parameters, substitute
+          if (IdentifierInfo *II = Tok.getIdentifierInfo()) { 
+            // Find which parameter index (p) it corresponds to
+            int p = MI->getParameterNum(II);
+
+            // If it's one of the parameters, we pull the tokens from Args
+            if (p >= 0) { 
+              // MacroArgs::getUnexpArgument() gives the argument tokens
+              ExpandedText += PP.getSpelling(*(Args->getUnexpArgument(p)));
+              continue; // go on to the next definition token
+            } 
+          } 
+        } 
+
+        // If not a parameter, just spell this token out
+        ExpandedText += PP.getSpelling(Tok);
+      } 
+    } else { 
+      // If there are no Args (object-like macros), just do the naive approach
+      for (const auto &Tok : MI->tokens()) { 
+        ExpandedText += PP.getSpelling(Tok);
+      } 
+    } 
+  } 
+
+  appendArgument("Orig", text.str());
+  appendArgument("Expanded", ExpandedText);
+}
+

@@ -1,0 +1,122 @@
+services:
+  crs-init:
+    image: ghcr.io/theori-io/crs:${CRS_TAG:-latest}
+    command: ["tail", "-f", "/dev/null"]
+    volumes:
+      - crs-files:/crs  # This will cause Docker to copy the image's /crs files
+
+  docker-daemon:
+    image: docker:20.10-dind
+    privileged: true
+    depends_on:
+      - crs-init
+    command: [
+      "--host=tcp://0.0.0.0:2375",
+      "--tls=false",
+      "--log-level=warn"
+    ]
+    volumes:
+      - crs-files:/crs
+      - type: bind
+        source: /tmp/dind-${DIND_CACHE_KEY:-default}
+        target: /var/lib/docker
+      - type: bind
+        source: ${CACHE_DIR:-/tmp/}
+        target: ${CACHE_DIR:-/tmp/}
+        bind:
+          propagation: rshared
+    environment:
+      - DOCKER_TLS_CERTDIR=
+    mem_limit: 80G
+    mem_swappiness: 0
+
+  crs:
+    image: ghcr.io/theori-io/crs:${CRS_TAG:-latest}
+    profiles: [ "none" ]
+    privileged: true
+    restart: no
+    depends_on:
+      - docker-daemon
+    volumes:
+      - ${HOME}/.docker:/root/.docker
+      - ./logs:/crs/logs
+      - ./configs:/crs/configs
+      - ./prompts:/crs/prompts
+      - ./tokens_etc:/crs/tokens_etc
+      - type: bind
+        source: ${CACHE_DIR:-/tmp/}
+        target: ${CACHE_DIR:-/tmp/}
+        bind:
+          propagation: rshared
+      - type: bind
+        source: /tmp
+        target: /tmp
+        bind:
+          propagation: rshared
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - AZURE_API_KEY=${AZURE_API_KEY}
+      - AZURE_API_BASE=${AZURE_API_BASE}
+      - AZURE_AI_API_KEY=${AZURE_AI_API_KEY}
+      - AZURE_AI_API_BASE=${AZURE_AI_API_BASE}
+      - MODEL=${MODEL}
+      - MODEL_MAP=${MODEL_MAP}
+      - CACHE_DIR=${CACHE_DIR:-/tmp/}
+      - SILENCE_BUILDS=${SILENCE_BUILDS:-0}
+      - DOCKER_HOST=tcp://docker-daemon:2375
+      - GIT_DISCOVERY_ACROSS_FILESYSTEM=1
+
+  crs-testing:
+    extends: crs
+    profiles: [ "test" ]
+    environment:
+      - LOG_LEVEL=DEBUG #- PYTHONASYNCIODEBUG=1
+      - PYTEST_ARGS
+    volumes:
+      - ./projects:/crs/projects
+      - ./tests:/crs/tests
+      - ./run-tests.sh:/crs/run-tests.sh
+    entrypoint: [ "/crs/run-tests.sh" ]
+
+  crs-eval:
+    extends: crs
+    profiles: [ "eval" ]
+    environment:
+      - EVAL_ARGS=${EVAL_ARGS}
+    volumes:
+      - ./projects:/crs/projects
+      - ./eval.py:/crs/eval.py
+      - ./tests:/crs/tests
+      - ./prompts:/crs/prompts
+      - ./eval-logs:/crs/eval-logs
+      - ./run-evals.sh:/crs/run-evals.sh
+    entrypoint: [ "/crs/run-evals.sh" ]
+
+  crs-main:
+    extends: crs
+    profiles: [ "main" ]
+    environment:
+      - CRS_PORT=${CRS_PORT:-1324}
+      - CRS_HOST=0.0.0.0
+      - API_KEY_ID=${API_KEY_ID}
+      - API_KEY_TOKEN=${API_KEY_TOKEN}
+      - CAPI_URL=${CAPI_URL:-http://host.docker.internal:1323}
+      - CAPI_ID=${CAPI_ID}
+      - CAPI_TOKEN=${CAPI_TOKEN}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./data:/crs/data
+      - ./prompts:/crs/prompts
+      - ./main.py:/crs/main.py
+      - ./run-crs.sh:/crs/run-crs.sh
+    entrypoint: [ "/crs/run-crs.sh" ]
+    ports:
+      - "127.0.0.1:${CRS_PORT:-1324}:${CRS_PORT:-1324}"
+
+volumes:
+  crs-files:
