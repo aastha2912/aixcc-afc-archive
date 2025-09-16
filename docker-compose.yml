@@ -1,36 +1,45 @@
 services:
   crs-init:
+    platform: linux/amd64
     image: ghcr.io/theori-io/crs:${CRS_TAG:-latest}
     command: ["tail", "-f", "/dev/null"]
     volumes:
       - crs-files:/crs  # This will cause Docker to copy the image's /crs files
 
   docker-daemon:
-    image: docker:20.10-dind
+    platform: linux/amd64 # added for macos arm64 compatibility
+    # image: docker:20.10-dind
+    image: docker:24-dind
     privileged: true
     depends_on:
       - crs-init
     command: [
       "--host=tcp://0.0.0.0:2375",
-      "--tls=false",
+      # "--tls=false", # issues with dind 24 for macos arm64
       "--log-level=warn"
     ]
     volumes:
       - crs-files:/crs
-      - type: bind
-        source: /tmp/dind-${DIND_CACHE_KEY:-default}
-        target: /var/lib/docker
-      - type: bind
-        source: ${CACHE_DIR:-/tmp/}
-        target: ${CACHE_DIR:-/tmp/}
-        bind:
-          propagation: rshared
+      # issues with dind 24 for macos arm64
+      # - type: bind
+      #   source: /tmp/dind-${DIND_CACHE_KEY:-default}
+      #   target: /var/lib/docker
+      # - type: bind
+      #   source: ${CACHE_DIR:-/tmp/}
+      #   target: ${CACHE_DIR:-/tmp/}
+      #   bind:
+      #     propagation: rshared
+      - docker-graph:/var/lib/docker # added for macos arm64 compatibility
+      - crs-cache:/cache # added for macos arm64 compatibility
     environment:
       - DOCKER_TLS_CERTDIR=
+      - DOCKER_TMPDIR=/var/tmp # added for macos arm64 compatibility
+      - TMPDIR=/var/tmp # added for macos arm64 compatibility
     mem_limit: 80G
     mem_swappiness: 0
 
   crs:
+    platform: linux/amd64 # added for macos arm64 compatibility
     image: ghcr.io/theori-io/crs:${CRS_TAG:-latest}
     profiles: [ "none" ]
     privileged: true
@@ -43,16 +52,18 @@ services:
       - ./configs:/crs/configs
       - ./prompts:/crs/prompts
       - ./tokens_etc:/crs/tokens_etc
-      - type: bind
-        source: ${CACHE_DIR:-/tmp/}
-        target: ${CACHE_DIR:-/tmp/}
-        bind:
-          propagation: rshared
-      - type: bind
-        source: /tmp
-        target: /tmp
-        bind:
-          propagation: rshared
+      # issues with dind 24 for macos arm64
+      # - type: bind
+      #   source: ${CACHE_DIR:-/tmp/}
+      #   target: ${CACHE_DIR:-/tmp/}
+      #   bind:
+      #     propagation: rshared
+      # - type: bind
+      #   source: /tmp
+      #   target: /tmp
+      #   bind:
+      #     propagation: rshared
+      - crs-cache:/cache # added for macos arm64 compatibility
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -65,7 +76,8 @@ services:
       - AZURE_AI_API_BASE=${AZURE_AI_API_BASE}
       - MODEL=${MODEL}
       - MODEL_MAP=${MODEL_MAP}
-      - CACHE_DIR=${CACHE_DIR:-/tmp/}
+      # - CACHE_DIR=${CACHE_DIR:-/tmp/}
+      - CACHE_DIR=/cache # added for macos arm64 compatibility
       - SILENCE_BUILDS=${SILENCE_BUILDS:-0}
       - DOCKER_HOST=tcp://docker-daemon:2375
       - GIT_DISCOVERY_ACROSS_FILESYSTEM=1
@@ -97,6 +109,7 @@ services:
     entrypoint: [ "/crs/run-evals.sh" ]
 
   crs-main:
+    platform: linux/amd64
     extends: crs
     profiles: [ "main" ]
     environment:
@@ -120,3 +133,6 @@ services:
 
 volumes:
   crs-files:
+  docker-graph:
+  crs-cache:
+  
