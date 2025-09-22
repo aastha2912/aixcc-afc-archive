@@ -92,8 +92,17 @@ async def post_v1_task_(body: Task) -> Optional[str]:
     """
     Submit Task
     """
-    await db.put_tasks(body)
-    return "OK"
+    try:
+        logger.info(f"Received task submission: {body}")
+        await db.put_tasks(body)
+        logger.info("Task submitted successfully")
+        return "OK"
+    except Exception as e:
+        import traceback
+        logger.error(f"Error submitting task: {e}")
+        logger.error(f"Task body: {body}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        raise
 
 
 @app.delete('/v1/task/{task_id}/', response_model=str, tags=['task'])

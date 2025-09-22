@@ -1911,8 +1911,9 @@ class CRS:
     )
     @requireable
     async def launch_task(self, task_data: TaskDataHarnesses) -> Result[None]:
-        logger.info(f"launching task {task_data=}")
+        logger.info(f"Processing task {task_data.task_id}")
         task = require(await self.task_from_id(task_data.task_id))
+        logger.info(f"Task {task.task_id} loaded for project {task.project.name}")
 
         if not task_data.harnesses_included:
             logger.warning(f"skipping task {task.task_id}:{task.project.name} it has no harnesses")
@@ -1994,6 +1995,8 @@ class CRS:
             last_task_id, last_cancelled_id, last_sarif_id = -1, -1, -1
             while True:
                 last_task_id, db_tasks = await self.taskdb.get_tasks(after=last_task_id)
+                if db_tasks:
+                    logger.info(f"Submitting {len(db_tasks)} tasks to work queue: {[t.task_id for t in db_tasks]}")
                 _ = await asyncio.gather(*(self.workdb.submit_job(
                     db_task.task_id,
                     WorkType.LAUNCH_TASK,

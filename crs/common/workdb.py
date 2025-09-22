@@ -248,6 +248,7 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
             job=job,
             unique=unique,
         )
+        logger.info(f"Submitting {worktype.name} job for task {task_id}")
         self.event_queue.append(event)
         self.wakeup.set()
 
@@ -328,6 +329,7 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
                 cur_job_task.reset(task_token)
                 cur_job_worktype.reset(work_token)
 
+        logger.info(f"Starting work queue job {worktype.name} for task {job.task_id}")
         task = tg.create_task(task_entry(self.callbacks[worktype](job.data)), name=f"{worktype.name}-{job.id}")
         running_tasks = self.running_tasks[job.task_id]
         running_tasks.add(task)
@@ -401,11 +403,15 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
         job_queue = self.job_queues.setdefault((job.worktype, job.task_id), [])
         heapq.heappush(job_queue, job)
         self.schedulers[job.worktype].add(job.task_id)
+        logger.info(f"Added {job.worktype.name} job for task {job.task_id} to scheduler")
 
     async def process_events(self) -> None:
         events, self.event_queue = self.event_queue, []
         dirty, self.dirty_job_queue = self.dirty_job_queue, set()
         self.wakeup.clear()
+        
+        if events:
+            logger.info(f"Processing {len(events)} work queue events")
 
         BATCHSIZE = 20000
 
@@ -424,12 +430,15 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
                 pending_adds.clear()
 
             for event in events:
+                logger.info(f"Processing event: {type(event).__name__}")
                 match event:
                     case AddJobEvent(job=job, unique=unique):
+                        logger.info(f"Processing AddJobEvent for {job.worktype.name} job {job.task_id}")
                         job_data = orjson.dumps(job.data)
                         if unique:
                             async with await conn.execute("SELECT id FROM jobs WHERE task_id=? AND worktype=? AND task_desc=?", (job.task_id, job.worktype, job_data)) as cursor:
                                 if (await cursor.fetchone()) is not None:
+                                    logger.info(f"Skipping duplicate job for task {job.task_id}")
                                     continue # skip this event
 
                         self._add_job(job)
@@ -461,25 +470,32 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
 
     async def schedule_step(self, tg: asyncio.TaskGroup) -> None:
         dt_now = datetime.datetime.now(datetime.timezone.utc)
+        logger.info(f"schedule_step called with {len(self.schedulers)} schedulers")
         for worktype, scheduler in self.schedulers.items():
             if worktype not in self.callbacks:
                 # TODO: this should be a concerning case to hit
+                logger.warning(f"No callback registered for worktype {worktype}")
                 continue
             # schedule this worktype until we hit global limit or run out of tasks
             while True:
                 if self.work_counts[worktype] >= self.work_limits[worktype]:
+                    logger.info(f"Work limit reached for {worktype.name}: {self.work_counts[worktype]} >= {self.work_limits[worktype]}")
                     break
                 task = scheduler.schedule()
                 if task is None:
                     # no work available
                     break
+                logger.info(f"Scheduling {worktype.name} job for task {task}")
                 queue = self.job_queues[worktype, task]
 
                 job = queue[0]
                 work_desc = self.WORK_DESCS[job.worktype]
                 if (batchsize := work_desc.batchsize) is not None:
-                    if self.task_work_counts.get((task, worktype), 0) >= batchsize:
+                    current_count = self.task_work_counts.get((task, worktype), 0)
+                    logger.info(f"Batch size check: {current_count} >= {batchsize} for task {task}")
+                    if current_count >= batchsize:
                         # out of batch slots, put the task back in the scheduler and skip for now
+                        logger.info(f"Batch size limit reached for task {task}, putting back in scheduler")
                         scheduler.finish(task)
                         scheduler.add(task)
                         break
@@ -493,14 +509,18 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
                 new_status: JobStatus = JobStatus.RUNNING
                 if dt_now > job.expiration:
                     new_status = JobStatus.EXPIRED
+                    logger.info(f"Job {job.id} expired at {job.expiration}, current time {dt_now}")
                 elif job.task_id in self.cancelled:
                     new_status = JobStatus.CANCELLED
+                    logger.info(f"Job {job.id} cancelled for task {job.task_id}")
 
                 job.set_status(new_status)
                 self.dirty_job_queue.add(job)
                 if new_status == JobStatus.RUNNING:
+                    logger.info(f"Job {job.id} status is RUNNING, calling kickoff")
                     self.kickoff(tg, worktype, work_desc, task, job)
                 else:
+                    logger.info(f"Job {job.id} status is {new_status}, finishing task")
                     scheduler.finish(task)
 
         for worktype, value in self.work_counts.items():
@@ -508,8 +528,10 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
            util_metric.set(value / self.work_limits[worktype], {"type": worktype.name})
 
     async def loop(self) -> None:
+        logger.info("Starting work queue loop")
         await self.setup()
         self.loop_started.set()
+        logger.info("Work queue setup complete, starting main loop")
 
         async with asyncio.TaskGroup() as tg:
             while True:

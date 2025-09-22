@@ -14,6 +14,7 @@ from crs.common.utils import bytes_to_uuid
 from .models import SARIFBroadcast, SARIFBroadcastDetail, Status, StatusState, StatusTasksState, Task, TaskDetail
 
 import aiosqlite
+from crs_rust import logger
 
 # convert UUIDs to str
 aiosqlite.register_adapter(UUID, str)
@@ -56,15 +57,30 @@ class TaskDB(SQLiteDB):
                 _ = await conn.execute(stmt)
 
     async def put_tasks(self, task: Task):
-        await self._init()
-        async with self.sqlite_connect() as conn:
-            _ = await conn.executemany(
-                """
-                INSERT INTO tasks VALUES (?, ?, ?)
-                """,
-                [(t.task_id, task.message_id, t.model_dump_json()) for t in task.tasks]
-            )
-            await conn.commit()
+        try:
+            await self._init()
+            async with self.sqlite_connect() as conn:
+                task_data = [(t.task_id, task.message_id, t.model_dump_json()) for t in task.tasks]
+                logger.info(f"Inserting {len(task_data)} tasks into database")
+                _ = await conn.executemany(
+                    """
+                    INSERT INTO tasks VALUES (?, ?, ?)
+                    """,
+                    task_data
+                )
+                await conn.commit()
+                logger.info("Tasks inserted successfully")
+        except aiosqlite.IntegrityError as e:
+            logger.error(f"Database integrity error in put_tasks: {e}")
+            logger.error(f"Task: {task}")
+            # Convert to a proper Python exception
+            raise ValueError(f"Task with ID already exists: {e}") from e
+        except Exception as e:
+            import traceback
+            logger.error(f"Error in put_tasks: {e}")
+            logger.error(f"Task: {task}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            raise
 
     async def get_tasks(self, after: int = -1) -> tuple[int, list[TaskDetail]]:
         await self._init()
@@ -81,6 +97,8 @@ class TaskDB(SQLiteDB):
                 tasks.append(TaskDetail(**json.loads(json_dat)))
                 last_row = max(last_row, rowid)
 
+        if tasks:
+            logger.info(f"Found {len(tasks)} new tasks to process")
         return last_row, tasks
 
     async def get_task(self, uuid: UUID) -> Optional[TaskDetail]:
