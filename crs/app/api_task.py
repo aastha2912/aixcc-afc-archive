@@ -59,9 +59,31 @@ async def fetch_file(session: aiohttp.ClientSession, url: str, filepath: Path, d
         return
     if await filepath.exists():
         return
+    
+    # (aastham) Check if this is a local file path (starts with file:// or is a local path)
+    logger.info(f"URL being processed: '{url}'")
+    logger.info(f"Starts with file://: {url.startswith('file://')}")
+    logger.info(f"Starts with http: {url.startswith('http')}")
+    if url.startswith("file://") or (not url.startswith("http")):
+        # (aastham) Handle local file
+        from pathlib import Path as StdPath
+        local_path = StdPath(url.replace("file://", ""))
+        logger.info(f"checking local file: {local_path}")
+        if local_path.exists():
+            logger.info(f"copying and decompressing local file {local_path} to {filepath}")
+            # Decompress the gzipped file
+            if await gunzip(local_path, filepath):
+                logger.info(f"successfully copied and decompressed {local_path} to {filepath}")
+                return
+            else:
+                logger.error(f"failed to decompress {local_path}")
+                return
+        else:
+            logger.error(f"local file not found: {local_path}")
+            return
+    
+    # (aastham) Original HTTP download logic for remote URLs
     backoff = 1
-
-    # retry in case of errors
     while True:
         async with aio.tmpfile(dir=filepath.parent, suffix=".gz") as tf:
             logger.info(f"fetching file {url=} {tf.name=} {filepath=}")

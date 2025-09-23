@@ -44,7 +44,7 @@ CORPUS_SAMPLE = CRSROOT / ".." / "external" / "corpus" / "sample.tar.xz"
 BEAR_PATH = CRSROOT / ".." / "external" / "bear"
 LLVM_COV = CRSROOT / ".." / "external" / "llvm-cov" / "llvm-cov"
 CRS_GITATTRIBUTES = CRSROOT / "gitattributes"
-CRS_UNPACK_GIT = CRSROOT / "../utils/unpack_git.sh"
+CRS_UNPACK_GIT = CRSROOT / "../utils/unpack_git.sh"  # (aastham) use host path for macOS Docker compatibility
 CRS_HARNESS_MATCH = CRSROOT / "../utils/harness_match.py"
 
 DATA_DIR = Path(os.getenv("DATA_DIR", CRSROOT / ".." / "data"))

@@ -248,7 +248,7 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
             job=job,
             unique=unique,
         )
-        logger.info(f"Submitting {worktype.name} job for task {task_id}")
+        logger.info(f"Submitting {worktype.name} job for task {task_id}")  # (aastham) Enhanced logging for debugging
         self.event_queue.append(event)
         self.wakeup.set()
 
@@ -329,7 +329,7 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
                 cur_job_task.reset(task_token)
                 cur_job_worktype.reset(work_token)
 
-        logger.info(f"Starting work queue job {worktype.name} for task {job.task_id}")
+        logger.info(f"Starting work queue job {worktype.name} for task {job.task_id}")  # (aastham) Enhanced logging for debugging
         task = tg.create_task(task_entry(self.callbacks[worktype](job.data)), name=f"{worktype.name}-{job.id}")
         running_tasks = self.running_tasks[job.task_id]
         running_tasks.add(task)
@@ -403,7 +403,7 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
         job_queue = self.job_queues.setdefault((job.worktype, job.task_id), [])
         heapq.heappush(job_queue, job)
         self.schedulers[job.worktype].add(job.task_id)
-        logger.info(f"Added {job.worktype.name} job for task {job.task_id} to scheduler")
+        logger.info(f"Added {job.worktype.name} job for task {job.task_id} to scheduler")  # (aastham) Enhanced logging for debugging
 
     async def process_events(self) -> None:
         events, self.event_queue = self.event_queue, []
@@ -411,7 +411,7 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
         self.wakeup.clear()
         
         if events:
-            logger.info(f"Processing {len(events)} work queue events")
+            logger.info(f"Processing {len(events)} work queue events")  # (aastham) Enhanced logging for debugging
 
         BATCHSIZE = 20000
 
@@ -430,10 +430,10 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
                 pending_adds.clear()
 
             for event in events:
-                logger.info(f"Processing event: {type(event).__name__}")
+                logger.info(f"Processing event: {type(event).__name__}")  # (aastham) Enhanced logging for debugging
                 match event:
                     case AddJobEvent(job=job, unique=unique):
-                        logger.info(f"Processing AddJobEvent for {job.worktype.name} job {job.task_id}")
+                        logger.info(f"Processing AddJobEvent for {job.worktype.name} job {job.task_id}")  # (aastham) Enhanced logging for debugging
                         job_data = orjson.dumps(job.data)
                         if unique:
                             async with await conn.execute("SELECT id FROM jobs WHERE task_id=? AND worktype=? AND task_desc=?", (job.task_id, job.worktype, job_data)) as cursor:

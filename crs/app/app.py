@@ -1911,9 +1911,9 @@ class CRS:
     )
     @requireable
     async def launch_task(self, task_data: TaskDataHarnesses) -> Result[None]:
-        logger.info(f"Processing task {task_data.task_id}")
+        logger.info(f"Processing task {task_data.task_id}")  # (aastham) Enhanced logging for debugging
         task = require(await self.task_from_id(task_data.task_id))
-        logger.info(f"Task {task.task_id} loaded for project {task.project.name}")
+        logger.info(f"Task {task.task_id} loaded for project {task.project.name}")  # (aastham) Enhanced logging for debugging
 
         if not task_data.harnesses_included:
             logger.warning(f"skipping task {task.task_id}:{task.project.name} it has no harnesses")
@@ -1996,7 +1996,7 @@ class CRS:
             while True:
                 last_task_id, db_tasks = await self.taskdb.get_tasks(after=last_task_id)
                 if db_tasks:
-                    logger.info(f"Submitting {len(db_tasks)} tasks to work queue: {[t.task_id for t in db_tasks]}")
+                    logger.info(f"Submitting {len(db_tasks)} tasks to work queue: {[t.task_id for t in db_tasks]}")  # (aastham) Enhanced logging for debugging
                 _ = await asyncio.gather(*(self.workdb.submit_job(
                     db_task.task_id,
                     WorkType.LAUNCH_TASK,

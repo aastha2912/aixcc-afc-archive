@@ -93,15 +93,15 @@ async def post_v1_task_(body: Task) -> Optional[str]:
     Submit Task
     """
     try:
-        logger.info(f"Received task submission: {body}")
+        logger.info(f"Received task submission: {body}")  # (aastham) Enhanced logging for debugging
         await db.put_tasks(body)
-        logger.info("Task submitted successfully")
+        logger.info("Task submitted successfully")  # (aastham) Enhanced logging for debugging
         return "OK"
     except Exception as e:
         import traceback
-        logger.error(f"Error submitting task: {e}")
-        logger.error(f"Task body: {body}")
-        logger.error(f"Full traceback: {traceback.format_exc()}")
+        logger.error(f"Error submitting task: {e}")  # (aastham) Enhanced error logging
+        logger.error(f"Task body: {body}")  # (aastham) Enhanced error logging
+        logger.error(f"Full traceback: {traceback.format_exc()}")  # (aastham) Enhanced error logging
         raise
 
 

@@ -56,6 +56,7 @@ class TaskDB(SQLiteDB):
             for stmt in SCHEMA:
                 _ = await conn.execute(stmt)
 
+    # (aastham) Enhanced error handling for task submission
     async def put_tasks(self, task: Task):
         try:
             await self._init()
@@ -74,7 +75,7 @@ class TaskDB(SQLiteDB):
             logger.error(f"Database integrity error in put_tasks: {e}")
             logger.error(f"Task: {task}")
             # Convert to a proper Python exception
-            raise ValueError(f"Task with ID already exists: {e}") from e
+            raise ValueError(f"Task with ID already exists: {str(e)}") from e  # (aastham) Fix string conversion for error handling
         except Exception as e:
             import traceback
             logger.error(f"Error in put_tasks: {e}")

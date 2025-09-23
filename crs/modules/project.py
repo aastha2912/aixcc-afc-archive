@@ -179,7 +179,13 @@ async def _init_project_data(project_dir: Path, build_image: str, ossfuzz_hash: 
         if await tar_path.exists():
             return data_dir, info, workdir
 
-        async with docker.run(build_image, mounts={config.CRS_UNPACK_GIT: "/opt/unpack_git.sh"}, timeout=DEFAULT_INIT_TIMEOUT) as run:
+        # (aastham) Handle macOS Docker compatibility - use host path when using host Docker daemon
+        unpack_git_path = config.CRS_UNPACK_GIT
+        if os.getenv("DOCKER_HOST", "").startswith("unix://"):
+            # (aastham) Using host Docker daemon, need to use host path
+            unpack_git_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/utils/unpack_git.sh")
+        
+        async with docker.run(build_image, mounts={unpack_git_path: "/opt/unpack_git.sh"}, timeout=DEFAULT_INIT_TIMEOUT) as run:
             proc = await run.exec("/opt/unpack_git.sh", stdout=PIPE, stderr=STDOUT)
             reader = process.Reader(proc)
             res = await reader.communicate()
@@ -656,14 +662,26 @@ class Project:
                 stdio_fd = None
 
             # wrap ALL compiles with theori_compile.sh to allow commands to run before build.sh
-            mounts[config.THEORI_COMPILE] = "/usr/local/bin/theori_compile.sh"
+            # (aastham) Handle macOS Docker compatibility - use host path when using host Docker daemon
+            theori_compile_path = config.THEORI_COMPILE
+            if os.getenv("DOCKER_HOST", "").startswith("unix://"):
+                # (aastham) Using host Docker daemon, need to use host path
+                theori_compile_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/utils/theori_compile.sh")
+            mounts[theori_compile_path] = "/usr/local/bin/theori_compile.sh"
             compile_commands = ["theori_compile.sh"]
             copies: list[tuple[str, Path, list[str]]] = []
 
             if using_bear:
                 if self.info.language in {"c", "c++"}:
-                    mounts[config.BEAR_PATH / "usr/lib/x86_64-linux-gnu/bear/"] = "/usr/lib/x86_64-linux-gnu/bear/"
-                    mounts[config.BEAR_PATH / "usr/bin/bear"] = "/opt/bear"
+                    # (aastham) Handle macOS Docker compatibility - use host path when using host Docker daemon
+                    bear_lib_path = config.BEAR_PATH / "usr/lib/x86_64-linux-gnu/bear/"
+                    bear_bin_path = config.BEAR_PATH / "usr/bin/bear"
+                    if os.getenv("DOCKER_HOST", "").startswith("unix://"):
+                        # (aastham) Using host Docker daemon, need to use host paths
+                        bear_lib_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/external/bear/usr/lib/x86_64-linux-gnu/bear/")
+                        bear_bin_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/external/bear/usr/bin/bear")
+                    mounts[bear_lib_path] = "/usr/lib/x86_64-linux-gnu/bear/"
+                    mounts[bear_bin_path] = "/opt/bear"
                     compile_commands = ["python3", "/opt/bear", "-o", "/src/compile_commands.json","theori_compile.sh"]
                     include_dirs = ["compile_commands.json"]
                     workdir = await self.get_working_dir()

@@ -3,6 +3,7 @@ import asyncio
 import datetime
 import os
 import pathlib
+import shutil  # (aastham) Added for local file operations
 
 from asyncio.subprocess import PIPE
 from contextlib import asynccontextmanager
@@ -37,53 +38,51 @@ PROJECTS_DIR = config.CRSROOT / ".." / "projects"
 PROJECTS = [dir.name for dir in pathlib.Path(PROJECTS_DIR).iterdir()]
 TASKS_DIR = config.CRSROOT / ".." / "tests" / "app" / "tasks"
 
-def getenv(name: str):
-    res = os.getenv(name)
-    if not res:
-        raise Exception(f"Must set {name} to use this script")
-    return res
+# (aastham) Local file storage configuration - replaces Azure blob storage for local development
+LOCAL_FILES_DIR = config.CRSROOT / ".." / "local_files"
 
-CONTAINER_NAME = getenv("CONTAINER_NAME")
-STORAGE_ACCOUNT = getenv("STORAGE_ACCOUNT")
-STORAGE_KEY = getenv("STORAGE_KEY")
-CONNECTION_STRING = getenv("CONNECTION_STRING")
-
-async def upload_blob(artifact: Path) -> tuple[str, str]:
+async def save_local_file(artifact: Path, project_name: str = None) -> tuple[str, str]:
+    """(aastham) Save file locally and return (sha256, local_file_path) - replaces Azure blob upload"""
     def compute_hash():
         with open(artifact, "rb") as f:
             return file_digest(f, "sha256").hexdigest()
     shasum = await asyncio.to_thread(compute_hash)
 
-    blob_name = f"{shasum}-{artifact.name}"
-    logger.info(f"Uploading {blob_name}...")
-    async with process.scope() as scope:
-        proc = await scope.exec(*[
-            "az", "storage", "blob", "upload",
-            "--container-name", CONTAINER_NAME,
-            "--account-name", STORAGE_ACCOUNT,
-            "--file", artifact.as_posix(),
-            "--name", blob_name,
-            "--sas-token", STORAGE_KEY,
-        ], stdout=PIPE, stderr=PIPE)
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0 and b"already exists" not in stderr:
-            raise Exception(f"Error uploading blob: {stderr}")
-
-        proc = await scope.exec(*[
-            "az", "storage", "blob", "generate-sas",
-            "--account-name", STORAGE_ACCOUNT,
-            "--container-name", CONTAINER_NAME,
-            "--name", blob_name,
-            "--permissions", "r",
-            "--expiry", "2100-01-01T00:00:00Z",
-            "--output", "tsv",
-            "--connection-string", CONNECTION_STRING,
-            "--full-uri"
-        ], stdout=PIPE, stderr=PIPE)
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise Exception(f"Error generating sas: {stderr}")
-        return shasum, stdout.decode().strip()
+    # Create local files directory structure
+    if project_name and not artifact.name.startswith("projects"):
+        # For project-specific files, create project subdirectory
+        project_dir = LOCAL_FILES_DIR / project_name
+        try:
+            await project_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            # Directory already exists, that's fine
+            logger.info(f"Directory {project_dir} already exists, skipping creation")
+        local_file_path = project_dir / artifact.name
+    else:
+        # For shared files like projects.tar.gz, put in root
+        try:
+            await LOCAL_FILES_DIR.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            # Directory already exists, that's fine
+            logger.info(f"Directory {LOCAL_FILES_DIR} already exists, skipping creation")
+        local_file_path = LOCAL_FILES_DIR / artifact.name
+    
+    import shutil
+    try:
+        shutil.copy2(artifact, local_file_path)
+    except PermissionError:
+        # File already exists, that's fine
+        logger.info(f"File {local_file_path} already exists, skipping copy")
+    
+    # Return local file path that works in Docker container
+    # Use relative path from /crs root so it works in both host and container
+    relative_path = local_file_path.relative_to(config.CRSROOT.parent)
+    local_path = f"file:///crs/{relative_path}"
+    
+    logger.info(f"Saved {artifact.name} locally to {local_file_path}")
+    logger.info(f"Local path: {local_path}")
+    
+    return shasum, local_path
 
 @asynccontextmanager
 async def tar_gz(dir: Path, prefix: Optional[str] = None, excludes: list[str] = []) -> AsyncIterator[Path]:
@@ -102,26 +101,26 @@ async def tar_gz(dir: Path, prefix: Optional[str] = None, excludes: list[str] = 
 
 async def get_ossfuzz_detail():
     async with tar_gz(PROJECTS_DIR, prefix="theori-test-projects") as src_tar:
-        shasum, url = await upload_blob(src_tar)
+        shasum, url = await save_local_file(src_tar)
         return SourceDetail(sha256=shasum, type=SourceType.SourceTypeFuzzTooling, url=url)
 
 src_tar_cache: dict[bytes, SourceDetail] = {}
-async def get_src_tar_detail(vfs: VFS, repo_path: Path):
+async def get_src_tar_detail(vfs: VFS, repo_path: Path, project_name: str):
     if (key := await vfs.hash()) not in src_tar_cache:
         async with vfs.materialized() as tmpdir:
             async with tar_gz(tmpdir / repo_path, excludes=[f"{repo_path.name}/.git"]) as src_tar:
-                shasum, url = await upload_blob(src_tar)
+                shasum, url = await save_local_file(src_tar, project_name)
                 src_tar_cache[key] = SourceDetail(sha256=shasum, type=SourceType.SourceTypeRepo, url=url)
     return src_tar_cache[key]
 
-async def get_diff_detail(diff: str):
+async def get_diff_detail(diff: str, project_name: str):
     async with aio.tmpdir() as td:
         diff_dir = td / "diff"
         await diff_dir.mkdir()
         diff_file = diff_dir / "ref.diff"
         _ = await diff_file.write_text(diff)
         async with tar_gz(diff_dir) as diff_tar:
-            shasum, url = await upload_blob(diff_tar)
+            shasum, url = await save_local_file(diff_tar, project_name)
             return SourceDetail(sha256=shasum, type=SourceType.SourceTypeDiff, url=url)
 
 def make_task(task_id: UUID, project_name: str, focus: str, source: list[SourceDetail], type: TaskType):
@@ -148,12 +147,50 @@ async def write_task(path: Path, task: Task):
     _ = await path.write_bytes(task.model_dump_json().encode())
     logger.info(f"Wrote task to {await path.resolve()}")
 
+async def create_repo_tar(project_path: Path, project_name: str) -> tuple[Path, str, str]:
+    """(aastham) Create repo tar directly from project source (skip Docker build)"""
+    async with tar_gz(project_path, excludes=[".git", "__pycache__", "*.pyc"]) as repo_tar:
+        shasum, local_path = await save_local_file(repo_tar, project_name)
+        logger.info(f"Created repo tar for {project_name}: {local_path}")
+        return repo_tar, shasum, local_path
+
+async def dump_task_curls_simple(project_name: str, repo_sha256: str, repo_url: str, oss_fuzz_source: SourceDetail):
+    """(aastham) Create task JSON for a project without Docker build"""
+    oss_fuzz_sha256 = oss_fuzz_source.sha256
+    oss_fuzz_url = oss_fuzz_source.url
+    
+    # Create task
+    task = Task(
+        message_id=uuid4(),
+        message_time=int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000),
+        tasks=[
+            TaskDetail(
+                deadline=int((datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=365)).timestamp() * 1000),
+                focus=project_name,
+                harnesses_included=True,
+                metadata={"round.id": "local-dev", "task.id": str(uuid4())},
+                project_name=project_name,
+                source=[
+                    SourceDetail(sha256=oss_fuzz_sha256, type="fuzz-tooling", url=oss_fuzz_url),
+                    SourceDetail(sha256=repo_sha256, type="repo", url=repo_url),
+                ],
+                task_id=str(uuid4()),
+                type="full",
+            )
+        ],
+    )
+    
+    # Write task file
+    task_path = TASKS_DIR / project_name / "full-local.json"
+    await task_path.parent.mkdir(parents=True, exist_ok=True)
+    await write_task(task_path, task)
+
 async def dump_task_curls(project: TestProject, oss_fuzz_source: SourceDetail):
     task_dir = TASKS_DIR / project.name
     await task_dir.mkdir(parents=True, exist_ok=True)
 
     repo_path = (await project.repo_path()).unwrap()
-    full_src_detail = await get_src_tar_detail(project.vfs, repo_path)
+    full_src_detail = await get_src_tar_detail(project.vfs, repo_path, project.name)
     task = make_task(
         (await project.task()).task_id,
         project.name,
@@ -166,8 +203,8 @@ async def dump_task_curls(project: TestProject, oss_fuzz_source: SourceDetail):
     for i, delta_task in enumerate((await project.tasks(rewrite_paths=False)).unwrap()):
         if i not in VULN_COMMITS[project.name]:
             continue
-        base_src_detail = await get_src_tar_detail(delta_task.base.vfs, repo_path)
-        diff_detail = await get_diff_detail(delta_task.diff)
+        base_src_detail = await get_src_tar_detail(delta_task.base.vfs, repo_path, project.name)
+        diff_detail = await get_diff_detail(delta_task.diff, project.name)
         task = make_task(
             delta_task.task_id,
             project.name,
@@ -189,12 +226,20 @@ async def main():
         choices=PROJECTS
     )
     args = parser.parse_args()
+    
+    # Create local files directory
+    await LOCAL_FILES_DIR.mkdir(parents=True, exist_ok=True)
+    
     oss_fuzz_source = await get_ossfuzz_detail()
     for project_name in args.projects:
         project_path = PROJECTS_DIR / project_name
-        project = await TestProject.from_dir(project_path)
-        await dump_task_curls(project, oss_fuzz_source)
-    pass
+        # Create repo tar directly from project source (skip Docker build)
+        repo_tar_path, repo_sha256, repo_url = await create_repo_tar(project_path, project_name)
+        await dump_task_curls_simple(project_name, repo_sha256, repo_url, oss_fuzz_source)
+    
+    logger.info(f"Created tasks for projects: {args.projects}")
+    logger.info(f"Local files stored in: {LOCAL_FILES_DIR}")
+    logger.info("Tasks created with local file paths - no HTTP server needed!")
 
 if __name__ == "__main__":
     asyncio.run(main())

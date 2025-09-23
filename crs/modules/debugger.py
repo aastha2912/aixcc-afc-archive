@@ -2,8 +2,10 @@ from asyncio.subprocess import PIPE, DEVNULL
 
 import asyncio
 import io
+import os
 import regex
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 
 from crs.config import CRSROOT, CRS_LOAD_OPTIONS
@@ -175,11 +177,19 @@ class Debugger():
     @alru_cache(maxsize=None, filter=only_ok)
     async def artifacts(self):
         cfg = self.project.info.debug_build_config.model_copy()
+        # (aastham) Handle macOS Docker compatibility - use host path when using host Docker daemon
+        libfuzzing_engine_path = self.CRS_LIBFUZZING_ENGINE
+        javac_wrapper_path = self.CRS_JAVAC_WRAPPER
+        if os.getenv("DOCKER_HOST", "").startswith("unix://"):
+            # (aastham) Using host Docker daemon, need to use host paths
+            libfuzzing_engine_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/utils/wrapper_engine/libFuzzingEngine.a")
+            javac_wrapper_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/utils/javac_wrapper/javac")
+        
         res = await self.project.build(
             cfg,
             mounts={
-                self.CRS_LIBFUZZING_ENGINE: DEFAULT_LIB_FUZZING_ENGINE,
-                self.CRS_JAVAC_WRAPPER: "/opt/javac"
+                libfuzzing_engine_path: DEFAULT_LIB_FUZZING_ENGINE,
+                javac_wrapper_path: "/opt/javac"
             }
         )
         if res.is_err():
@@ -188,8 +198,8 @@ class Debugger():
             res = await self.project.build(
                 cfg,
                 mounts={
-                    self.CRS_LIBFUZZING_ENGINE: DEFAULT_LIB_FUZZING_ENGINE,
-                    self.CRS_JAVAC_WRAPPER: "/opt/javac"
+                    libfuzzing_engine_path: DEFAULT_LIB_FUZZING_ENGINE,
+                    javac_wrapper_path: "/opt/javac"
                 }
             )
         return res
