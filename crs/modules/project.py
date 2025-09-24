@@ -517,6 +517,7 @@ class Project:
     async def init_harness_info(self) -> Result[list[Harness]]:
         if self.harnesses is not None:
             return Ok(self.harnesses)
+        
         # (aastham) Mount libFuzzingEngine.a for harness initialization builds - needed for nginx and other projects
         libfuzzing_engine_path = Path(__file__).parent.parent.parent / "utils" / "wrapper_engine" / "libFuzzingEngine.a"
         if os.getenv("DOCKER_HOST", "").startswith("unix://"):
@@ -1007,7 +1008,12 @@ class Project:
     @requireable
     async def repo_path(self):
         workdir = Path(require(await self.get_working_dir()))
-        return Ok(workdir.relative_to("/src"))
+        # (aastham) Fix for OSS-Fuzz project structures - handle working directories that are subdirectories of /src
+        try:
+            return Ok(workdir.relative_to("/src"))
+        except ValueError:
+            # If workdir is not under /src, return the workdir itself (e.g., for OSS-Fuzz projects)
+            return Ok(workdir)
 
     @requireable
     async def run_tests(self, timeout: float = DEFAULT_BUILD_TIMEOUT) -> Result[None]:
