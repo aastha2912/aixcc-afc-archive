@@ -695,7 +695,12 @@ class Project:
                     include_dirs = ["compile_commands.json"]
                     workdir = await self.get_working_dir()
                     if workdir.is_ok():
-                        include_dirs.append(Path(workdir.unwrap()).relative_to("/src/").as_posix())
+                        # (aastham) Fix for OSS-Fuzz project structures - handle working directories that are subdirectories of /src
+                        try:
+                            include_dirs.append(Path(workdir.unwrap()).relative_to("/src/").as_posix())
+                        except ValueError:
+                            # If workdir is not under /src, skip adding it to include_dirs
+                            pass
                     include_dirs.append(Path(self.info.main_repo).stem)
                 copies.append(("/src", bear_tar, DEFAULT_FUZZER_DIRS))
 
