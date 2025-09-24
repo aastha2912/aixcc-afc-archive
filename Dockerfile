@@ -7,6 +7,7 @@ RUN apt-get update \
     pkg-config protobuf-compiler flex bison libnl-route-3-dev software-properties-common openjdk-17-jdk \
     universal-ctags global patchutils rustup musl-tools clang sudo ripgrep wget \
     libssl-dev \
+    python3 python3-venv python3-dev \
     && rustup default stable \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt update \
@@ -27,12 +28,12 @@ RUN . /etc/os-release && wget https://packages.microsoft.com/config/ubuntu/$VERS
 RUN mkdir -p /crs /crs/external/infer /crs/external/llvm-cov
 WORKDIR /crs
 
-# fetch infer
-RUN curl -L https://de6543ab956de244.blob.core.windows.net/files/infer_2232d6b.tar.xz | tar -Jxf - -C external/infer/
-RUN wget https://de6543ab956de244.blob.core.windows.net/files/llvm-cov -O external/llvm-cov/llvm-cov && chmod +x external/llvm-cov/llvm-cov
+# (aastham) fetch infer - SKIPPED: Azure blob storage account is disabled
+# RUN curl -L https://de6543ab956de244.blob.core.windows.net/files/infer_2232d6b.tar.xz | tar -Jxf - -C external/infer/
+# RUN wget https://de6543ab956de244.blob.core.windows.net/files/llvm-cov -O external/llvm-cov/llvm-cov && chmod +x external/llvm-cov/llvm-cov
 
-# fetch corpus sample
-RUN azcopy copy https://de6543ab956de244.blob.core.windows.net/files/sample.tar.xz /crs/external/corpus/sample.tar.xz
+# (aastham) fetch corpus sample - SKIPPED: Azure blob storage account is disabled
+# RUN azcopy copy https://de6543ab956de244.blob.core.windows.net/files/sample.tar.xz /crs/external/corpus/sample.tar.xz
 
 # install kaitai
 RUN curl -LO https://github.com/kaitai-io/kaitai_struct_compiler/releases/download/0.10/kaitai-struct-compiler_0.10_all.deb
@@ -50,7 +51,11 @@ RUN git config --system --add safe.directory '*'
 COPY ./src ./src
 COPY ./Cargo.toml ./Cargo.toml
 COPY ./pyproject.toml ./pyproject.toml
-RUN python3.13 -m venv .venv && .venv/bin/pip install .
+
+RUN python3 -m venv .venv \
+ && .venv/bin/python -m pip install --upgrade pip \
+ && .venv/bin/pip install --no-cache-dir .
+ 
 COPY ./crs ./crs
 COPY ./.git ./.git
 
