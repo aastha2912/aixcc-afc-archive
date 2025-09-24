@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Collection, Optional
 
 from opentelemetry import trace
 
-from crs.common.constants import SANITIZER_VARS
+from crs.common.constants import SANITIZER_VARS, DEFAULT_LIB_FUZZING_ENGINE
 from crs.config import telem_tracer, metrics, CACHE_DIR, CORPUS_SAMPLE, CRS_BLOB_ENDPOINT, CRS_DEDUP_MON
 from crs.common.alru import async_once, alru_cache
 from crs.common.types import CRSError, Result, Ok, Err, POVTarget
@@ -965,7 +965,14 @@ class FuzzManager:
         res: dict[str, dict[Harness, FuzzHarnessManager]] = {}
         primary = True
         for build_config in self.task.project.info.build_configs:
-            match await self.task.project.build(build_config):
+            # (aastham) Mount libFuzzingEngine.a for fuzzing builds - needed for nginx and other projects
+            libfuzzing_engine_path = Path(__file__).parent.parent.parent / "utils" / "wrapper_engine" / "libFuzzingEngine.a"
+            if os.getenv("DOCKER_HOST", "").startswith("unix://"):
+                # (aastham) Using host Docker daemon, need to use host paths
+                libfuzzing_engine_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/utils/wrapper_engine/libFuzzingEngine.a")
+            
+            mounts = {libfuzzing_engine_path: DEFAULT_LIB_FUZZING_ENGINE}
+            match await self.task.project.build(build_config, capture_output=True, mounts=mounts):
                 case Ok(artifacts):
                     pass
                 case Err() as e:

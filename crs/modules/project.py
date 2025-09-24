@@ -517,7 +517,15 @@ class Project:
     async def init_harness_info(self) -> Result[list[Harness]]:
         if self.harnesses is not None:
             return Ok(self.harnesses)
-        artifacts = require(await self.build_all())
+        # (aastham) Mount libFuzzingEngine.a for harness initialization builds - needed for nginx and other projects
+        libfuzzing_engine_path = Path(__file__).parent.parent.parent / "utils" / "wrapper_engine" / "libFuzzingEngine.a"
+        if os.getenv("DOCKER_HOST", "").startswith("unix://"):
+            # (aastham) Using host Docker daemon, need to use host paths
+            libfuzzing_engine_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/utils/wrapper_engine/libFuzzingEngine.a")
+        
+        from crs.common.constants import DEFAULT_LIB_FUZZING_ENGINE
+        mounts = {libfuzzing_engine_path: DEFAULT_LIB_FUZZING_ENGINE}
+        artifacts = require(await self.build_all(capture_output=True, mounts=mounts))
         logger.info(f"locating harnesses for {self.project_dir.as_posix()}")
         harnesses: list[Harness] = []
 
@@ -781,10 +789,10 @@ class Project:
                     logger.warning(f"error during bear build: {error}")
                     return None
 
-    async def build_all(self, timeout: float = DEFAULT_BUILD_TIMEOUT, capture_output: bool = False) -> Result[list[BuildArtifacts]]:
+    async def build_all(self, timeout: float = DEFAULT_BUILD_TIMEOUT, capture_output: bool = False, mounts: dict[Path, str] = {}) -> Result[list[BuildArtifacts]]:
         return collect(
             await asyncio.gather(*[
-                self.build(conf, timeout=timeout, capture_output=capture_output) for conf in self.info.build_configs
+                self.build(conf, timeout=timeout, capture_output=capture_output, mounts=mounts) for conf in self.info.build_configs
             ])
         )
 
