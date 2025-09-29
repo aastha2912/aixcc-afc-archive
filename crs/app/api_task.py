@@ -62,12 +62,14 @@ async def fetch_file(session: aiohttp.ClientSession, url: str, filepath: Path, d
     
     # (aastham) Check if this is a local file path (starts with file:// or is a local path)
     logger.info(f"URL being processed: '{url}'")
-    logger.info(f"Starts with file://: {url.startswith('file://')}")
-    logger.info(f"Starts with http: {url.startswith('http')}")
     if url.startswith("file://") or (not url.startswith("http")):
         # (aastham) Handle local file
         from pathlib import Path as StdPath
-        local_path = StdPath(url.replace("file://", ""))
+        # (aastham) Handle both absolute and relative paths correctly
+        if url.startswith("file://"):
+            local_path = StdPath(url.replace("file://", ""))
+        else:
+            local_path = StdPath(url)
         logger.info(f"checking local file: {local_path}")
         if local_path.exists():
             logger.info(f"copying and decompressing local file {local_path} to {filepath}")
@@ -237,10 +239,14 @@ async def api_to_crs_task(task_detail: models.TaskDetail) -> Result[project.Task
     repo_folder = extract_tar_dir(repo_tar_path)
 
     raw_project = await project.Project.from_dir(oss_fuzz_dir, ossfuzz_hash=source.sha256)
+    
     source_vfs = await TarFS.fsopen(repo_tar_path)
+    
     match await raw_project.fork_with_source(source_vfs, repo_folder):
-        case Ok(base): pass
+        case Ok(base): 
+            logger.info(f"Successfully forked project with source code")  # (aastham) Keep essential success log
         case Err(e):
+            logger.error(f"Failed to fork project with source code: {e.error}")  # (aastham) Keep essential error log
             return Err(CRSError(f"failed to fork project with source code: {e.error}"))
 
     if diff_file and diff_details:
