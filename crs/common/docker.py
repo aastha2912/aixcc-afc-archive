@@ -221,6 +221,7 @@ class DockerRun:
         docker_args = list(docker_args or ())
         if kwargs.get("stdin") not in (None, DEVNULL):
             docker_args.append("-i")
+        logger.info(f"Executing in container {self.cid}: {' '.join(cmd)}")
         return await self.scope.exec("docker", "exec", *docker_args, self.cid, *cmd, **kwargs)
 
     @contextlib.asynccontextmanager
@@ -331,7 +332,6 @@ async def run(
         _ = await proc.stdout.readline()
         proc.kill()
         _ = await proc.wait()
-
         port_map: dict[int, HostPort] = {}
         if ports:
             proc = await scope.exec("docker", "container", "port", cid, stdout=PIPE)
@@ -366,8 +366,12 @@ async def build_image(scope: DockerScope, project_dir: Path, image_name: str) ->
 
     # 1. inspect
     proc = await scope.exec("docker", "image", "inspect", image_name, stdout=DEVNULL, stderr=DEVNULL)
-    if await proc.wait() == 0:
+    inspect_result = await proc.wait()
+    if inspect_result == 0:
+        logger.info(f"Using existing image: {image_name}")
         return Ok(None)
+    else:
+        logger.info(f"Image not found locally (exit code: {inspect_result}), will build: {image_name}")
 
     # 2. pull
     if is_remote_image:
@@ -375,10 +379,14 @@ async def build_image(scope: DockerScope, project_dir: Path, image_name: str) ->
             return Ok(None)
 
     # 3. build
-    logger.info(f"building image {image_name} in {project_dir.as_posix()}...")
+    logger.info(f"Building image {image_name} in {project_dir.as_posix()}...")
     proc = await scope.exec("docker", "build", "--platform", "linux/amd64", "-t", image_name, project_dir.as_posix())
-    if await proc.wait() != 0:
+    build_result = await proc.wait()
+    if build_result != 0:
+        logger.error(f"Build failed (exit code: {build_result}): {image_name}")
         return Err(ImageBuildError(f"failed to build image {image_name!r}"))
+    else:
+        logger.info(f"Successfully built image: {image_name}")
 
     # 4. push (it's ok if this fails)
     if is_remote_image:
@@ -400,6 +408,7 @@ async def get_image_workdir(
         if (await docker_pull(scope, image_name)).is_err():
             return Err(CRSError(f"get_image_workdir() could not pull image {image_name!r}"))
 
+    # (aastham) First try to get working directory from image metadata
     proc = await scope.exec(
         "docker", "image", "inspect", "-f", "{{.Config.WorkingDir}}", image_name,
         stdin=DEVNULL, stdout=PIPE, stderr=PIPE,
@@ -407,7 +416,21 @@ async def get_image_workdir(
     stdout, stderr = await proc.communicate()
     if proc.returncode != 0:
         return Err(CRSError(f"docker error: {stderr.decode(errors='replace')}"))
-    return Ok(stdout.decode().strip())
+    
+    workdir = stdout.decode().strip()
+    
+    # (aastham) If working directory is empty, get it by running a container
+    if not workdir:
+        proc = await scope.exec(
+            "docker", "run", "--rm", "--platform", "linux/amd64", image_name, "pwd",
+            stdin=DEVNULL, stdout=PIPE, stderr=PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            return Err(CRSError(f"docker run error: {stderr.decode(errors='replace')}"))
+        workdir = stdout.decode().strip()
+    
+    return Ok(workdir)
 
 # TODO: everything here besides _many/_tar commands should probably just be a VFS
 # also all of the vmany commands should probably just move to blob storage
