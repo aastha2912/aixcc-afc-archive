@@ -12,7 +12,7 @@ import traceback
 import warnings
 
 if not ((sys.version_info[:2] == (3, 12) and sys.version_info[2] <= 10)
-        or (sys.version_info[:2] == (3, 13) and sys.version_info[2] <= 4)):
+        or (sys.version_info[:2] == (3, 13) and sys.version_info[2] <= 7)): # (aastham) Increased from 4 to 7 to fix 3.13.7 issue
     with open(asyncio.selector_events.__file__, "rb") as f:
         selector_events_hash = hashlib.file_digest(f, "sha256").hexdigest()
     if selector_events_hash != "c599c1cb03b45b931eef8c0ba1c8122aa456e0f3d24fd813f12ab70cd6f52636":
