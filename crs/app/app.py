@@ -244,8 +244,8 @@ class CRS:
 
         self.workdb.register_work_callback(WorkType.LAUNCH_TASK, self.launch_task)
         self.workdb.register_work_callback(WorkType.LAUNCH_TASK_SCOPE, self.launch_task_scope)
-        self.workdb.register_work_callback(WorkType.LAUNCH_BUILDS, self.launch_builds)
         self.workdb.register_work_callback(WorkType.LAUNCH_BGWORKERS, self.launch_bgworkers)
+        self.workdb.register_work_callback(WorkType.LAUNCH_BUILDS, self.launch_builds)
         self.workdb.register_work_callback(WorkType.LAUNCH_FUZZERS, self.launch_fuzzers)
         self.workdb.register_work_callback(WorkType.LAUNCH_INFER, self.launch_infer)
         self.workdb.register_work_callback(WorkType.LAUNCH_AINALYSIS, self.launch_ainalysis)
@@ -289,8 +289,15 @@ class CRS:
     async def _task_from_id(self, task_id: uuid.UUID) -> Result[project.Task]:
         dbtask = await self.taskdb.get_task(task_id)
         if dbtask is None:
+            logger.error(f"Missing task data for {task_id}")  # (aastham) Keep essential error log
             return Err(CRSError(f"missing task data for task with {task_id=}"))
-        return await api_task.api_to_crs_task(dbtask)
+        result = await api_task.api_to_crs_task(dbtask)
+        match result:
+            case Ok(task):
+                logger.info(f"Successfully converted task {task_id} to CRS task for project {task.project.name}")  # (aastham) Keep essential success log
+            case Err(error):
+                logger.error(f"Failed to convert task {task_id} to CRS task: {error}")  # (aastham) Keep essential error log
+        return result
 
     async def task_from_id(self, task_id: uuid.UUID) -> Result[project.Task]:
         task = await self._task_from_id(task_id)
@@ -419,6 +426,7 @@ class CRS:
         return await self.bgworkers[task].fuzzcrash.enqueue_and_wait(crash_dat)
 
     async def launch_task_scope(self, task_data: TaskData) -> Result[None]:
+        logger.info(f"LAUNCH_TASK_SCOPE started for task {task_data.task_id}")  # (aastham) Keep essential start log
         async with contextlib.AsyncExitStack() as stack:
             self.exit_stacks[task_data.task_id] = stack
             try:
@@ -426,6 +434,7 @@ class CRS:
                     await asyncio.sleep(float('inf'))
             finally:
                 _ = self.exit_stacks.pop(task_data.task_id, None)
+                logger.info(f"LAUNCH_TASK_SCOPE scope cleaned up for task {task_data.task_id}")  # (aastham) Keep essential cleanup log
 
     @telem_tracer.start_as_current_span(
         "crs_task.launch_bgworkers",
@@ -969,6 +978,7 @@ class CRS:
     @requireable
     async def analyze_diff(self, task_data: TaskData) -> Result[None]:
         task = require(await self.task_from_id(task_data.task_id))
+        logger.info(f"ANALYZE_DIFF started for task {task_data.task_id} on project {task.project.name}")  # (aastham) Add start log
 
         success = False
         # run both with and without pruning; don't bother to terminate early if one succeeds
@@ -984,7 +994,9 @@ class CRS:
                         _ = await self.handle_analyzed_vuln(task, VulnSource.DIFF_ANALYZER, vuln)
                         success = True
         if success:
+            logger.info(f"ANALYZE_DIFF completed successfully for task {task_data.task_id}")  # (aastham) Add completion log
             return Ok(None)
+        logger.warning(f"ANALYZE_DIFF found no vulnerabilities in diff for task {task_data.task_id}")  # (aastham) Add no vuln log
         return Err(CRSError("no bugs found in diff"))
 
     def _get_spend_limiter(self, task: project.Task) -> SpendLimiter:
