@@ -194,6 +194,7 @@ class ClangSearcher:
 
                 return Ok(from_raw(defns, referenced_files))
         except TimeoutError:
+            logger.error("clang_ast docker timed out after 5 minutes")
             return Err(CRSError("clang_ast docker timed out"))
 
 MAX_DECL_LENGTH = 200
@@ -1053,12 +1054,23 @@ class Searcher:
 
     async def compiler_might_use_path(self, p: str | Path) -> bool:
         if self.gtags.clang_searcher:
-            match await self.gtags.clang_searcher.is_file_referenced(Path(p)):
-                # we had an error so we can't rule it out
-                case Err():
-                    return True
-                # if we know if it is referenced, we can use that information
-                case Ok(is_referenced):
-                    return is_referenced
+            try:
+                match await self.gtags.clang_searcher.is_file_referenced(Path(p)):
+                    # we had an error so we can't rule it out
+                    case Err():
+                        return True
+                    # if we know if it is referenced, we can use that information
+                    case Ok(is_referenced):
+                        return is_referenced
+            except ExceptionGroup as eg:
+                # Handle TaskGroup exceptions specifically
+                logger.warning(f"compiler_might_use_path: TaskGroup exception for {p}: {eg}")
+                for exc in eg.exceptions:
+                    logger.warning(f"  Sub-exception: {exc}")
+                return True
+            except Exception as e:
+                # Handle other exceptions - if clang searcher fails, assume file might be used
+                logger.warning(f"compiler_might_use_path: clang searcher failed for {p}: {e}")
+                return True
         # we don't have clang to tell us, so we can't rule it out
         return True
