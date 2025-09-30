@@ -134,7 +134,6 @@ def handle_subfile(cwd: Path, src_path: Path, json_path: Path) -> tuple[Path, li
         parsed = json.load(json_path.open(mode="rb"))
     except json.JSONDecodeError:
         _ = sys.stderr.write(f"failed to load {src_path}'s json: {json_path} [{json_path.open(mode='rb').read(64)!r}\n")
-        _ = sys.stderr.flush()
         return (src_path, [], set())
 
     return (src_path, get_funcs_rec(offset_line_dat, parsed), files_referenced)
@@ -144,7 +143,12 @@ def run_one_compile_command(c: CompileCommand) -> Optional[tuple[Path, list[DefS
     _ = sys.stderr.flush()
     with tempfile.NamedTemporaryFile() as tf:
         try:
-            retcode = subprocess.call([c['arguments'][0], "-Xclang", "-ast-dump=json", "-fsyntax-only", *c['arguments'][1:]], cwd=c['directory'], stdout=tf.file)
+            # Replace gcc/cc with clang if needed to ensure clang-specific flags work
+            compiler_cmd = c['arguments'][0]
+            if compiler_cmd.endswith('gcc') or compiler_cmd.endswith('cc') or 'gcc' in compiler_cmd:
+                compiler_cmd = 'clang'
+                
+            retcode = subprocess.call([compiler_cmd, "-Xclang", "-ast-dump=json", "-fsyntax-only", *c['arguments'][1:]], cwd=c['directory'], stdout=tf.file)
             if retcode != 0:
                 return None
         except OSError as e:
@@ -156,17 +160,21 @@ def run_one_compile_command(c: CompileCommand) -> Optional[tuple[Path, list[DefS
 
 def parse_clang_ast(compile_commands_path: Path, includeable_paths: list[str]):
     compile_commands = json.load(compile_commands_path.open("rb"))
-    with Pool(8) as pool:
-        parsed_res = pool.map(
-            run_one_compile_command,
-            [
-                c for c in compile_commands
-                # note that includeable_paths MIGHT be a file path, that's "fine"
-                # is_relative_to is string based, so it will allow that literal path
-                if len(includeable_paths) == 0 or any(
-                    Path(c['directory'], c['file']).is_relative_to(inc) for inc in includeable_paths
-                )
-        ])
+    
+    filtered_commands = [
+        c for c in compile_commands
+        # note that includeable_paths MIGHT be a file path, that's "fine"
+        # is_relative_to is string based, so it will allow that literal path
+        if len(includeable_paths) == 0 or any(
+            Path(c['directory'], c['file']).is_relative_to(inc) for inc in includeable_paths
+        )
+    ]
+    
+    # Process serially (more reliable in containers than multiprocessing Pool)
+    parsed_res = []
+    for i, command in enumerate(filtered_commands):
+        result = run_one_compile_command(command)
+        parsed_res.append(result)
 
     paths_referenced: set[Path] = set()
     for s in parsed_res:
@@ -175,7 +183,10 @@ def parse_clang_ast(compile_commands_path: Path, includeable_paths: list[str]):
 
     paths_referenced = set(p.relative_to("/src") if p.is_relative_to("/src") else p for p in paths_referenced)
     files_referenced = set(os.path.normpath(p.as_posix()) for p in paths_referenced)
+    
     return {s[0].relative_to("/src").as_posix():s[1] for s in parsed_res if s}, list(files_referenced)
 
 if __name__ == "__main__":
-    json.dump(parse_clang_ast(Path(sys.argv[1]), sys.argv[2:]), sys.stdout)
+    result = parse_clang_ast(Path(sys.argv[1]), sys.argv[2:])
+    json.dump(result, sys.stdout)
+    sys.stdout.flush()
