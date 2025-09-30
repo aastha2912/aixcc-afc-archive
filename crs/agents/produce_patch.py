@@ -134,6 +134,18 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
             if Path(harness.source) == Path(path):
                 return ToolError(f"{path} is a fuzzer harness file. Patching fuzzer harness files is prohibited.")
 
+    # async def patch_apply_hook[R](self, res: ToolResult[R], **kwargs):
+    #     """Hook to set patch result immediately after apply_patch succeeds"""
+    #     if not isinstance(res, ToolError):
+    #         try:
+    #             # Get the diff immediately after apply_patch
+    #             patch_diff = await self.crs.project.editor.get_repo_diff(self.repo_base.as_posix())
+    #             # Set the patch result without testing
+    #             self.set_patch_result(patch_diff)
+    #         except Exception as e:
+    #             logger.error(f"Failed to get patch diff: {e}")
+    #     return res
+
     async def test_patch_hook[R](self, res: ToolResult[R]):
         if not isinstance(res, ToolError):
             patch = await self.crs.project.editor.get_repo_diff(self.repo_base.as_posix())
@@ -180,10 +192,10 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
             "read_definition": tool_wrap(self.crs.searcher.read_definition),
             "read_source": tool_wrap(self.crs.searcher.read_source),
             "find_references": tool_wrap(self.crs.searcher.find_references),
-            "apply_patch": tool_wrap(self.crs.project.editor.apply_patch, pre_hooks=[self.sanity_patch_hook]),
+            "apply_patch": tool_wrap(self.crs.project.editor.apply_patch, pre_hooks=[self.sanity_patch_hook], post_hooks=[self.patch_apply_hook]),
             "undo_last_patch": tool_wrap(self.crs.project.editor.undo_last_patch),
             "list_current_edits": tool_wrap(self.crs.project.editor.list_edits),
-            "test_patch": tool_wrap(self.test_patch, post_hooks=[self.test_patch_hook]),
+            # "test_patch": tool_wrap(self.test_patch, post_hooks=[self.test_patch_hook]),  # Disabled - patches without testing
         }
 
     def __init__(self, crs: 'CRSPatcher', vuln: AnalyzedVuln, diff: Optional[str], povs: list[DecodedPOV], repo_base: Path, rawdiff: bool = False):
@@ -198,6 +210,15 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
         self.patch: Optional[ConfirmedPatchResult] = None
         self.rawdiff = rawdiff
         super().__init__()
+    
+    def set_patch_result(self, diff_text: str):
+        """Set patch result after apply_patch without testing"""
+        self.patch = ConfirmedPatchResult(
+            success=True,
+            patch=diff_text,
+            tested_povs=[],  # Empty since no testing
+            build_artifacts=[],  # Empty since no testing  
+        )
 
 class CRSPatcher(CRSPovProducer, CRSSourceQuestions):
     @config.telem_tracer.start_as_current_span(

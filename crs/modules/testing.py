@@ -2,6 +2,7 @@ from asyncio.subprocess import PIPE
 from crs.common.aio import Path
 from typing import Self, Optional
 import hashlib
+import os
 import time
 import uuid
 
@@ -76,7 +77,14 @@ class TestProject(Project):
 
         assert (commit_range := self.info.commit_range) is not None
         repo = require(await self.repo_path())
-        async with docker.run(SANDBOX_IMAGE_NAME, mounts={config.CRS_GITATTRIBUTES: "/tmp/gitattributes"}, timeout=TASK_INIT_TIMEOUT) as run:
+        
+        # (aastham) Handle macOS Docker compatibility - use host path when using host Docker daemon
+        gitattributes_path = config.CRS_GITATTRIBUTES
+        if os.getenv("DOCKER_HOST", "").startswith("unix://"):
+            # (aastham) Using host Docker daemon, need to use host path
+            gitattributes_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/crs/gitattributes")
+        
+        async with docker.run(SANDBOX_IMAGE_NAME, mounts={gitattributes_path: "/tmp/gitattributes"}, timeout=TASK_INIT_TIMEOUT) as run:
             require(await docker.vwrite_layers(run, "/src", await self.vfs.layers()))
             repo_path = Path("/src") / repo
             docker_args = ["-w", repo_path.as_posix()]

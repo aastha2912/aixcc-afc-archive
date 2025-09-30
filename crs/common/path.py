@@ -31,7 +31,13 @@ class PathSuffixTree:
     async def from_layers(
         layers: Iterable[docker.Layer],
     ) -> Result["PathSuffixTree"]:
-        mounts = {config.PATH_SUFFIX_TREE: "/opt/path_suffix_tree.py"}
+        # (aastham) Handle macOS Docker compatibility - use host path when using host Docker daemon
+        path_suffix_tree_path = config.PATH_SUFFIX_TREE
+        if os.getenv("DOCKER_HOST", "").startswith("unix://"):
+            # (aastham) Using host Docker daemon, need to use host path
+            path_suffix_tree_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/utils/path_suffix_tree.py")
+        
+        mounts = {path_suffix_tree_path: "/opt/path_suffix_tree.py"}
         try:
             async with docker.run(
                 SANDBOX_IMAGE_NAME,

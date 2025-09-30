@@ -72,7 +72,13 @@ class DiffOverlayFS(VFS):
                 if await p.wait() != 0:
                     raise RuntimeError(f"git apply failed! {p.returncode=}, {stderr=}")
 
-            await self.editable.populate(Path(tmpdir))
+            try:
+                await self.editable.populate(Path(tmpdir))
+            except Exception as e:
+                logger.error(f"DiffOverlayFS._init failed to populate editable VFS: {e}")
+                logger.error(f"Exception type: {type(e)}")
+                # (aastham) Re-raise to preserve the original exception
+                raise
 
             # track deletions
             for p in paths:

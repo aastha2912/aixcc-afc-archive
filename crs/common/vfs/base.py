@@ -20,8 +20,8 @@ from crs.config import metrics, CACHE_DIR
 vfs_counter = metrics.create_counter("vfs-ops")
 
 VFS_TREE_CACHE_DIR = CACHE_DIR / "trees"
-TREE_RETRY_DELAY = 5
-MAX_TREE_RETRIES = 5
+TREE_RETRY_DELAY = 2  # (aastham) Reduced from 5s to 2s for faster retries
+MAX_TREE_RETRIES = 2  # (aastham) Reduced from 5 to 2 retries for faster failure detection
 FileMode = Literal["r", "rb"]
 
 async def apply_layer(path: Path, layer: Layer):
@@ -186,10 +186,16 @@ class MountFS(VFS):
     async def layers(self) -> tuple[Layer, ...]:
         vfs_counter.add(1, {"type": "mount", "op": "layers"})
         res = await self.parent.layers()
-        res += (
-            CommandLayer(".", ".", ("rm", "-rf", self.mount)),
-            CommandLayer(".", ".", ("mkdir", self.mount))
-        )
+        
+        # (aastham) Add logging to identify problematic mount points
+        logger.info(f"MountFS.layers(): mount='{self.mount}', child_path='{self.child_path}'")
+        
+        # (aastham) Fix: When mount is '.', we don't need to create/remove directories
+        if self.mount != ".":
+            res += (
+                CommandLayer(".", ".", ("rm", "-rf", self.mount)),
+                CommandLayer(".", ".", ("mkdir", self.mount))
+            )
         res += tuple(
             replace(l, path=os.path.join(self.mount, l.path), extract_under=self.child_path)
             for l in await self.child.layers()

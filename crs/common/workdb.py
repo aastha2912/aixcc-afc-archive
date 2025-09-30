@@ -290,7 +290,8 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
                 else:
                     if job.task_id in self.cancelled:
                         job.set_status(JobStatus.CANCELLED)
-                    else:
+                    # Don't change status if it's already DONE (successful completion)
+                    elif job.status != JobStatus.DONE:
                         job.set_status(JobStatus.SUBMITTED)
                         self._add_job(job)
                     self.dirty_job_queue.add(job)
@@ -316,6 +317,7 @@ class WorkDB[W: enum.IntEnum](SQLiteDB):
                             case _:
                                 job.set_status(JobStatus.DONE)
                                 self.dirty_job_queue.add(job)
+                                logger.info(f"{worktype.name} job {job.id} completed successfully")  # (aastham) Add success logging
                         return res
                     except Exception:
                         failed = True

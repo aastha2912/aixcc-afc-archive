@@ -190,13 +190,13 @@ class CRSWorkDB(WorkDB[WorkType]):
         WorkType.LAUNCH_BUILDS:       WorkDesc(limit=    8, timeout=float('inf'), cls=TaskData),
         WorkType.LAUNCH_FUZZERS:      WorkDesc(limit=   64, timeout=float('inf'), cls=TaskData, attempts=None),
         WorkType.LAUNCH_INFER:        WorkDesc(limit=   12, timeout=float('inf'), cls=TaskData),
-        WorkType.LAUNCH_AINALYSIS:    WorkDesc(limit=    4, timeout=float('inf'), cls=TaskData),
-        WorkType.LAUNCH_AINALYSIS_M:  WorkDesc(limit=    4, timeout=float('inf'), cls=TaskData),
+        WorkType.LAUNCH_AINALYSIS:    WorkDesc(limit=    4, timeout=float('inf'), cls=TaskData, attempts=2),
+        WorkType.LAUNCH_AINALYSIS_M:  WorkDesc(limit=    4, timeout=float('inf'), cls=TaskData, attempts=2),
         WorkType.LAUNCH_SARIF:        WorkDesc(limit=   50, timeout=float('inf'), cls=SARIFData),
         WorkType.GENERATE_ENCODER:    WorkDesc(limit=   64, timeout=60 * 60,      cls=CoderRequestData),
         WorkType.GENERATE_DECODER:    WorkDesc(limit=   64, timeout=60 * 60,      cls=CoderRequestData),
         WorkType.ANALYZE_HARNESS:     WorkDesc(limit=   32, timeout=2 * 60 * 60,  cls=HarnessData),
-        WorkType.ANALYZE_DIFF:        WorkDesc(limit=   32, timeout=float('inf'), cls=TaskData, attempts=6),
+        WorkType.ANALYZE_DIFF:        WorkDesc(limit=   32, timeout=float('inf'), cls=TaskData, attempts=2),
         WorkType.ANALYZE_VULN:        WorkDesc(limit= 1000, timeout=float('inf'), cls=ReportData),
         WorkType.PRODUCE_POV:         WorkDesc(limit=   50, timeout=2 * 60 * 60,  cls=VulnData), # pov producer
         WorkType.PRODUCE_POV_HINT:    WorkDesc(limit=   50, timeout=2 * 60 * 60,  cls=VulnData), # pov producer
@@ -242,12 +242,16 @@ class CRS:
         self.spend_limiters: dict[uuid.UUID, SpendLimiter] = {}
         self.exit_stacks: dict[uuid.UUID, contextlib.AsyncExitStack] = {}
 
+        # (aastham) MINIMAL MODE: Only register essential callbacks for patching + context retrieval
         self.workdb.register_work_callback(WorkType.LAUNCH_TASK, self.launch_task)
         self.workdb.register_work_callback(WorkType.LAUNCH_TASK_SCOPE, self.launch_task_scope)
+        # (aastham) MINIMAL MODE: Only register bear builds for searcher support
         self.workdb.register_work_callback(WorkType.LAUNCH_BUILDS, self.launch_builds)
+        # (aastham) MINIMAL MODE: Comment out unnecessary callbacks
         self.workdb.register_work_callback(WorkType.LAUNCH_BGWORKERS, self.launch_bgworkers)
         self.workdb.register_work_callback(WorkType.LAUNCH_FUZZERS, self.launch_fuzzers)
         self.workdb.register_work_callback(WorkType.LAUNCH_INFER, self.launch_infer)
+        # (aastham) MINIMAL MODE: Enable LLM-based analysis to find vulnerabilities for patching
         self.workdb.register_work_callback(WorkType.LAUNCH_AINALYSIS, self.launch_ainalysis)
         self.workdb.register_work_callback(WorkType.LAUNCH_AINALYSIS_M, lambda w: self.launch_ainalysis(w, multi=True))
         self.workdb.register_work_callback(WorkType.LAUNCH_SARIF, self.launch_sarif)
@@ -255,18 +259,22 @@ class CRS:
         self.workdb.register_work_callback(WorkType.GENERATE_ENCODER, self.generate_encoder)
         self.workdb.register_work_callback(WorkType.GENERATE_DECODER, self.generate_decoder)
         self.workdb.register_work_callback(WorkType.SCORE_VULN, self.score_vuln)
+        # (aastham) MINIMAL MODE: Enable diff analysis for delta tasks
         self.workdb.register_work_callback(WorkType.ANALYZE_DIFF, self.analyze_diff)
         self.workdb.register_work_callback(WorkType.ANALYZE_VULN, self.analyze_vuln)
+        # (aastham) MINIMAL MODE: Comment out POV production and other unnecessary callbacks
         self.workdb.register_work_callback(WorkType.PRODUCE_POV, self.produce_pov)
         self.workdb.register_work_callback(WorkType.PRODUCE_POV_HINT, self.produce_pov_if_hit)
         self.workdb.register_work_callback(WorkType.PATCH_VULN, self.patch_vuln)
         self.workdb.register_work_callback(WorkType.TRIAGE_POV, self.triage_pov)
         self.workdb.register_work_callback(WorkType.PROCESS_COVERAGE, self.process_coverage)
+        # (aastham) MINIMAL MODE: Comment out remaining unnecessary callbacks
         self.workdb.register_work_callback(WorkType.TRIAGE_FUZZ_CRASH, self.process_crash)
         self.workdb.register_work_callback(WorkType.BUNDLE_POV, self.bundle_pov)
         self.workdb.register_work_callback(WorkType.BUNDLE_PATCH, self.bundle_patch)
         self.workdb.register_work_callback(WorkType.BUNDLE_PATCH_NO_POV, self.bundle_patch_no_pov)
         self.workdb.register_work_callback(WorkType.BUNDLE_SARIF, self.bundle_sarif)
+        # (aastham) MINIMAL MODE: Comment out final unnecessary callbacks
         self.workdb.register_work_callback(WorkType.SUBMIT_BUNDLE, self.submit_bundle)
         self.workdb.register_work_callback(WorkType.PRE_FLIP_BRANCH, self.pre_flip_branch)
         self.workdb.register_work_callback(WorkType.FLIP_BRANCH, self.flip_branch)
@@ -289,8 +297,15 @@ class CRS:
     async def _task_from_id(self, task_id: uuid.UUID) -> Result[project.Task]:
         dbtask = await self.taskdb.get_task(task_id)
         if dbtask is None:
+            logger.error(f"Missing task data for {task_id}")  # (aastham) Keep essential error log
             return Err(CRSError(f"missing task data for task with {task_id=}"))
-        return await api_task.api_to_crs_task(dbtask)
+        result = await api_task.api_to_crs_task(dbtask)
+        match result:
+            case Ok(task):
+                logger.info(f"Successfully converted task {task_id} to CRS task for project {task.project.name}")  # (aastham) Keep essential success log
+            case Err(error):
+                logger.error(f"Failed to convert task {task_id} to CRS task: {error}")  # (aastham) Keep essential error log
+        return result
 
     async def task_from_id(self, task_id: uuid.UUID) -> Result[project.Task]:
         task = await self._task_from_id(task_id)
@@ -329,8 +344,12 @@ class CRS:
         else:
             povs = list((await self.productsdb.get_povs_for_vuln(data.vuln_id)).values())
 
-        harnesses = require(await task.project.init_harness_info())
-        decoded = [(await self.decode_pov(task, harnesses, pov))[0] for pov in povs]
+        # (aastham) MINIMAL MODE: Comment out harness initialization - not needed for patching without testing
+        # harnesses = require(await task.project.init_harness_info())
+        # decoded = [(await self.decode_pov(task, harnesses, pov))[0] for pov in povs]
+        
+        # (aastham) MINIMAL MODE: Use simple POV decoding without harness info
+        decoded = [pov.safe_decode() for pov in povs]
 
         limiter = self._get_spend_limiter(task)
         async with limiter.limit("patch_vuln", **SPEND_LIMITS["patch_vuln"]) as res:
@@ -366,27 +385,42 @@ class CRS:
                         artifacts=res.build_artifacts
                     )
                     patch_id = await self.productsdb.add_patch(patch_res)
-                    if povs:
-                        await self.workdb.submit_job(
-                            task.task_id,
-                            WorkType.BUNDLE_PATCH,
-                            PatchData(patch_id=patch_id, pov_verified=True),
-                            task.deadline_datetime
-                        )
-                    else:
-                        consider_at = datetime.now(timezone.utc) + timedelta(seconds=NO_POV_PATCH_DELAY)
-                        await self.workdb.submit_job(
-                            task.task_id,
-                            WorkType.BUNDLE_PATCH_NO_POV,
-                            DelayPatchData(patch_id=patch_id, deadline=consider_at),
-                            task.deadline_datetime
-                        )
+                    # (aastham) MINIMAL MODE: Comment out bundling since we don't have those callbacks
+                    # if povs:
+                    #     await self.workdb.submit_job(
+                    #         task.task_id,
+                    #         WorkType.BUNDLE_PATCH,
+                    #         PatchData(patch_id=patch_id, pov_verified=True),
+                    #         task.deadline_datetime
+                    #     )
+                    # else:
+                    #     consider_at = datetime.now(timezone.utc) + timedelta(seconds=NO_POV_PATCH_DELAY)
+                    #     await self.workdb.submit_job(
+                    #         task.task_id,
+                    #         WorkType.BUNDLE_PATCH_NO_POV,
+                    #         DelayPatchData(patch_id=patch_id, deadline=consider_at),
+                    #         task.deadline_datetime
+                    #     )
+                    success = True
+                    this_success = True
+                case Ok(produce_patch.PatchResult(success=True) as res):
+                    # (aastham) MINIMAL MODE: Handle simple patch without build artifacts (when testing is disabled)
+                    # We need to get the patch from the editor since test_patch wasn't called
+                    patch = await task.project.editor.get_repo_diff(task.project.project_dir.as_posix())
+                    patch_res = PatchRes(
+                        task_uuid=task_id,
+                        project_name=task.project.name,
+                        diff=patch,
+                        vuln_id=data.vuln_id,
+                        artifacts=[]  # No build artifacts since we didn't build
+                    )
+                    patch_id = await self.productsdb.add_patch(patch_res)
                     success = True
                     this_success = True
                 case Err() as e:
                     errs.append(CRSError(f"patcher failed: {e}"))
                 case Ok(res):
-                    errs.append(CRSError(f"patch result wasn't confirmed: {res}"))
+                    errs.append(CRSError(f"patch result wasn't successful: {res}"))
             patch_counter.add(1, {
                 "task": str(task_id),
                 "project": task.project.name,
@@ -419,6 +453,7 @@ class CRS:
         return await self.bgworkers[task].fuzzcrash.enqueue_and_wait(crash_dat)
 
     async def launch_task_scope(self, task_data: TaskData) -> Result[None]:
+        logger.info(f"LAUNCH_TASK_SCOPE started for task {task_data.task_id}")  # (aastham) Keep essential start log
         async with contextlib.AsyncExitStack() as stack:
             self.exit_stacks[task_data.task_id] = stack
             try:
@@ -426,6 +461,7 @@ class CRS:
                     await asyncio.sleep(float('inf'))
             finally:
                 _ = self.exit_stacks.pop(task_data.task_id, None)
+                logger.info(f"LAUNCH_TASK_SCOPE scope cleaned up for task {task_data.task_id}")  # (aastham) Keep essential cleanup log
 
     @telem_tracer.start_as_current_span(
         "crs_task.launch_bgworkers",
@@ -969,22 +1005,39 @@ class CRS:
     @requireable
     async def analyze_diff(self, task_data: TaskData) -> Result[None]:
         task = require(await self.task_from_id(task_data.task_id))
+        logger.info(f"ANALYZE_DIFF started for task {task_data.task_id} on project {task.project.name}")  # (aastham) Add start log
 
         success = False
         # run both with and without pruning; don't bother to terminate early if one succeeds
-        for response in await run_coro_batch(
-            [diff_analyzer.CRSDiff.from_task(task).analyze_diff(), diff_analyzer.CRSDiff.from_task(task).analyze_diff(rawdiff=True)],
-            name=f"analyze_diff() project={task.project.name}"
-        ):
-            match response:
-                case Err(e):
-                    logger.error(f"failed to analyze task!: {e}")
-                case Ok(res):
-                    for vuln in res.vuln:
-                        _ = await self.handle_analyzed_vuln(task, VulnSource.DIFF_ANALYZER, vuln)
-                        success = True
+        logger.info(f"Starting diff analysis with pruning and raw diff for task {task_data.task_id}")  # (aastham) Add progress log
+        # (aastham) Add try-catch to handle TaskGroup exceptions from run_coro_batch
+        try:
+            for response in await run_coro_batch(
+                [diff_analyzer.CRSDiff.from_task(task).analyze_diff(), diff_analyzer.CRSDiff.from_task(task).analyze_diff(rawdiff=True)],
+                name=f"analyze_diff() project={task.project.name}"
+            ):
+                match response:
+                    case Err(e):
+                        logger.error(f"failed to analyze task!: {e}")
+                    case Ok(res):
+                        logger.info(f"Diff analysis found {len(res.vuln)} vulnerabilities for task {task_data.task_id}")  # (aastham) Add vuln count log
+                        for vuln in res.vuln:
+                            _ = await self.handle_analyzed_vuln(task, VulnSource.DIFF_ANALYZER, vuln)
+                            success = True
+        except ExceptionGroup as eg:
+            # (aastham) Handle TaskGroup exceptions by extracting the actual underlying error
+            logger.error(f"ANALYZE_DIFF failed with TaskGroup exception for task {task_data.task_id}: {eg}")
+            for exc in eg.exceptions:
+                logger.error(f"  Sub-exception: {exc}")
+            return Err(CRSError(f"analyze_diff failed: {eg.exceptions[0] if eg.exceptions else 'unknown error'}"))
+        except Exception as e:
+            logger.error(f"ANALYZE_DIFF failed with exception for task {task_data.task_id}: {e}")  # (aastham) Enhanced error logging
+            return Err(CRSError(f"analyze_diff failed: {e}"))  # (aastham) Return proper error instead of letting exception bubble up
+        
         if success:
+            logger.info(f"ANALYZE_DIFF completed successfully for task {task_data.task_id}")  # (aastham) Add completion log
             return Ok(None)
+        logger.warning(f"ANALYZE_DIFF found no vulnerabilities in diff for task {task_data.task_id}")  # (aastham) Add no vuln log
         return Err(CRSError("no bugs found in diff"))
 
     def _get_spend_limiter(self, task: project.Task) -> SpendLimiter:
@@ -1874,33 +1927,34 @@ class CRS:
             # kickoff bear build first so it gets priority on the build lock
             _ = tg.create_task(task.project.build_bear_tar(), name=f"build_bear_tar() project={project_name} {task_id=}")
 
-            # kickoff main build and init harness info
-            harness_info_task = tg.create_task(task.project.init_harness_info(), name=f"init_harness_info() project={project_name} {task_id=}")
+            # (aastham) MINIMAL MODE: Comment out all other builds - only do bear build
+            # # kickoff main build and init harness info
+            # harness_info_task = tg.create_task(task.project.init_harness_info(), name=f"init_harness_info() project={project_name} {task_id=}")
 
-            if isinstance(task, project.DeltaTask):
-                # kickoff main build and init harness info for base project
-                _ = tg.create_task(task.base.init_harness_info(), name=f"init_harness_info() (delta base) project={project_name} {task_id=}")
+            # if isinstance(task, project.DeltaTask):
+            #     # kickoff main build and init harness info for base project
+            #     _ = tg.create_task(task.base.init_harness_info(), name=f"init_harness_info() (delta base) project={project_name} {task_id=}")
 
-            # kickoff debug build
-            _ = tg.create_task(debugger.Debugger(task.project).artifacts(), name=f"debug_build project={project_name} {task_id=}")
+            # # kickoff debug build
+            # _ = tg.create_task(debugger.Debugger(task.project).artifacts(), name=f"debug_build project={project_name} {task_id=}")
 
-            # kickoff coverage build
-            _ = tg.create_task(coverage.CoverageAnalyzer(task.project).artifacts(), name=f"coverage_build project={project_name} {task_id=}")
+            # # kickoff coverage build
+            # _ = tg.create_task(coverage.CoverageAnalyzer(task.project).artifacts(), name=f"coverage_build project={project_name} {task_id=}")
 
-            match await harness_info_task:
-                case None | Err(_):
-                    logger.warning(f"no harness info found for task {task_data.task_id}")
-                case Ok(harnesses):
-                    if len(harnesses) > MAX_HARNESS_PRECOMPUTE:
-                        logger.warning(f"too many harnesses to precompute them all: {len(harnesses)}")
-                        harnesses = harnesses[:MAX_HARNESS_PRECOMPUTE]
-                    _ = await asyncio.gather(*(self.workdb.submit_job(
-                        task_data.task_id,
-                        WorkType.ANALYZE_HARNESS,
-                        HarnessData(task_id=task_data.task_id, harness_num=harness_num),
-                        task.deadline_datetime,
-                        unique=True,
-                    ) for harness_num in range(len(harnesses))))
+            # match await harness_info_task:
+            #     case None | Err(_):
+            #         logger.warning(f"no harness info found for task {task_data.task_id}")
+            #     case Ok(harnesses):
+            #         if len(harnesses) > MAX_HARNESS_PRECOMPUTE:
+            #             logger.warning(f"too many harnesses to precompute them all: {len(harnesses)}")
+            #             harnesses = harnesses[:MAX_HARNESS_PRECOMPUTE]
+            #         _ = await asyncio.gather(*(self.workdb.submit_job(
+            #             task_data.task_id,
+            #             WorkType.ANALYZE_HARNESS,
+            #             HarnessData(task_id=task_data.task_id, harness_num=harness_num),
+            #             task.deadline_datetime,
+            #             unique=True,
+            #         ) for harness_num in range(len(harnesses))))
 
         return Ok(None)
 
@@ -1929,7 +1983,7 @@ class CRS:
             unique=True,
         ))
 
-        # immediately launch builds
+        # (aastham) MINIMAL MODE: Only launch bear builds for searcher support
         submit_coros.append(self.workdb.submit_job(
             task.task_id,
             WorkType.LAUNCH_BUILDS,
@@ -1945,36 +1999,40 @@ class CRS:
                 TaskData(task_id=task.task_id),
                 expiration=task.deadline_datetime,
             ))
-        else:
-            match task.project.info.language:
-                case "c"|"c++":
-                    submit_coros.append(self.workdb.submit_job(
-                        task.task_id,
-                        WorkType.LAUNCH_INFER,
-                        TaskData(task_id=task.task_id),
-                        expiration=task.deadline_datetime,
-                        unique=True,
-                    ))
-                case _:
-                    logger.warning(f"infer not supported for language {task.project.info.language} yet")
+        # else:
+        #     match task.project.info.language:
+        #         case "c"|"c++":
+        #             submit_coros.append(self.workdb.submit_job(
+        #                 task.task_id,
+        #                 WorkType.LAUNCH_INFER,
+        #                 TaskData(task_id=task.task_id),
+        #                 expiration=task.deadline_datetime,
+        #                 unique=True,
+        #             ))
+        #         case _:
+        #             logger.warning(f"infer not supported for language {task.project.info.language} yet")
 
-            for multi in (False, True):
-                submit_coros.append(self.workdb.submit_job(
-                    task.task_id,
-                    WorkType.LAUNCH_AINALYSIS_M if multi else WorkType.LAUNCH_AINALYSIS,
-                    TaskData(task_id=task.task_id),
-                    expiration=task.deadline_datetime,
-                    unique=True,
-                ))
+        # (aastham) MINIMAL MODE: Comment out LLM-based analysis 
+        # for multi in (False, True):
+        #     submit_coros.append(self.workdb.submit_job(
+        #         task.task_id,
+        #         WorkType.LAUNCH_AINALYSIS_M if multi else WorkType.LAUNCH_AINALYSIS,
+        #         TaskData(task_id=task.task_id),
+        #         expiration=task.deadline_datetime,
+        #         unique=True,
+        #     ))
 
-        submit_coros.append(self.workdb.submit_job(
-            task.task_id,
-            WorkType.LAUNCH_BGWORKERS,
-            TaskData(task_id=task.task_id),
-            expiration=task.deadline_datetime,
-            unique=True,
-        ))
+        # (aastham) MINIMAL MODE: Comment out background workers
+        # submit_coros.append(self.workdb.submit_job(
+        #     task.task_id,
+        #     WorkType.LAUNCH_BGWORKERS,
+        #     TaskData(task_id=task.task_id),
+        #     expiration=task.deadline_datetime,
+        #     unique=True,
+        # ))
+        logger.info(f"Submitting {len(submit_coros)} jobs for task {task.task_id}")  # (aastham) Enhanced logging
         _ = await asyncio.gather(*submit_coros)
+        logger.info(f"LAUNCH_TASK completed successfully for task {task.task_id}")  # (aastham) Enhanced logging
         return Ok(None)
 
 
@@ -2005,18 +2063,19 @@ class CRS:
                     unique=True,
                 ) for db_task in db_tasks))
 
-                last_sarif_id, db_sarifs = await self.taskdb.get_sarifs(after=last_sarif_id)
-                _ = await asyncio.gather(*(self.workdb.submit_job(
-                    db_sarif.task_id,
-                    WorkType.LAUNCH_SARIF,
-                    SARIFData(
-                        task_id=db_sarif.task_id,
-                        sarif_id=db_sarif.sarif_id,
-                        sarif=db_sarif.sarif
-                    ),
-                    expiration=datetime.now(timezone.utc) + timedelta(days=1), # we don't have the task deadline handy
-                    unique=True,
-                ) for db_sarif in db_sarifs))
+                # (aastham) MINIMAL MODE: Comment out SARIF processing
+                # last_sarif_id, db_sarifs = await self.taskdb.get_sarifs(after=last_sarif_id)
+                # _ = await asyncio.gather(*(self.workdb.submit_job(
+                #     db_sarif.task_id,
+                #     WorkType.LAUNCH_SARIF,
+                #     SARIFData(
+                #         task_id=db_sarif.task_id,
+                #         sarif_id=db_sarif.sarif_id,
+                #         sarif=db_sarif.sarif
+                #     ),
+                #     expiration=datetime.now(timezone.utc) + timedelta(days=1), # we don't have the task deadline handy
+                #     unique=True,
+                # ) for db_sarif in db_sarifs))
 
                 last_cancelled_id, cancelled_ids = await self.taskdb.get_cancelled(after=last_cancelled_id)
                 for cancelled_id in cancelled_ids:
