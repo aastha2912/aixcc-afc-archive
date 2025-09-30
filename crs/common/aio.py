@@ -77,7 +77,7 @@ OpenBinaryModeWriting: TypeAlias = Literal["wb", "bw", "ab", "ba", "xb", "bx"]
 OpenBinaryModeReading: TypeAlias = Literal["rb", "br", "rbU", "rUb", "Urb", "brU", "bUr", "Ubr"]
 OpenBinaryMode: TypeAlias = OpenBinaryModeUpdating | OpenBinaryModeReading | OpenBinaryModeWriting
 
-async def async_map[A, B](fn: Callable[[A], B], it: AsyncIterator[A]) -> AsyncGenerator[B, None]: # (aastham) noqa: ASYNC900 # this is only used from a context manager
+async def async_map[A, B](fn: Callable[[A], B], it: AsyncIterator[A]) -> AsyncGenerator[B]: # noqa: ASYNC900 # this is only used from a context manager
     async for item in it:
         yield fn(item)
 
@@ -100,8 +100,7 @@ class Path(PurePath):
 
     async def read_text(self, encoding: str | None = None, errors: str | None = None, newline: str | None = None) -> str:
         path = pathlib.Path(self)
-        # (aastham) Remove newline parameter for Python 3.12 compatibility
-        return await asyncio.to_thread(path.read_text, encoding=encoding, errors=errors)
+        return await asyncio.to_thread(path.read_text, encoding=encoding, errors=errors, newline=newline)
 
     @contextlib.asynccontextmanager
     async def glob(self, pattern: str, *, case_sensitive: bool | None = None, recurse_symlinks: bool = False) -> AsyncIterator[AsyncIterator[Self]]:
