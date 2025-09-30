@@ -1,45 +1,42 @@
 services:
   crs-init:
-    platform: linux/amd64  # (aastham) Docker compose changes for macOS
+    platform: linux/amd64
     image: ghcr.io/theori-io/crs:${CRS_TAG:-latest}
     command: ["tail", "-f", "/dev/null"]
     volumes:
-      - crs-files:/crs  # This will cause Docker to copy the image's /crs files
+      - crs-files:/crs
 
   docker-daemon:
-    platform: linux/amd64 # (aastham) added for macos arm64 compatibility
-    image: docker:20.10-dind  # (aastham) using older version for macOS stability
-    # image: docker:24-dind
+    # run natively on Apple Silicon (arm64)
+    platform: linux/arm64
+    image: docker:26-dind
     privileged: true
     depends_on:
       - crs-init
-    command: [
-      "--host=tcp://0.0.0.0:2375",
-      "--tls=false", # (aastham) explicitly disable TLS for local development
-      "--log-level=warn"
-    ]
+    command:
+      - --host=tcp://0.0.0.0:2375
+      - --tls=false
+      - --log-level=warn
+      - --storage-driver=overlay2
+    tmpfs:
+      - /run
+      - /tmp
     volumes:
       - crs-files:/crs
-      # issues with dind 24 for macos arm64
-      # - type: bind
-      #   source: /tmp/dind-${DIND_CACHE_KEY:-default}
-      #   target: /var/lib/docker
-      # - type: bind
-      #   source: ${CACHE_DIR:-/tmp/}
-      #   target: ${CACHE_DIR:-/tmp/}
-      #   bind:
-      #     propagation: rshared
-      - docker-graph:/var/lib/docker # added for macos arm64 compatibility
-      - crs-cache:/cache # added for macos arm64 compatibility
+      - docker-graph:/var/lib/docker
+      - crs-cache:/cache
+      - ./utils:/crs/utils:ro          # so DinD can bind into build containers
+      # - ./bear:/crs/bear:ro          # uncomment if you use BEAR
     environment:
       - DOCKER_TLS_CERTDIR=
-      - DOCKER_TMPDIR=/var/tmp # added for macos arm64 compatibility
-      - TMPDIR=/var/tmp # added for macos arm64 compatibility
-    mem_limit: 80G
-    mem_swappiness: 0
+      - DOCKER_TMPDIR=/var/tmp
+      - TMPDIR=/var/tmp
+    # remove misleading resource flags
+    # mem_limit: 80G
+    # mem_swappiness: 0
 
   crs:
-    platform: linux/amd64 # added for macos arm64 compatibility
+    platform: linux/amd64
     image: ghcr.io/theori-io/crs:${CRS_TAG:-latest}
     profiles: [ "none" ]
     privileged: true
@@ -47,25 +44,15 @@ services:
     depends_on:
       - docker-daemon
     volumes:
+      - crs-files:/crs                 # share the same /crs with DinD
       - ${HOME}/.docker:/root/.docker
       - ./logs:/crs/logs
       - ./configs:/crs/configs
       - ./prompts:/crs/prompts
       - ./tokens_etc:/crs/tokens_etc
-      - ./utils:/crs/utils  # (aastham) mount utils for Docker-in-Docker builds
-      - ./crs:/crs/crs  # (aastham) mount crs source for Docker-in-Docker builds
-      # issues with dind 24 for macos arm64
-      # - type: bind
-      #   source: ${CACHE_DIR:-/tmp/}
-      #   target: ${CACHE_DIR:-/tmp/}
-      #   bind:
-      #     propagation: rshared
-      # - type: bind
-      #   source: /tmp
-      #   target: /tmp
-      #   bind:
-      #     propagation: rshared
-      - crs-cache:/cache # added for macos arm64 compatibility
+      - ./utils:/crs/utils
+      - ./crs:/crs/crs
+      - crs-cache:/cache
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -78,8 +65,7 @@ services:
       - AZURE_AI_API_BASE=${AZURE_AI_API_BASE}
       - MODEL=${MODEL}
       - MODEL_MAP=/crs/configs/models-openai-simple.toml
-      # - CACHE_DIR=${CACHE_DIR:-/tmp/}
-      - CACHE_DIR=/cache # added for macos arm64 compatibility
+      - CACHE_DIR=/cache
       - SILENCE_BUILDS=${SILENCE_BUILDS:-0}
       - DOCKER_HOST=tcp://docker-daemon:2375
       - GIT_DISCOVERY_ACROSS_FILESYSTEM=1
@@ -88,7 +74,7 @@ services:
     extends: crs
     profiles: [ "test" ]
     environment:
-      - LOG_LEVEL=DEBUG #- PYTHONASYNCIODEBUG=1
+      - LOG_LEVEL=DEBUG
       - PYTEST_ARGS
     volumes:
       - ./projects:/crs/projects
@@ -122,20 +108,21 @@ services:
       - CAPI_URL=${CAPI_URL:-http://host.docker.internal:1323}
       - CAPI_ID=${CAPI_ID}
       - CAPI_TOKEN=${CAPI_TOKEN}
-      - DOCKER_HOST=unix:///var/run/docker.sock  # (aastham) use host Docker daemon for macOS compatibility
+      - DOCKER_HOST=tcp://docker-daemon:2375
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # (aastham) mount host Docker socket for macOS compatibility
+      - crs-files:/crs                 # share the same /crs with DinD
       - ./data:/crs/data
-      - ./projects:/crs/projects  # (aastham) mount projects for local development
+      - ./projects:/crs/projects
+      - ./tests:/crs/tests
       - ./prompts:/crs/prompts
-      - ./utils:/crs/utils  # (aastham) mount utils for local development
-      - ./local_files:/crs/local_files  # (aastham) mount local files for local development
-      - ./crs:/crs/crs  # (aastham) mount crs source for local development
+      - ./utils:/crs/utils
+      - ./local_files:/crs/local_files
+      - ./crs:/crs/crs
       - ./main.py:/crs/main.py
       - ./run-crs.sh:/crs/run-crs.sh
-      - ./create_tasks.py:/crs/create_tasks.py # (aastham) mount crs source for local development
+      - ./create_tasks.py:/crs/create_tasks.py
     entrypoint: [ "/crs/run-crs.sh" ]
     ports:
       - "127.0.0.1:${CRS_PORT:-1324}:${CRS_PORT:-1324}"
@@ -145,7 +132,7 @@ volumes:
   docker-graph:
   crs-cache:
 
-name: aixcc-afc-archive  # (aastham) Fix for constant container in use issue
+name: aixcc-afc-archive
 networks:
   default:
-    name: aixcc-afc-archive_default  # (aastham) Fix for constant container in use issue
+    name: aixcc-afc-archive_default
