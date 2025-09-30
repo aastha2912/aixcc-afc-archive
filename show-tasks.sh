@@ -44,14 +44,37 @@ get_status_name() {
     esac
 }
 
-# Function to get work type name
+# Function to get work type name (updated to match current WorkType enum)
 get_work_type() {
     case $1 in
-        0) echo "LAUNCH_TASK" ;;
-        1) echo "BUILD_IMAGE" ;;
-        2) echo "RUN_FUZZER" ;;
-        3) echo "ANALYZE_RESULTS" ;;
-        4) echo "GENERATE_REPORT" ;;
+        1) echo "LAUNCH_TASK" ;;
+        2) echo "LAUNCH_TASK_SCOPE" ;;
+        3) echo "LAUNCH_BUILDS" ;;
+        4) echo "LAUNCH_BGWORKERS" ;;
+        5) echo "LAUNCH_FUZZERS" ;;
+        6) echo "LAUNCH_INFER" ;;
+        7) echo "LAUNCH_AINALYSIS" ;;
+        8) echo "LAUNCH_AINALYSIS_M" ;;
+        9) echo "LAUNCH_SARIF" ;;
+        10) echo "ANALYZE_HARNESS" ;;
+        11) echo "GENERATE_ENCODER" ;;
+        12) echo "GENERATE_DECODER" ;;
+        13) echo "SCORE_VULN" ;;
+        14) echo "ANALYZE_DIFF" ;;
+        15) echo "ANALYZE_VULN" ;;
+        16) echo "PROCESS_COVERAGE" ;;
+        17) echo "TRIAGE_FUZZ_CRASH" ;;
+        18) echo "PRODUCE_POV" ;;
+        19) echo "PRODUCE_POV_HINT" ;;
+        20) echo "PATCH_VULN" ;;
+        21) echo "TRIAGE_POV" ;;
+        22) echo "PRE_FLIP_BRANCH" ;;
+        23) echo "FLIP_BRANCH" ;;
+        24) echo "BUNDLE_POV" ;;
+        25) echo "BUNDLE_PATCH" ;;
+        26) echo "BUNDLE_PATCH_NO_POV" ;;
+        27) echo "BUNDLE_SARIF" ;;
+        28) echo "SUBMIT_BUNDLE" ;;
         *) echo "UNKNOWN($1)" ;;
     esac
 }
