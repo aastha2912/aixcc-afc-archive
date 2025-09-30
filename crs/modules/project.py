@@ -179,13 +179,7 @@ async def _init_project_data(project_dir: Path, build_image: str, ossfuzz_hash: 
         if await tar_path.exists():
             return data_dir, info, workdir
 
-        # (aastham) Handle macOS Docker compatibility - use host path when using host Docker daemon
-        unpack_git_path = config.CRS_UNPACK_GIT
-        if os.getenv("DOCKER_HOST", "").startswith("unix://"):
-            # (aastham) Using host Docker daemon, need to use host path
-            unpack_git_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/utils/unpack_git.sh")
-        
-        async with docker.run(build_image, mounts={unpack_git_path: "/opt/unpack_git.sh"}, timeout=DEFAULT_INIT_TIMEOUT) as run:
+        async with docker.run(build_image, mounts={config.CRS_UNPACK_GIT: "/opt/unpack_git.sh"}, timeout=DEFAULT_INIT_TIMEOUT) as run:
             proc = await run.exec("/opt/unpack_git.sh", stdout=PIPE, stderr=STDOUT)
             reader = process.Reader(proc)
             res = await reader.communicate()
@@ -480,7 +474,9 @@ class Project:
         build_image = _build_image_name(project_dir.name, ossfuzz_hash)
         data_dir, info, workdir = await _init_project_data(project_dir, build_image, ossfuzz_hash)
         vfs = EditableOverlayFS(await TarFS.fsopen(data_dir / "src.tar"))
-        return cls(project_dir, data_dir, vfs, info, ossfuzz_hash, workdir=workdir)
+        result = cls(project_dir, data_dir, vfs, info, ossfuzz_hash, workdir=workdir)
+        logger.info(f"Project created successfully for {project_dir.name}")  # (aastham) Keep essential success log
+        return result
 
     async def runner_image(self) -> Result[str]:
         return Ok(RUNNER_IMAGE)
@@ -518,13 +514,8 @@ class Project:
         if self.harnesses is not None:
             return Ok(self.harnesses)
         
-        # (aastham) Mount libFuzzingEngine.a for harness initialization builds - needed for nginx and other projects
-        libfuzzing_engine_path = Path(__file__).parent.parent.parent / "utils" / "wrapper_engine" / "libFuzzingEngine.a"
-        if os.getenv("DOCKER_HOST", "").startswith("unix://"):
-            # (aastham) Using host Docker daemon, need to use host paths
-            libfuzzing_engine_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/utils/wrapper_engine/libFuzzingEngine.a")
-        
         from crs.common.constants import DEFAULT_LIB_FUZZING_ENGINE
+        libfuzzing_engine_path = Path(__file__).parent.parent.parent / "utils" / "wrapper_engine" / "libFuzzingEngine.a"
         mounts = {libfuzzing_engine_path: DEFAULT_LIB_FUZZING_ENGINE}
         artifacts = require(await self.build_all(capture_output=True, mounts=mounts))
         logger.info(f"locating harnesses for {self.project_dir.as_posix()}")
@@ -663,7 +654,7 @@ class Project:
                 return Ok(BuildArtifacts(self.name, build_config, await self.get_build_vfs(build_config)))
             logger.info(f"Building project {self.project_dir.as_posix()} to {build_tar}")
 
-            if capture_output:
+            if capture_output or using_bear:
                 stdio_fd = asyncio.subprocess.PIPE
             elif SILENCE_BUILDS:
                 stdio_fd = asyncio.subprocess.DEVNULL
@@ -671,36 +662,19 @@ class Project:
                 stdio_fd = None
 
             # wrap ALL compiles with theori_compile.sh to allow commands to run before build.sh
-            # (aastham) Handle macOS Docker compatibility - use host path when using host Docker daemon
-            theori_compile_path = config.THEORI_COMPILE
-            if os.getenv("DOCKER_HOST", "").startswith("unix://"):
-                # (aastham) Using host Docker daemon, need to use host path
-                theori_compile_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/utils/theori_compile.sh")
-            mounts[theori_compile_path] = "/usr/local/bin/theori_compile.sh"
+            mounts[config.THEORI_COMPILE] = "/usr/local/bin/theori_compile.sh"
             compile_commands = ["theori_compile.sh"]
             copies: list[tuple[str, Path, list[str]]] = []
 
             if using_bear:
                 if self.info.language in {"c", "c++"}:
-                    # (aastham) Handle macOS Docker compatibility - use host path when using host Docker daemon
-                    bear_lib_path = config.BEAR_PATH / "usr/lib/x86_64-linux-gnu/bear/"
-                    bear_bin_path = config.BEAR_PATH / "usr/bin/bear"
-                    if os.getenv("DOCKER_HOST", "").startswith("unix://"):
-                        # (aastham) Using host Docker daemon, need to use host paths
-                        bear_lib_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/external/bear/usr/lib/x86_64-linux-gnu/bear/")
-                        bear_bin_path = Path("/Users/aastham/Workspace/aixcc-afc-archive/external/bear/usr/bin/bear")
-                    mounts[bear_lib_path] = "/usr/lib/x86_64-linux-gnu/bear/"
-                    mounts[bear_bin_path] = "/opt/bear"
+                    mounts[config.BEAR_PATH / "usr/lib/x86_64-linux-gnu/bear/"] = "/usr/lib/x86_64-linux-gnu/bear/"
+                    mounts[config.BEAR_PATH / "usr/bin/bear"] = "/opt/bear"
                     compile_commands = ["python3", "/opt/bear", "-o", "/src/compile_commands.json","theori_compile.sh"]
                     include_dirs = ["compile_commands.json"]
                     workdir = await self.get_working_dir()
                     if workdir.is_ok():
-                        # (aastham) Fix for OSS-Fuzz project structures - handle working directories that are subdirectories of /src
-                        try:
-                            include_dirs.append(Path(workdir.unwrap()).relative_to("/src/").as_posix())
-                        except ValueError:
-                            # If workdir is not under /src, skip adding it to include_dirs
-                            pass
+                        include_dirs.append(Path(workdir.unwrap()).relative_to("/src/").as_posix())
                     include_dirs.append(Path(self.info.main_repo).stem)
                 copies.append(("/src", bear_tar, DEFAULT_FUZZER_DIRS))
 
@@ -790,6 +764,7 @@ class Project:
             match await self._build(build_config, mounts, timeout, capture_output, using_bear=True):
                 case Ok(res):
                     self.builds[state][build_config] = res # might as well cache the build artifacts as well
+                    logger.info(f"Successfully built bear tar for {self.name} with config {build_config}")
                     return bear_tar
                 case Err(error):
                     logger.warning(f"error during bear build: {error}")
@@ -1013,12 +988,10 @@ class Project:
     @requireable
     async def repo_path(self):
         workdir = Path(require(await self.get_working_dir()))
-        # (aastham) Fix for OSS-Fuzz project structures - handle working directories that are subdirectories of /src
-        try:
-            return Ok(workdir.relative_to("/src"))
-        except ValueError:
-            # If workdir is not under /src, return the workdir itself (e.g., for OSS-Fuzz projects)
-            return Ok(workdir)
+        result = workdir.relative_to("/src")
+        # (aastham) Debug: Log what relative_to returns
+        logger.info(f"DEBUG: workdir.relative_to('/src') returned: '{result}'")
+        return Ok(result)
 
     @requireable
     async def run_tests(self, timeout: float = DEFAULT_BUILD_TIMEOUT) -> Result[None]:
@@ -1096,11 +1069,17 @@ class DeltaTask(Task):
 
     @async_once
     async def pruned_diff(self, rawdiff: bool=False):
-        ignore_paths = set([
-            path for path in diff_utils.iter_post_paths(self.diff)
-                if Path(path).suffix.lower() in SOURCE_CODE_EXTENSIONS
-                and not await self.project.searcher.compiler_might_use_path(path)
-        ])
+        # (aastham) Add error handling for compiler_might_use_path which can fail with TaskGroup exceptions
+        try:
+            ignore_paths = set([
+                path for path in diff_utils.iter_post_paths(self.diff)
+                    if Path(path).suffix.lower() in SOURCE_CODE_EXTENSIONS
+                    and not await self.project.searcher.compiler_might_use_path(path)
+            ])
+        except Exception as e:
+            logger.warning(f"pruned_diff: Failed to determine ignore paths for task {self.task_id}: {e}")
+            # (aastham) If compiler_might_use_path fails, don't ignore any paths
+            ignore_paths = set()
         
         if rawdiff:
             pruned = self.diff
