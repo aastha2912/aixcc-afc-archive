@@ -14,6 +14,7 @@ from typing import Callable, Optional, Self
 
 from .base import VFS, Layer, CommandLayer, TarFileLayer, TarBytesLayer, vfs_counter
 from crs.common.alru import alru_cache, async_once
+from crs_rust import logger
 
 _DUMMY = tarfile.open(mode="w", fileobj=io.BytesIO())
 def gettarinfo(name: str, arcname: Optional[str] = None):
@@ -233,14 +234,25 @@ class EditableOverlayFS(VFS):
 
     async def populate(self, host_path: Path):
         vfs_counter.add(1, {"type": "editable", "op": "populate"})
-        async with host_path.walk() as it:
-            async for root, _, files in it:
-                for f in files:
-                    path = (root / f)
-                    relative = path.relative_to(host_path).as_posix()
-                    info = gettarinfo(path.as_posix(), arcname=relative)
-                    self.deleted.discard(relative)
-                    self.files[relative] = File(info, b"" if await path.is_symlink() else await path.read_bytes())
+        try:
+            async with host_path.walk() as it:
+                async for root, _, files in it:
+                    for f in files:
+                        path = (root / f)
+                        relative = path.relative_to(host_path).as_posix()
+                        info = gettarinfo(path.as_posix(), arcname=relative)
+                        self.deleted.discard(relative)
+                        self.files[relative] = File(info, b"" if await path.is_symlink() else await path.read_bytes())
+        except ExceptionGroup as eg:
+            # Handle TaskGroup exceptions by logging and re-raising
+            logger.error(f"TaskGroup exception in populate: {eg}")
+            for exc in eg.exceptions:
+                logger.error(f"  Sub-exception: {exc}")
+            raise
+        except Exception as e:
+            # Handle any other exceptions
+            logger.error(f"Exception in populate: {e}")
+            raise
         self._hash = None
 
     async def write(self, path: str, data: bytes) -> None:
