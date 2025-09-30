@@ -514,10 +514,11 @@ class Project:
         if self.harnesses is not None:
             return Ok(self.harnesses)
         
-        from crs.common.constants import DEFAULT_LIB_FUZZING_ENGINE
-        libfuzzing_engine_path = Path(__file__).parent.parent.parent / "utils" / "wrapper_engine" / "libFuzzingEngine.a"
-        mounts = {libfuzzing_engine_path: DEFAULT_LIB_FUZZING_ENGINE}
-        artifacts = require(await self.build_all(capture_output=True, mounts=mounts))
+        artifacts = require(await self.build_all())
+        # from crs.common.constants import DEFAULT_LIB_FUZZING_ENGINE
+        # libfuzzing_engine_path = Path(__file__).parent.parent.parent / "utils" / "wrapper_engine" / "libFuzzingEngine.a"
+        # mounts = {libfuzzing_engine_path: DEFAULT_LIB_FUZZING_ENGINE}
+        # artifacts = require(await self.build_all(capture_output=True, mounts=mounts))
         logger.info(f"locating harnesses for {self.project_dir.as_posix()}")
         harnesses: list[Harness] = []
 
@@ -770,10 +771,10 @@ class Project:
                     logger.warning(f"error during bear build: {error}")
                     return None
 
-    async def build_all(self, timeout: float = DEFAULT_BUILD_TIMEOUT, capture_output: bool = False, mounts: dict[Path, str] = {}) -> Result[list[BuildArtifacts]]:
+    async def build_all(self, timeout: float = DEFAULT_BUILD_TIMEOUT, capture_output: bool = False) -> Result[list[BuildArtifacts]]:
         return collect(
             await asyncio.gather(*[
-                self.build(conf, timeout=timeout, capture_output=capture_output, mounts=mounts) for conf in self.info.build_configs
+                self.build(conf, timeout=timeout, capture_output=capture_output) for conf in self.info.build_configs
             ])
         )
 
