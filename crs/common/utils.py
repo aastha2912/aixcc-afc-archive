@@ -339,7 +339,9 @@ async def run_coro_batch[T, R](
                 if res.cancelled():
                     continue
                 if res.exception() is not None:
-                    logger.warning(f"run_batch - agent encountered exception: {repr(res.exception())}")
+                    logger.error(f"run_batch - task {res.get_name()} encountered exception: {repr(res.exception())}")
+                    logger.error(f"run_batch - exception type: {type(res.exception())}")
+                    logger.error(f"run_batch - exception details: {res.exception()}")
                     continue
                 res = res.result()
                 if filter and (res := filter(res)) is None:
