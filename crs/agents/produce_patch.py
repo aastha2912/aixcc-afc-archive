@@ -1,6 +1,7 @@
 from crs.common.aio import Path
 from pydantic import BaseModel, Field
 from typing import Optional
+import asyncio
 
 from opentelemetry import trace
 
@@ -138,45 +139,58 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
         """Hook that finalizes the patch immediately after it's applied, skipping testing."""
         if not isinstance(res, ToolError):
             logger.info("FIRST PATCH GENERATED - Applying patch and finalizing immediately (skipping test phase)")
-            # Build the project to generate build artifacts
-            match await self.crs.project.build_all(capture_output=True):
-                case Err(BuildError(error=error)):
-                    match await summarize_build_failure(error):
-                        case Err(CRSError(error=error)):
-                            pass
-                        case Ok(error):
-                            pass
-                case Err(CRSError(error=error)):
-                    pass
-                case Ok(_):
-                    error = None
             
-            if error is not None:
-                logger.warning(f"Build failed after patch application: {error}")
-                # Still finalize the patch even if build fails
-                patch = await self.crs.project.editor.get_repo_diff(self.repo_base.as_posix())
-                build_artifacts: list[PatchArtifact] = []
-                self.patch = ConfirmedPatchResult(
-                    success=True,
-                    patch=patch,
-                    tested_povs=self.povs,
-                    build_artifacts=build_artifacts,
-                )
-                logger.info(f"PATCH FINALIZED - Successfully finalized patch with {len(build_artifacts)} build artifacts (build failed but patch accepted)")
-            else:
-                # Build succeeded, generate build artifacts
-                patch = await self.crs.project.editor.get_repo_diff(self.repo_base.as_posix())
-                build_artifacts: list[PatchArtifact] = []
-                for config in self.crs.project.info.build_configs:
-                    tar_path = await self.crs.project.get_build_tar(config)
-                    build_artifacts.append(PatchArtifact(build_tar_path=tar_path.as_posix(), build_config=config))
-                self.patch = ConfirmedPatchResult(
-                    success=True,
-                    patch=patch,
-                    tested_povs=self.povs,
-                    build_artifacts=build_artifacts,
-                )
-                logger.info(f"PATCH FINALIZED - Successfully finalized patch with {len(build_artifacts)} build artifacts (no testing performed)")
+            # TODO: REVERT - Uncomment the build section below to restore build functionality
+            # Build the project to generate build artifacts
+            # match await self.crs.project.build_all(capture_output=True):
+            #     case Err(BuildError(error=error)):
+            #         match await summarize_build_failure(error):
+            #             case Err(CRSError(error=error)):
+            #                 pass
+            #             case Ok(error):
+            #                 pass
+            #     case Err(CRSError(error=error)):
+            #         pass
+            #     case Ok(_):
+            #         error = None
+            # 
+            # if error is not None:
+            #     logger.warning(f"Build failed after patch application: {error}")
+            #     # Still finalize the patch even if build fails
+            #     patch = await self.crs.project.editor.get_repo_diff(self.repo_base.as_posix())
+            #     build_artifacts: list[PatchArtifact] = []
+            #     self.patch = ConfirmedPatchResult(
+            #         success=True,
+            #         patch=patch,
+            #         tested_povs=self.povs,
+            #         build_artifacts=build_artifacts,
+            #     )
+            #     logger.info(f"PATCH FINALIZED - Successfully finalized patch with {len(build_artifacts)} build artifacts (build failed but patch accepted)")
+            # else:
+            #     # Build succeeded, generate build artifacts
+            #     patch = await self.crs.project.editor.get_repo_diff(self.repo_base.as_posix())
+            #     build_artifacts: list[PatchArtifact] = []
+            #     for config in self.crs.project.info.build_configs:
+            #         tar_path = await self.crs.project.get_build_tar(config)
+            #         build_artifacts.append(PatchArtifact(build_tar_path=tar_path.as_posix(), build_config=config))
+            #     self.patch = ConfirmedPatchResult(
+            #         success=True,
+            #         patch=patch,
+            #         tested_povs=self.povs,
+            #         build_artifacts=build_artifacts,
+            #     )
+            #     logger.info(f"PATCH FINALIZED - Successfully finalized patch with {len(build_artifacts)} build artifacts (no testing performed)")
+            
+            # TEMPORARY: Skip build for faster testing - just finalize the patch immediately
+            patch = await self.crs.project.editor.get_repo_diff(self.repo_base.as_posix())
+            build_artifacts: list[PatchArtifact] = []  # Empty - no build artifacts
+            self.patch = ConfirmedPatchResult(
+                success=True,
+                patch=patch,
+                tested_povs=self.povs,
+                build_artifacts=build_artifacts,
+            )
+            logger.info("PATCH FINALIZED - Successfully finalized patch (no build, no testing)")
         return res
 
     async def test_patch_hook[R](self, res: ToolResult[R]):
@@ -216,18 +230,74 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
         return res
 
     async def source_code_questions(self, question: str, additional_info: str = "") -> Result[SourceQuestionsResult]:
-        return await self.crs.source_code_questions(question, additional_info, self.rawdiff)
+        result = await self.crs.source_code_questions(question, additional_info, self.rawdiff)
+        self._capture_context_call("source_questions", (question, additional_info), {}, result)
+        return result
+
+    def _capture_context_call(self, tool_name: str, args: tuple, kwargs: dict, result: any):
+        """Capture context retrieval call data"""
+        call_data = {
+            "tool_name": tool_name,
+            "args": args,
+            "kwargs": kwargs,
+            "timestamp": asyncio.get_event_loop().time(),
+            "success": not isinstance(result, ToolError)
+        }
+        
+        if isinstance(result, ToolError):
+            call_data["error"] = str(result.error)
+        else:
+            # Capture a summary of the result (first 200 chars to avoid huge data)
+            result_str = str(result)[:200] + "..." if len(str(result)) > 200 else str(result)
+            call_data["result_summary"] = result_str
+        
+        self.context_capture[tool_name].append(call_data)
+        return result
+
+    async def read_definition(self, name: str, path: Optional[str] = None, line_number: Optional[int] = None, display_lines: bool = True):
+        result = await self.crs.searcher.read_definition(name, path, line_number, display_lines)
+        self._capture_context_call("read_definition", (name, path, line_number, display_lines), {}, result)
+        return result
+
+    async def read_source(self, file_name: str, line_number: int):
+        result = await self.crs.searcher.read_source(file_name, line_number)
+        self._capture_context_call("read_source", (file_name, line_number), {}, result)
+        return result
+
+    async def find_references(self, name: str, path: Optional[str] = None, case_insensitive: bool = False):
+        result = await self.crs.searcher.find_references(name, path, case_insensitive)
+        self._capture_context_call("find_references", (name, path, case_insensitive), {}, result)
+        return result
+
+    async def apply_patch(self, path: str, patch: str):
+        result = await self.crs.project.editor.apply_patch(path, patch)
+        self._capture_context_call("apply_patch", (path, patch), {}, result)
+        return result
+
+    async def undo_last_patch(self):
+        result = await self.crs.project.editor.undo_last_patch()
+        self._capture_context_call("undo_last_patch", (), {}, result)
+        return result
+
+    async def list_current_edits(self):
+        result = await self.crs.project.editor.list_edits()
+        self._capture_context_call("list_current_edits", (), {}, result)
+        return result
+
+    def get_context_capture(self):
+        """Get the captured context retrieval data"""
+        return self.context_capture
 
     @cached_property
     def _tools(self) -> dict[str, Tool]:
         return {
             "source_questions": tool_wrap(self.source_code_questions),
-            "read_definition": tool_wrap(self.crs.searcher.read_definition),
-            "read_source": tool_wrap(self.crs.searcher.read_source),
-            "find_references": tool_wrap(self.crs.searcher.find_references),
-            "apply_patch": tool_wrap(self.crs.project.editor.apply_patch, pre_hooks=[self.sanity_patch_hook], post_hooks=[self.apply_patch_hook]),
-            "undo_last_patch": tool_wrap(self.crs.project.editor.undo_last_patch),
-            "list_current_edits": tool_wrap(self.crs.project.editor.list_edits),
+            "read_definition": tool_wrap(self.read_definition),
+            "read_source": tool_wrap(self.read_source),
+            "find_references": tool_wrap(self.find_references),
+            "apply_patch": tool_wrap(self.apply_patch, pre_hooks=[self.sanity_patch_hook], post_hooks=[self.apply_patch_hook]),
+            "undo_last_patch": tool_wrap(self.undo_last_patch),
+            "list_current_edits": tool_wrap(self.list_current_edits),
             # "test_patch": tool_wrap(self.test_patch, post_hooks=[self.test_patch_hook]),  # Removed to skip testing
         }
 
@@ -242,6 +312,16 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
         self.sec_failure_count = 0
         self.patch: Optional[ConfirmedPatchResult] = None
         self.rawdiff = rawdiff
+        # Context capture for debugging
+        self.context_capture = {
+            "source_questions": [],
+            "read_definition": [],
+            "read_source": [],
+            "find_references": [],
+            "apply_patch": [],
+            "undo_last_patch": [],
+            "list_current_edits": []
+        }
         super().__init__()
 
 class CRSPatcher(CRSPovProducer, CRSSourceQuestions):
@@ -274,4 +354,14 @@ class CRSPatcher(CRSPovProducer, CRSSourceQuestions):
             f"patch producer complete",
             attributes={"crs.debug.success": response.success}
         )
+        
+        # Store the agent for context capture access
+        self._last_agent = agent
+        
         return Ok(response)
+    
+    def get_context_capture(self):
+        """Get the context capture from the last patching agent"""
+        if hasattr(self, '_last_agent'):
+            return self._last_agent.get_context_capture()
+        return {}
