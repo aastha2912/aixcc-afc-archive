@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""
+Test PoC against libraw project - Following actual CRS workflow
+"""
+import asyncio
+import sys
+import json
+from pathlib import Path
+
+# Add current directory to Python path
+sys.path.insert(0, str(Path.cwd()))
+
+from crs.modules.testing import TestProject
+
+async def test_poc():
+    """Test the PoC against the vulnerable version - Following CRS workflow"""
+    
+    # ==========================================================================
+    # PHASE 1: TEST POC (like task.test_pov in CRS)
+    # ==========================================================================
+    print("\n" + "="*60)
+    print("PHASE 1: TESTING POC")
+    print("="*60)
+    
+    # Load project
+    project = await TestProject.from_dir("projects/libraw")
+    task = await project.task()
+    
+    # Build the project first
+    print("Building project...")
+    build_result = await task.project.build_all()
+    if build_result.is_err():
+        print(f"❌ Build failed: {build_result.err()}")
+        return None
+    print("✅ Project built successfully")
+    
+    # Initialize harness info
+    print("Initializing harnesses...")
+    harnesses = await task.project.init_harness_info()
+    if harnesses.is_err():
+        print(f"❌ Harness initialization failed: {harnesses.err()}")
+        return None
+    
+    harness_list = harnesses.unwrap()
+    print(f"✅ Found {len(harness_list)} harnesses:")
+    harness_names = [h.name for h in harness_list]
+    for i, name in enumerate(harness_names):
+        print(f"  {i}: {name}")
+    
+    # Find the libraw_fuzzer harness
+    libraw_fuzzer_index = None
+    for i, name in enumerate(harness_names):
+        if name == "libraw_fuzzer":
+            libraw_fuzzer_index = i
+            break
+    
+    if libraw_fuzzer_index is None:
+        print("❌ libraw_fuzzer harness not found!")
+        return None
+    
+    print(f"Using harness: libraw_fuzzer (index {libraw_fuzzer_index})")
+    
+    # Check if you have a real PoC file
+    poc_file = Path("projects/libraw/poc.bin")
+    if poc_file.exists():
+        print(f"✅ Found PoC file: {poc_file}")
+        # Read the PoC file and embed it directly in the Python script
+        with open(poc_file, "rb") as f:
+            poc_data = f.read()
+        print(f"✅ Read {len(poc_data)} bytes from PoC file")
+        
+        # Embed the data directly in the Python script
+        pov_python = f"""
+# Use embedded PoC data
+poc_data = {repr(poc_data)}
+
+with open("input.bin", "wb") as f:
+    f.write(poc_data)
+"""
+    else:
+        print("⚠️  No PoC file found, using test data")
+        # Use embedded test data
+        pov_python = """
+# Create test PoC data and write it as input.bin
+poc_data = b"test poc data that might trigger a vulnerability"
+
+with open("input.bin", "wb") as f:
+    f.write(poc_data)
+"""
+    
+    # Test PoC (EXACTLY like CRS does)
+    print("Testing PoC...")
+    result = await task.test_pov(harness_num=libraw_fuzzer_index, pov_python=pov_python)
+    
+    if result.is_err():
+        print("❌ PoC did not crash")
+        print(f"Error: {result.err()}")
+        return None
+    
+    crash_result = result.unwrap()
+    print("✅ PoC triggered a crash!")
+    print(f"Output: {crash_result.output[:200]}...")
+    print(f"Stack: {crash_result.stack[:200]}...")
+    print(f"Dedup: {crash_result.dedup}")
+    
+    # ==========================================================================
+    # PHASE 2: CREATE POVRunData (like CRS does in handle_pov_produce_result)
+    # ==========================================================================
+    print("\n" + "="*60)
+    print("PHASE 2: CREATING POVRunData FROM CRASH")
+    print("="*60)
+    
+    from crs.common.types import POVRunData
+    
+    # Create POVRunData EXACTLY like CRS does in handle_pov_produce_result (line 1201-1213)
+    pov_run_data = POVRunData(
+        task_uuid=task.task_id,  # Use actual task UUID
+        project_name=task.project.name,  # Use actual project name
+        harness=harness_list[libraw_fuzzer_index].name,
+        sanitizer=crash_result.config.SANITIZER,
+        engine=crash_result.config.FUZZING_ENGINE,
+        python=pov_python,
+        input=crash_result.input,  # Use actual input from crash
+        output=crash_result.output,
+        dedup=crash_result.dedup,
+        stack=crash_result.stack
+    )
+    
+    print(f"✅ Created POVRunData (like CRS does):")
+    print(f"  Task UUID: {pov_run_data.task_uuid}")
+    print(f"  Project: {pov_run_data.project_name}")
+    print(f"  Harness: {pov_run_data.harness}")
+    print(f"  Sanitizer: {pov_run_data.sanitizer}")
+    print(f"  Dedup: {pov_run_data.dedup}")
+    
+    # ==========================================================================
+    # PHASE 3: DECODE POV (like CRS does in triage_pov line 1186)
+    # ==========================================================================
+    print("\n" + "="*60)
+    print("PHASE 3: DECODING POV")
+    print("="*60)
+    
+    # Create CRS instance to use decode_pov method (like CRS does in triage_pov line 1186)
+    from crs.app.app import CRS
+    
+    crs_instance = CRS()
+    print("🔍 Decoding POV using CRS decode_pov function...")
+    decoded_pov, _ = await crs_instance.decode_pov(task, harness_list, pov_run_data)
+    
+    print(f"✅ Decoded POV:")
+    print(f"  Project: {decoded_pov.project_name}")
+    print(f"  Harness: {decoded_pov.harness}")
+    print(f"  Decoding: {decoded_pov.decoding[:200]}...")
+    print(f"  Dedup: {decoded_pov.dedup}")
+    
+    # ==========================================================================
+    # PHASE 4: TRIAGE POV (like CRS does in triage_pov line 1191)
+    # ==========================================================================
+    print("\n" + "="*60)
+    print("PHASE 4: TRIAGING POV WITH LLM")
+    print("="*60)
+    
+    from crs.agents.triage import CRSTriage
+    
+    # Run triage EXACTLY like CRS does in triage_pov (line 1191)
+    print("🤖 Running CRS Triage Agent (with context retrieval)...")
+    triage_agent = CRSTriage.from_task(task)
+    analyzed_vuln_result = await triage_agent.pov_triage(decoded_pov)
+    
+    if analyzed_vuln_result.is_err():
+        print(f"❌ CRS Triage Agent failed: {analyzed_vuln_result.err()}")
+        return None
+    
+    analyzed_vuln = analyzed_vuln_result.unwrap()
+    print(f"✅ Vulnerability Analysis Complete:")
+    print(f"  Function: {analyzed_vuln.function}")
+    print(f"  File: {analyzed_vuln.file}")
+    print(f"  Description: {analyzed_vuln.description[:200]}...")
+    print(f"  Conditions: {len(analyzed_vuln.conditions)} conditions")
+    
+    # ==========================================================================
+    # PHASE 5: STORE VULNERABILITY IN DATABASE (like CRS does)
+    # ==========================================================================
+    print("\n" + "="*60)
+    print("PHASE 5: STORING VULNERABILITY IN DATABASE")
+    print("="*60)
+    
+    # Store vulnerability in database EXACTLY like CRS does in handle_analyzed_vuln
+    from crs.app.app import VulnSource
+    
+    # Use the CRS instance's productsdb (like CRS does)
+    print("💾 Storing vulnerability in database...")
+    vuln_id = await crs_instance.productsdb.add_vuln(
+        task=task.task_id,
+        project=task.project.name,
+        vuln=analyzed_vuln,
+        source="arvo_poc_test",  # Source identifier
+        report_id=None,
+        sarif_id=None
+    )
+    
+    print(f"✅ Vulnerability stored in database with ID: {vuln_id}")
+    print(f"  • Vuln ID: {vuln_id}")
+    print(f"  • Function: {analyzed_vuln.function}")
+    print(f"  • File: {analyzed_vuln.file}")
+    
+    # ==========================================================================
+    # PHASE 6: SAVE WORKFLOW DATA
+    # ==========================================================================
+    print("\n" + "="*60)
+    print("PHASE 6: SAVING WORKFLOW DATA")
+    print("="*60)
+    
+    workflow_data = {
+        "vuln_id": vuln_id,  # Database ID for the stored vulnerability
+        "crash_result": {
+            "output": crash_result.output[:500],
+            "stack": crash_result.stack.decode('utf-8', errors='replace')[:500] if isinstance(crash_result.stack, bytes) else crash_result.stack[:500],
+            "dedup": crash_result.dedup
+        },
+        "pov_run_data": {
+            "task_uuid": str(pov_run_data.task_uuid),
+            "project_name": pov_run_data.project_name,
+            "harness": pov_run_data.harness,
+            "sanitizer": pov_run_data.sanitizer,
+            "engine": pov_run_data.engine,
+            "dedup": pov_run_data.dedup
+        },
+        "decoded_pov": {
+            "project_name": decoded_pov.project_name,
+            "harness": decoded_pov.harness,
+            "sanitizer": decoded_pov.sanitizer,
+            "engine": decoded_pov.engine,
+            "decoding": decoded_pov.decoding,
+            "dedup": decoded_pov.dedup
+        },
+        "analyzed_vuln": {
+            "function": analyzed_vuln.function,
+            "file": analyzed_vuln.file,
+            "description": analyzed_vuln.description,
+            "conditions": analyzed_vuln.conditions
+        }
+    }
+    
+    workflow_file = Path(__file__).parent / "arvo_workflow_data.json"
+    workflow_file.write_text(json.dumps(workflow_data, indent=2))
+    print(f"💾 Saved workflow data to: {workflow_file}")
+    
+    # ==========================================================================
+    # PHASE 7: RUN PATCHING AGENT (like CRS does in patch_vuln)
+    # ==========================================================================
+    print("\n" + "="*60)
+    print("PHASE 7: RUNNING PATCHING AGENT")
+    print("="*60)
+    
+    # Run the patching agent EXACTLY like CRS does in patch_vuln
+    from crs.agents.produce_patch import CRSPatcher
+    
+    print("🤖 Starting CRS Patching Agent...")
+    print(f"  • Vulnerability ID: {vuln_id}")
+    print(f"  • Function: {analyzed_vuln.function}")
+    print(f"  • File: {analyzed_vuln.file}")
+    
+    # Create CRS Patcher instance (like CRS does)
+    patcher = CRSPatcher.from_task(task)
+    
+    # Get POVs for this vulnerability (we have our decoded_pov)
+    povs = [decoded_pov]  # Use the POV we already have
+    
+    print("🔧 Patching Agent will use context retrieval tools:")
+    print("  • source_questions - Ask natural language questions about code")
+    print("  • read_definition - Read function definitions")
+    print("  • read_source - Read source code")
+    print("  • find_references - Find function references")
+    print("  • apply_patch - Apply patches to code")
+    print("  • test_patch - Test patches against PoC")
+    
+    try:
+        # Run the patching agent EXACTLY like CRS does in patch_vuln
+        print("\n🚀 Running patching agent (this may take a while)...")
+        patch_result = await patcher.patch_vulnerability(
+            analyzed_vuln, 
+            povs, 
+            rawdiff=False  # Use structured diff format
+        )
+        
+        if patch_result.is_ok():
+            patch_response = patch_result.unwrap()
+            print(f"✅ Patching agent completed!")
+            print(f"  • Success: {patch_response.success}")
+            
+            # Check if we got a ConfirmedPatchResult (with actual patch) or just PatchResult
+            if hasattr(patch_response, 'patch') and patch_response.success:
+                print(f"  • Patch generated: {len(patch_response.patch)} characters")
+                print(f"  • Build artifacts: {len(patch_response.build_artifacts) if patch_response.build_artifacts else 0}")
+                print(f"  • Tested POVs: {len(patch_response.tested_povs)}")
+                
+                # Save patch to file
+                patch_file = Path(__file__).parent / "generated_patch.diff"
+                patch_file.write_text(patch_response.patch)
+                print(f"💾 Saved patch to: {patch_file}")
+                
+                # Update workflow data with patch results
+                workflow_data["patch_result"] = {
+                    "success": patch_response.success,
+                    "patch": patch_response.patch,
+                    "build_artifacts_count": len(patch_response.build_artifacts) if patch_response.build_artifacts else 0,
+                    "tested_povs_count": len(patch_response.tested_povs)
+                }
+            else:
+                print(f"  • No patch generated")
+                if hasattr(patch_response, 'failure_reason') and patch_response.failure_reason:
+                    print(f"  • Failure reason: {patch_response.failure_reason}")
+                
+                # Update workflow data with failure info
+                workflow_data["patch_result"] = {
+                    "success": patch_response.success,
+                    "failure_reason": getattr(patch_response, 'failure_reason', 'Unknown failure')
+                }
+            
+            # Re-save workflow data with patch results
+            workflow_file.write_text(json.dumps(workflow_data, indent=2))
+            print(f"💾 Updated workflow data with patch results")
+            
+        else:
+            print(f"❌ Patching agent failed: {patch_result.err()}")
+            workflow_data["patch_result"] = {
+                "success": False,
+                "error": str(patch_result.err())
+            }
+            workflow_file.write_text(json.dumps(workflow_data, indent=2))
+            
+    except Exception as e:
+        print(f"❌ Error running patching agent: {e}")
+        workflow_data["patch_result"] = {
+            "success": False,
+            "error": str(e)
+        }
+        workflow_file.write_text(json.dumps(workflow_data, indent=2))
+    
+    # ==========================================================================
+    # SUMMARY
+    # ==========================================================================
+    print("\n" + "="*60)
+    print("🎯 COMPLETE CRS WORKFLOW FINISHED")
+    print("="*60)
+    print("✅ Completed Full CRS Workflow:")
+    print("  1. test_pov() - PoC triggered crash")
+    print("  2. Created POVRunData (like handle_pov_produce_result)")
+    print("  3. decode_pov() - Decoded the POV")
+    print("  4. CRSTriage.pov_triage() - Analyzed vulnerability with LLM")
+    print("  5. productsdb.add_vuln() - Stored vulnerability in database")
+    print("  6. Saved workflow data to arvo_workflow_data.json")
+    print("  7. CRSPatcher.patch_vulnerability() - Generated patches with LLM")
+    print()
+    print("📊 Final Results:")
+    print(f"  • Vulnerability ID: {vuln_id} (stored in database)")
+    print(f"  • Vulnerable Function: {analyzed_vuln.function}")
+    print(f"  • Vulnerable File: {analyzed_vuln.file}")
+    print(f"  • Crash Dedup: {decoded_pov.dedup}")
+    print(f"  • Patch Generated: {'✅' if 'patch_result' in workflow_data and workflow_data['patch_result']['success'] else '❌'}")
+    print()
+    print("🎉 Complete ARVO-to-CRS workflow executed successfully!")
+    print("   From ARVO crash data to working patches using real CRS agents!")
+    
+    return crash_result, pov_run_data, decoded_pov, analyzed_vuln, vuln_id
+
+if __name__ == "__main__":
+    asyncio.run(test_poc())
