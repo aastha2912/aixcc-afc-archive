@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test PoC against libraw project - Following actual CRS workflow
+Test PoC against different projects - Following actual CRS workflow
 """
 import asyncio
 import sys
@@ -12,14 +12,80 @@ sys.path.insert(0, str(Path.cwd()))
 
 from crs.modules.testing import TestProject
 
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+# Directory structure (must match setup_arvo_project.py)
+ARVO_CONFIG_DIR_NAME = "arvo_{arvo_id}"  # Directory name for ARVO configurations
+ARVO_CONFIG_FILE_NAME = "config.json"    # Configuration file name
+
+# =============================================================================
+# CONFIGURATION LOADING
+# =============================================================================
+
+def load_arvo_config(arvo_id: str) -> dict:
+    """Load configuration from ARVO config file"""
+    script_dir = Path(__file__).parent
+    arvo_dir = script_dir / ARVO_CONFIG_DIR_NAME.format(arvo_id=arvo_id)
+    config_file = arvo_dir / ARVO_CONFIG_FILE_NAME
+    
+    if not config_file.exists():
+        print(f"Configuration file not found: {config_file}")
+        print("Please run setup_arvo_project.py first to create the configuration.")
+        sys.exit(1)
+    
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+        return config
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Error loading configuration: {e}")
+        sys.exit(1)
+
+def get_config_from_args():
+    """Get configuration from command line arguments"""
+    if len(sys.argv) < 2:
+        print("Usage: python3 arvo_to_crs_integration.py <ARVO_ID>")
+        print("Example: python3 arvo_to_crs_integration.py 65027")
+        sys.exit(1)
+    
+    arvo_id = sys.argv[1]
+    config = load_arvo_config(arvo_id)
+    
+    print(f"\nLoaded configuration for ARVO ID: {arvo_id}")
+    print(f"Project: {config['project_name']}")
+    print(f"Fuzzer: {config['fuzzer_name']}")
+    print(f"POC File: {config['poc_file']}")
+    print("="*60)
+    
+    return config
+
+# Load configuration from command line arguments
+CONFIG = get_config_from_args()
+
+# Extract configuration parameters
+PROJECT_DIR = CONFIG['project_dir']
+POC_FILE = CONFIG['poc_file']
+FUZZER_NAME = CONFIG['fuzzer_name']
+
+# =============================================================================
+# END CONFIGURATION LOADING
+# =============================================================================
+
 async def setup_project_and_harnesses():
     """Phase 1: Setup project and find harnesses"""
     print("\n" + "="*60)
     print("PHASE 1: SETTING UP PROJECT AND HARNESSES")
     print("="*60)
+    print(f"Configuration:")
+    print(f"  Project: {PROJECT_DIR}")
+    print(f"  POC File: {POC_FILE}")
+    print(f"  Fuzzer: {FUZZER_NAME}")
+    print("="*60)
     
     # Load project
-    project = await TestProject.from_dir("projects/libraw")
+    project = await TestProject.from_dir(PROJECT_DIR)
     task = await project.task()
     
     # Build the project first
@@ -43,26 +109,27 @@ async def setup_project_and_harnesses():
     for i, name in enumerate(harness_names):
         print(f"  {i}: {name}")
     
-    # Find the libraw_fuzzer harness
-    libraw_fuzzer_index = None
+    # Find the specified fuzzer harness
+    fuzzer_index = None
     for i, name in enumerate(harness_names):
-        if name == "libraw_fuzzer":
-            libraw_fuzzer_index = i
+        if name == FUZZER_NAME:
+            fuzzer_index = i
             break
     
-    if libraw_fuzzer_index is None:
-        print("libraw_fuzzer harness not found!")
+    if fuzzer_index is None:
+        print(f"Fuzzer harness '{FUZZER_NAME}' not found!")
+        print(f"Available harnesses: {harness_names}")
         return None, None, None
     
-    print(f"Using harness: libraw_fuzzer (index {libraw_fuzzer_index})")
+    print(f"Using harness: {harness_list[fuzzer_index].name} (index {fuzzer_index})")
     
-    return task, harness_list, libraw_fuzzer_index
+    return task, harness_list, fuzzer_index
 
 
 def prepare_poc_data():
     """Prepare PoC data for testing"""
     # Check if you have a real PoC file
-    poc_file = Path("projects/libraw/poc.bin")
+    poc_file = Path(PROJECT_DIR) / POC_FILE
     if poc_file.exists():
         print(f"Found PoC file: {poc_file}")
         # Read the PoC file and embed it directly in the Python script
@@ -92,7 +159,7 @@ with open("input.bin", "wb") as f:
     return pov_python
 
 
-async def test_poc_crash(task, harness_list, libraw_fuzzer_index):
+async def test_poc_crash(task, harness_list, fuzzer_index):
     """Phase 2: Test PoC and get crash result"""
     print("\n" + "="*60)
     print("PHASE 2: TESTING POC")
@@ -102,7 +169,7 @@ async def test_poc_crash(task, harness_list, libraw_fuzzer_index):
     
     # Test PoC (EXACTLY like CRS does)
     print("Testing PoC...")
-    result = await task.test_pov(harness_num=libraw_fuzzer_index, pov_python=pov_python)
+    result = await task.test_pov(harness_num=fuzzer_index, pov_python=pov_python)
     
     if result.is_err():
         print("PoC did not crash")
@@ -118,7 +185,7 @@ async def test_poc_crash(task, harness_list, libraw_fuzzer_index):
     return crash_result, pov_python
 
 
-async def create_pov_run_data(task, harness_list, libraw_fuzzer_index, crash_result, pov_python):
+async def create_pov_run_data(task, harness_list, fuzzer_index, crash_result, pov_python):
     """Phase 3: Create POVRunData from crash"""
     print("\n" + "="*60)
     print("PHASE 3: CREATING POVRunData FROM CRASH")
@@ -130,7 +197,7 @@ async def create_pov_run_data(task, harness_list, libraw_fuzzer_index, crash_res
     pov_run_data = POVRunData(
         task_uuid=task.task_id,  # Use actual task UUID
         project_name=task.project.name,  # Use actual project name
-        harness=harness_list[libraw_fuzzer_index].name,
+        harness=harness_list[fuzzer_index].name,
         sanitizer=crash_result.config.SANITIZER,
         engine=crash_result.config.FUZZING_ENGINE,
         python=pov_python,
@@ -227,7 +294,7 @@ async def store_vulnerability_in_database(crs_instance, task, analyzed_vuln):
     return vuln_id
 
 
-def save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyzed_vuln):
+def save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyzed_vuln, arvo_id):
     """Phase 7: Save workflow data"""
     print("\n" + "="*60)
     print("PHASE 7: SAVING WORKFLOW DATA")
@@ -264,14 +331,17 @@ def save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyze
         }
     }
     
-    workflow_file = Path(__file__).parent / "arvo_workflow_data.json"
+    # Save to ARVO-specific directory
+    script_dir = Path(__file__).parent
+    arvo_dir = script_dir / ARVO_CONFIG_DIR_NAME.format(arvo_id=arvo_id)
+    workflow_file = arvo_dir / "workflow_data.json"
     workflow_file.write_text(json.dumps(workflow_data, indent=2))
     print(f"Saved workflow data to: {workflow_file}")
     
     return workflow_data, workflow_file
 
 
-async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow_data, workflow_file):
+async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow_data, workflow_file, arvo_id):
     """Phase 8: Run patching agent"""
     print("\n" + "="*60)
     print("PHASE 8: RUNNING PATCHING AGENT")
@@ -322,8 +392,10 @@ async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow
                 print(f"  Build artifacts: {len(patch_response.build_artifacts) if patch_response.build_artifacts else 0}")
                 print(f"  Tested POVs: {len(patch_response.tested_povs)}")
                 
-                # Save patch to file
-                patch_file = Path(__file__).parent / "generated_patch.diff"
+                # Save patch to ARVO-specific directory
+                script_dir = Path(__file__).parent
+                arvo_dir = script_dir / ARVO_CONFIG_DIR_NAME.format(arvo_id=arvo_id)
+                patch_file = arvo_dir / "generated_patch.diff"
                 patch_file.write_text(patch_response.patch)
                 print(f"Saved patch to: {patch_file}")
                 
@@ -365,8 +437,10 @@ async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow
                     for i, call in enumerate(calls):
                         print(f"    Call {i+1}: {call.get('args', [])[:2]}...")  # Show first 2 args
             
-            # Save context retrieval data to separate file for analysis
-            context_file = Path(__file__).parent / "context_retrieval_data.json"
+            # Save context retrieval data to ARVO-specific directory
+            script_dir = Path(__file__).parent
+            arvo_dir = script_dir / ARVO_CONFIG_DIR_NAME.format(arvo_id=arvo_id)
+            context_file = arvo_dir / "context_retrieval_data.json"
             context_file.write_text(json.dumps(context_capture, indent=2))
             print(f"Saved detailed context retrieval data to: {context_file}")
             
@@ -412,7 +486,7 @@ def print_summary(vuln_id, analyzed_vuln, decoded_pov, workflow_data):
     print("  3. decode_pov() - Decoded the POV")
     print("  4. CRSTriage.pov_triage() - Analyzed vulnerability with LLM")
     print("  5. productsdb.add_vuln() - Stored vulnerability in database")
-    print("  6. Saved workflow data to arvo_workflow_data.json")
+    print("  6. Saved workflow data to ARVO directory")
     print("  7. CRSPatcher.patch_vulnerability() - Generated patches with LLM")
     print()
     print("Final Results:")
@@ -422,25 +496,32 @@ def print_summary(vuln_id, analyzed_vuln, decoded_pov, workflow_data):
     print(f"  Crash Dedup: {decoded_pov.dedup}")
     print(f"  Patch Generated: {'YES' if 'patch_result' in workflow_data and workflow_data['patch_result']['success'] else 'NO'}")
     print()
+    print("Output Files Saved:")
+    print(f"  Configuration: arvo_{CONFIG['arvo_id']}/config.json")
+    print(f"  Workflow Data: arvo_{CONFIG['arvo_id']}/workflow_data.json")
+    print(f"  Context Retrieval: arvo_{CONFIG['arvo_id']}/context_retrieval_data.json")
+    if 'patch_result' in workflow_data and workflow_data['patch_result']['success']:
+        print(f"  Generated Patch: arvo_{CONFIG['arvo_id']}/generated_patch.diff")
+    print()
     print("Complete ARVO-to-CRS workflow executed successfully!")
     print("   From ARVO crash data to working patches using real CRS agents!")
 
 
-async def test_poc():
+async def test_poc(arvo_id):
     """Test the PoC against the vulnerable version - Following CRS workflow"""
     
     # Phase 1: Setup project and harnesses
-    task, harness_list, libraw_fuzzer_index = await setup_project_and_harnesses()
+    task, harness_list, fuzzer_index = await setup_project_and_harnesses()
     if task is None:
         return None
     
     # Phase 2: Test PoC and get crash result
-    crash_result, pov_python = await test_poc_crash(task, harness_list, libraw_fuzzer_index)
+    crash_result, pov_python = await test_poc_crash(task, harness_list, fuzzer_index)
     if crash_result is None:
         return None
     
     # Phase 3: Create POVRunData from crash
-    pov_run_data = await create_pov_run_data(task, harness_list, libraw_fuzzer_index, crash_result, pov_python)
+    pov_run_data = await create_pov_run_data(task, harness_list, fuzzer_index, crash_result, pov_python)
     
     # Phase 4: Decode POV
     decoded_pov, crs_instance = await decode_pov(task, harness_list, pov_run_data)
@@ -454,10 +535,10 @@ async def test_poc():
     vuln_id = await store_vulnerability_in_database(crs_instance, task, analyzed_vuln)
     
     # Phase 7: Save workflow data
-    workflow_data, workflow_file = save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyzed_vuln)
+    workflow_data, workflow_file = save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyzed_vuln, arvo_id)
     
     # Phase 8: Run patching agent
-    workflow_data = await run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow_data, workflow_file)
+    workflow_data = await run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow_data, workflow_file, arvo_id)
     
     # Print summary
     print_summary(vuln_id, analyzed_vuln, decoded_pov, workflow_data)
@@ -465,4 +546,6 @@ async def test_poc():
     return crash_result, pov_run_data, decoded_pov, analyzed_vuln, vuln_id
 
 if __name__ == "__main__":
-    asyncio.run(test_poc())
+    # Get ARVO ID from command line arguments (already loaded in CONFIG)
+    arvo_id = CONFIG['arvo_id']
+    asyncio.run(test_poc(arvo_id))
