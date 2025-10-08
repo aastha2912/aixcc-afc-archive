@@ -694,6 +694,11 @@ class Project:
             else:
                 stdio_fd = None
 
+            # (aastham) ARVO Integration: Check if we're in ARVO mode
+            data_dir = config.CACHE_DIR / "data" / self.ossfuzz_hash / self.name
+            arvo_marker = data_dir / "arvo_workdir.txt"
+            is_arvo_mode = await arvo_marker.exists()
+            
             # wrap ALL compiles with theori_compile.sh to allow commands to run before build.sh
             mounts[config.THEORI_COMPILE] = "/usr/local/bin/theori_compile.sh"
             compile_commands = ["theori_compile.sh"]
@@ -703,7 +708,16 @@ class Project:
                 if self.info.language in {"c", "c++"}:
                     mounts[config.BEAR_PATH / "usr/lib/x86_64-linux-gnu/bear/"] = "/usr/lib/x86_64-linux-gnu/bear/"
                     mounts[config.BEAR_PATH / "usr/bin/bear"] = "/opt/bear"
-                    compile_commands = ["python3", "/opt/bear", "-o", "/src/compile_commands.json","theori_compile.sh"]
+                    
+                    # (aastham) ARVO Integration: Use 'arvo compile' instead of 'theori_compile.sh' for ARVO
+                    # ARVO images have their own compilation workflow via 'arvo compile'
+                    # This command knows how to rebuild the project correctly in the ARVO environment
+                    if is_arvo_mode:
+                        compile_commands = ["/opt/bear", "-o", "/src/compile_commands.json", "arvo", "compile"]
+                        logger.info(f"ARVO bear build: Using 'bear arvo compile' instead of 'bear theori_compile.sh'")
+                    else:
+                        compile_commands = ["python3", "/opt/bear", "-o", "/src/compile_commands.json","theori_compile.sh"]
+                    
                     include_dirs = ["compile_commands.json"]
                     workdir = await self.get_working_dir()
                     if workdir.is_ok():
@@ -713,10 +727,29 @@ class Project:
 
             reader = process.Reader()
             try:
-                async with docker.run(self.build_image, env=build_config.to_dict(), mounts=mounts, timeout=timeout, scope=scope) as run:
-                    # materialize /src vfs in container
-                    vfs = self.vfs.parent if using_bear else self.vfs
-                    require(await docker.vwrite_layers(run, "/src", await vfs.layers()))
+                # (aastham) ARVO Integration: Don't override environment for ARVO bear builds
+                # ARVO images have their own environment setup (CXXFLAGS, compiler paths, etc.)
+                # If we override with build_config.to_dict(), it breaks C++ compilation
+                build_env = {} if (using_bear and is_arvo_mode) else build_config.to_dict()
+                
+                async with docker.run(self.build_image, env=build_env, mounts=mounts, timeout=timeout, scope=scope) as run:
+                    # (aastham) ARVO Integration: Skip /src overwrite for ARVO bear builds
+                    # Background: ARVO images have prebuilt binaries with a specific build state in /src
+                    # If we overwrite /src with our VFS, it breaks 'arvo compile' because:
+                    # 1. Build artifacts (.o files, Makefiles state, etc.) get replaced
+                    # 2. 'arvo compile' expects the original build configuration
+                    # 3. Mismatch causes compilation failures
+                    # 
+                    # Solution: For ARVO bear builds, preserve original /src so 'bear arvo compile' succeeds
+                    skip_src_overwrite = using_bear and is_arvo_mode
+                    
+                    if skip_src_overwrite:
+                        logger.info(f"ARVO bear build: Preserving original /src to maintain build state")
+                    
+                    # materialize /src vfs in container (skip for ARVO bear builds)
+                    if not skip_src_overwrite:
+                        vfs = self.vfs.parent if using_bear else self.vfs
+                        require(await docker.vwrite_layers(run, "/src", await vfs.layers()))
 
                     proc = await run.exec(*compile_commands, stdout=stdio_fd, stderr=stdio_fd)
                     reader = process.Reader(proc)
@@ -787,23 +820,9 @@ class Project:
         if self.info.language not in {"c", "c++"}:
             return None
         
-        # (aastham) ARVO Integration: Skip bear build for ARVO prebuilt projects
-        # Background: bear build intercepts compilation to generate compile_commands.json
-        # This provides precise compiler flags and AST-based code navigation
-        # 
-        # Why skip for ARVO:
-        # 1. ARVO images contain prebuilt binaries - recompiling would require matching exact build state
-        # 2. Running 'bear arvo compile' fails due to overwritten /src causing state mismatches
-        # 3. Even if successful, bear builds are slow (2-5 minutes per project)
-        # 4. CRS falls back to text-based navigation (regex/GTags) which works well enough
-        # 
-        # Impact: Slightly less precise cross-file references, but core functionality preserved
-        # Trade-off: Lose ~10% precision but gain 100% reliability and 10x speed improvement
-        data_dir = config.CACHE_DIR / "data" / self.ossfuzz_hash / self.name
-        arvo_marker = data_dir / "arvo_workdir.txt"
-        if await arvo_marker.exists():
-            logger.info(f"Using ARVO prebuilt image, skipping bear build")
-            return None  # Return None signals "no bear build available, use fallback navigation"
+        # (aastham) ARVO Integration: Bear build now works with ARVO!
+        # The fix is in _build() where we skip overwriting /src for ARVO bear builds
+        # This preserves ARVO's original build state so 'arvo compile' succeeds
         
         build_config = self.info.default_build_config
         state = await self.edit_state()
