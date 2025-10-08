@@ -86,8 +86,200 @@ FUZZER_NAME = CONFIG['fuzzer_name']
 # END CONFIGURATION LOADING
 # =============================================================================
 
+def pull_arvo_image_if_needed(arvo_image_name: str) -> bool:
+    """
+    Pull ARVO Docker image if it doesn't exist locally.
+    
+    Returns:
+        True if image is available (existed or pulled successfully)
+        False if pull failed
+    """
+    import subprocess
+    
+    print("Checking for ARVO image...")
+    proc_check = subprocess.run(
+        ["docker", "image", "inspect", arvo_image_name],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    
+    if proc_check.returncode != 0:
+        # Image does not exist locally, pull it
+        print(f"Pulling ARVO image: {arvo_image_name}")
+        proc_pull = subprocess.run(
+            ["docker", "pull", arvo_image_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        if proc_pull.returncode != 0:
+            print(f"Failed to pull ARVO image: {proc_pull.stderr.decode()}")
+            return False
+        else:
+            print(f"Successfully pulled ARVO image")
+            return True
+    else:
+        print(f"ARVO image already exists locally")
+        return True
+
+
+async def extract_arvo_source_and_workdir(arvo_image_name: str, project_name: str, ossfuzz_hash: str):
+    """
+    Extract source code from ARVO image and save workdir marker.
+    
+    This creates:
+    - src.tar: Source code from ARVO /src (CRS will skip Dockerfile build)
+    - arvo_workdir.txt: Workdir marker (signals ARVO mode to project.py)
+    
+    Returns:
+        True if extraction succeeded, False otherwise
+    """
+    from pathlib import Path as StdPath
+    from crs import config
+    from crs.common import docker
+    
+    # Calculate cache directory (same logic as TestProject.from_dir)
+    data_dir = StdPath(config.CACHE_DIR) / "data" / ossfuzz_hash / project_name
+    data_dir.mkdir(parents=True, exist_ok=True)
+    
+    src_tar_path = data_dir / "src.tar"
+    workdir_marker = data_dir / "arvo_workdir.txt"
+    
+    # Get workdir from ARVO image metadata
+    # This is needed because we won't build the Dockerfile to get it
+    print(f"Getting workdir from ARVO image...")
+    async with docker.scope(timeout=120) as scope:
+        workdir_result = await docker.get_image_workdir(scope, arvo_image_name)
+        if workdir_result.is_err():
+            print(f"Failed to get workdir from ARVO image: {workdir_result.err()}")
+            return False
+        
+        workdir = workdir_result.unwrap()
+        # Save workdir marker - tells project.py we're in ARVO mode
+        with open(workdir_marker, "w") as f:
+            f.write(workdir)
+        print(f"Saved ARVO workdir marker: {workdir}")
+    
+    # Extract /src from ARVO image if not already cached
+    if not src_tar_path.exists():
+        print(f"Extracting source code from ARVO image to {src_tar_path}...")
+        async with docker.run(arvo_image_name, timeout=60, group=docker.DockerGroup.Misc) as run:
+            # Run tar inside ARVO container to package /src
+            proc = await run.exec(
+                "tar", "cf", "-", "--transform", r"s/^\.\///", "-C", "/src", ".",
+                stdout=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            
+            if proc.returncode != 0:
+                print(f"Failed to extract /src from ARVO image")
+                return False
+            
+            # Save to cache location where project.py expects it
+            # When project.py checks "if src.tar exists", it will find this and skip Dockerfile build
+            with open(src_tar_path, "wb") as f:
+                f.write(stdout)
+            print(f"Extracted source code from ARVO image")
+            print(f"CRS will detect src.tar and skip Dockerfile build entirely")
+    else:
+        print(f"Source code already cached at {src_tar_path}")
+    
+    return True
+
+
+async def extract_arvo_binaries(task, arvo_image_name: str) -> bool:
+    """
+    Extract prebuilt binaries from ARVO /out directory.
+    
+    For each build config (address sanitizer, undefined sanitizer, etc.),
+    extracts the prebuilt fuzzers and saves to CRS's build cache.
+    
+    Returns:
+        True if extraction succeeded, False otherwise
+    """
+    from crs.common import docker
+    from crs.common.types import Ok, Err
+    
+    print(f"\nExtracting prebuilt binaries (/out) from ARVO image...")
+    
+    try:
+        async with docker.scope(timeout=300) as scope:
+            # Extract build artifacts for each build config
+            # ARVO images have the vulnerable version already compiled in /out
+            for build_config in task.project.info.build_configs:
+                # Get the expected tar path for this build config
+                # CRS checks if this exists to skip compilation
+                build_tar_path = await task.project.get_build_tar(build_config)
+                
+                # Skip if we already have this build cached
+                if await build_tar_path.exists():
+                    print(f"Build artifacts for {build_config.SANITIZER} already cached at {build_tar_path}")
+                    continue
+                
+                # Run a container from the ARVO image and copy /out directory
+                async with docker.run(arvo_image_name, timeout=60, group=docker.DockerGroup.Misc) as run:
+                    # Extract /out from the container (contains prebuilt fuzzers)
+                    proc = await run.exec(
+                        "tar", "cf", "-", "--transform", r"s/^\.\///", "-C", "/out", ".",
+                        stdout=asyncio.subprocess.PIPE,
+                    )
+                    
+                    # Write tar to file
+                    stdout, _ = await proc.communicate()
+                    
+                    if proc.returncode != 0:
+                        print(f"Failed to extract build artifacts for {build_config.SANITIZER}")
+                        return False
+                    
+                    # Write to the expected build tar path so build() will use the cache
+                    # When CRS calls build(), it will find this and skip compilation
+                    with open(build_tar_path, "wb") as f:
+                        f.write(stdout)
+                    print(f"Extracted prebuilt binaries for {build_config.SANITIZER}")
+            
+            print("\n✓ Successfully setup from ARVO prebuilt image:")
+            print("  - Source code extracted from /src (Dockerfile build skipped)")
+            print("  - Binaries extracted from /out (compilation skipped)")
+            print("  - Context retrieval and patching will use ARVO vulnerable version")
+            return True
+    
+    except Exception as e:
+        print(f"Error extracting binaries from ARVO image: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def find_fuzzer_index(harness_list, fuzzer_name: str) -> int:
+    """
+    Find the index of the specified fuzzer in the harness list.
+    
+    Returns:
+        Index of the fuzzer, or None if not found
+    """
+    harness_names = [h.name for h in harness_list]
+    
+    for i, name in enumerate(harness_names):
+        if name == fuzzer_name:
+            return i
+    
+    return None
+
+
 async def setup_project_and_harnesses():
-    """Phase 1: Setup project and find harnesses using prebuilt ARVO image"""
+    """
+    Phase 1: Setup project and find harnesses using ARVO prebuilt image.
+    
+    This function orchestrates the setup process:
+    1. Pull ARVO prebuilt Docker image if needed
+    2. Extract source code from ARVO /src (skips Dockerfile build)
+    3. Extract binaries from ARVO /out (skips compilation)
+    4. Load project using CRS (which finds our cached extracts)
+    5. Initialize harnesses and find the target fuzzer
+    
+    Returns:
+        (task, harness_list, fuzzer_index) if successful
+        (None, None, None) if setup failed
+    """
     print("\n" + "="*60)
     print("PHASE 1: SETTING UP PROJECT AND HARNESSES")
     print("="*60)
@@ -96,7 +288,9 @@ async def setup_project_and_harnesses():
     print(f"  POC File: {POC_FILE}")
     print(f"  Fuzzer: {FUZZER_NAME}")
     
-    # Check if we should use prebuilt ARVO image
+    # =========================================================================
+    # Step 1: Check configuration and prepare for ARVO prebuilt mode
+    # =========================================================================
     use_prebuilt_image = CONFIG.get('use_prebuilt_image', True)
     arvo_image_name = CONFIG.get('arvo_image_name', None)
     
@@ -106,54 +300,34 @@ async def setup_project_and_harnesses():
         print(f"  Will build project from source")
     print("="*60)
     
-    # Check if we should use prebuilt ARVO image BEFORE loading project
-    # This allows us to potentially skip building the Dockerfile
     prebuilt_setup_done = False
     
+    # =========================================================================
+    # Step 2: Pull ARVO Docker image if using prebuilt mode
+    # =========================================================================
     if use_prebuilt_image and arvo_image_name:
-        # Try to setup using ARVO prebuilt image BEFORE building Dockerfile
         print(f"Attempting to use prebuilt ARVO image: {arvo_image_name}")
         print("This will extract both /src (source code) and /out (binaries) to skip Dockerfile build")
         
-        import subprocess
-        from crs import config
-        from crs.common import docker
+        # Pull image using helper function
+        if not pull_arvo_image_if_needed(arvo_image_name):
+            print("Will build from source using Dockerfile...")
+            use_prebuilt_image = False
         
-        # First check if image exists locally, if not pull it
-        print("Checking for ARVO image...")
-        proc_check = subprocess.run(
-            ["docker", "image", "inspect", arvo_image_name],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        
-        if proc_check.returncode != 0:
-            # Image does not exist locally, pull it
-            print(f"Pulling ARVO image: {arvo_image_name}")
-            proc_pull = subprocess.run(
-                ["docker", "pull", arvo_image_name],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            if proc_pull.returncode != 0:
-                print(f"Failed to pull ARVO image: {proc_pull.stderr.decode()}")
-                print("Will build from source using Dockerfile...")
-                use_prebuilt_image = False
-            else:
-                print(f"Successfully pulled ARVO image")
-        else:
-            print(f"ARVO image already exists locally")
-        
-        # Extract /src from ARVO image to avoid Dockerfile build
+        # =====================================================================
+        # Step 3: Extract source code and workdir from ARVO image
+        # =====================================================================
         if use_prebuilt_image:
             try:
-                # Calculate the data directory where src.tar should be stored
-                # This matches what _init_project_data expects
+                # Calculate ossfuzz_hash - needed to determine cache location
+                # This must match what TestProject.from_dir() calculates
                 from pathlib import Path as StdPath
                 import hashlib
+                import subprocess
                 
-                # Calculate ossfuzz_hash (same logic as TestProject.from_dir)
                 projects_dir = StdPath(PROJECT_DIR).parent
+                
+                # Get git hash and diff of projects directory
                 proc_hash = subprocess.run(
                     ["git", "-C", str(projects_dir.absolute()), "log", "-1", "--pretty=format:'%H'", str(projects_dir.absolute())],
                     stdout=subprocess.PIPE,
@@ -168,139 +342,59 @@ async def setup_project_and_harnesses():
                 )
                 git_diff = proc_diff.stdout
                 
+                # Calculate hash - this determines cache directory
                 h = hashlib.sha256()
                 h.update(git_hash)
                 h.update(git_diff)
                 ossfuzz_hash = h.hexdigest()
                 
-                # Get project name
                 project_name = StdPath(PROJECT_DIR).name
-                data_dir = StdPath(config.CACHE_DIR) / "data" / ossfuzz_hash / project_name
-                data_dir.mkdir(parents=True, exist_ok=True)
                 
-                src_tar_path = data_dir / "src.tar"
-                
-                # ALWAYS save workdir marker when using ARVO prebuilt
-                workdir_marker = data_dir / "arvo_workdir.txt"
-                
-                # Get workdir from ARVO image (needed even if src.tar cached)
-                print(f"Getting workdir from ARVO image...")
-                async with docker.scope(timeout=120) as scope:
-                    workdir_result = await docker.get_image_workdir(scope, arvo_image_name)
-                    if workdir_result.is_err():
-                        print(f"Failed to get workdir from ARVO image: {workdir_result.err()}")
-                        use_prebuilt_image = False
-                    else:
-                        workdir = workdir_result.unwrap()
-                        # ALWAYS save workdir marker so project.py knows to use ARVO
-                        with open(workdir_marker, "w") as f:
-                            f.write(workdir)
-                        print(f"Saved ARVO workdir marker: {workdir}")
-                
-                # Extract /src if not already cached
-                if not src_tar_path.exists():
-                    print(f"Extracting source code from ARVO image to {src_tar_path}...")
-                    async with docker.run(arvo_image_name, timeout=60, group=docker.DockerGroup.Misc) as run:
-                        # Extract /src directory
-                        proc = await run.exec(
-                            "tar", "cf", "-", "--transform", r"s/^\.\///", "-C", "/src", ".",
-                            stdout=asyncio.subprocess.PIPE,
-                        )
-                        stdout, _ = await proc.communicate()
-                        
-                        if proc.returncode != 0:
-                            print(f"Failed to extract /src from ARVO image")
-                            print("Will build from source using Dockerfile...")
-                            use_prebuilt_image = False
-                        else:
-                            # Write src.tar so _init_project_data will skip building
-                            with open(src_tar_path, "wb") as f:
-                                f.write(stdout)
-                            print(f"Extracted source code from ARVO image")
-                            prebuilt_setup_done = True
-                else:
-                    print(f"Source code already cached at {src_tar_path}")
+                # Extract source and workdir using helper function
+                if await extract_arvo_source_and_workdir(arvo_image_name, project_name, ossfuzz_hash):
                     prebuilt_setup_done = True
+                else:
+                    use_prebuilt_image = False
+                    print("Will build from source using Dockerfile...")
                     
             except Exception as e:
-                print(f"Error extracting source from ARVO image: {e}")
+                print(f"Error during ARVO setup: {e}")
                 import traceback
                 traceback.print_exc()
                 print("Will build from source using Dockerfile...")
                 use_prebuilt_image = False
     
-    # Load project (this may build Dockerfile if we're not using prebuilt)
+    # =========================================================================
+    # Step 4: Load project using CRS
+    # =========================================================================
+    # At this point, if we extracted src.tar, CRS will find it and skip Dockerfile build
     project = await TestProject.from_dir(PROJECT_DIR)
     task = await project.task()
     
-    # If using ARVO prebuilt, replace build_image with ARVO image
-    # This ensures all subsequent docker operations use ARVO image, not non-existent CRS image
+    # =========================================================================
+    # Step 5: Override build_image to use ARVO container for all operations
+    # =========================================================================
+    # CRS generates image names like "libraw:abc123" which don't exist
+    # We override to use ARVO image which has everything
     if use_prebuilt_image and arvo_image_name and prebuilt_setup_done:
         print(f"Setting build_image to ARVO image: {arvo_image_name}")
         task.project.build_image = arvo_image_name
         print(f"All build operations will now use ARVO prebuilt image")
     
-    # Extract /out artifacts from ARVO image if we successfully extracted /src
+    # =========================================================================
+    # Step 6: Extract prebuilt binaries from ARVO /out
+    # =========================================================================
+    # Extract fuzzers for each sanitizer (address, undefined, etc.)
     if use_prebuilt_image and arvo_image_name and prebuilt_setup_done:
-        print(f"\nExtracting prebuilt binaries (/out) from ARVO image...")
-        
-        # Pull the prebuilt ARVO image and extract artifacts
-        from crs.common import docker
-        from crs.common.types import Ok, Err
-        
-        try:
-            # Use docker scope to manage the container lifecycle
-            async with docker.scope(timeout=300) as scope:
-                # Extract build artifacts for each build config
-                # ARVO images have the vulnerable version already compiled in /out
-                for build_config in task.project.info.build_configs:
-                    # Get the expected tar path for this build config
-                    build_tar_path = await task.project.get_build_tar(build_config)
-                    
-                    # Skip if we already have this build cached
-                    if await build_tar_path.exists():
-                        print(f"Build artifacts for {build_config.SANITIZER} already cached at {build_tar_path}")
-                        continue
-                    
-                    # Run a container from the ARVO image and copy /out directory
-                    async with docker.run(arvo_image_name, timeout=60, group=docker.DockerGroup.Misc) as run:
-                        # Extract /out from the container (contains prebuilt fuzzers)
-                        proc = await run.exec(
-                            "tar", "cf", "-", "--transform", r"s/^\.\///", "-C", "/out", ".",
-                            stdout=asyncio.subprocess.PIPE,
-                        )
-                        
-                        # Write tar to file
-                        stdout, _ = await proc.communicate()
-                        
-                        if proc.returncode != 0:
-                            print(f"Failed to extract build artifacts for {build_config.SANITIZER}")
-                            print("Falling back to building from source...")
-                            use_prebuilt_image = False
-                            break
-                        else:
-                            # Write to the expected build tar path so build() will use the cache
-                            with open(build_tar_path, "wb") as f:
-                                f.write(stdout)
-                            print(f"Extracted prebuilt binaries for {build_config.SANITIZER}")
-                
-                if use_prebuilt_image:
-                    print("\n✓ Successfully setup from ARVO prebuilt image:")
-                    print("  - Source code extracted from /src (Dockerfile build skipped)")
-                    print("  - Binaries extracted from /out (compilation skipped)")
-                    print("  - Context retrieval and patching will use ARVO vulnerable version")
-        
-        except Exception as e:
-            print(f"Error extracting binaries from ARVO image: {e}")
-            import traceback
-            traceback.print_exc()
+        if not await extract_arvo_binaries(task, arvo_image_name):
             print("Falling back to building from source...")
             use_prebuilt_image = False
     
-    # Note: init_harness_info() will call build_all()
-    # If we extracted prebuilt artifacts above, build() will find the cached tars and skip building
-    
-    # Initialize harness info
+    # =========================================================================
+    # Step 7: Initialize harnesses (CRS scans binaries to find fuzzers)
+    # =========================================================================
+    # Note: init_harness_info() calls build_all() internally
+    # Since we pre-populated build caches, it will use those instead of compiling
     print("Initializing harnesses...")
     harnesses = await task.project.init_harness_info()
     if harnesses.is_err():
@@ -313,12 +407,10 @@ async def setup_project_and_harnesses():
     for i, name in enumerate(harness_names):
         print(f"  {i}: {name}")
     
-    # Find the specified fuzzer harness
-    fuzzer_index = None
-    for i, name in enumerate(harness_names):
-        if name == FUZZER_NAME:
-            fuzzer_index = i
-            break
+    # =========================================================================
+    # Step 8: Find the fuzzer specified in configuration
+    # =========================================================================
+    fuzzer_index = find_fuzzer_index(harness_list, FUZZER_NAME)
     
     if fuzzer_index is None:
         print(f"Fuzzer harness '{FUZZER_NAME}' not found!")
