@@ -31,18 +31,33 @@ class Editor:
         Return a unified diff of all changes that have been applied to the `repo`.
         `repo` must be a relative path to git repository contained in `self.base_dir`.
         """
+        from crs_rust import logger
         repo = os.path.normpath(repo)
         vfs = self.vfs
         parent_vfs = vfs.parent
         chunks: list[str] = []
+        
+        logger.info(f"get_repo_diff called with repo='{repo}'")
+        logger.info(f"vfs.files has {len(vfs.files)} modified files: {list(vfs.files.keys())}")
+        
         for path in vfs.files.keys():
-            if not path.startswith(f"{repo}/"):
+            # (aastham) When repo is ".", all files belong to this repo (WORKDIR=/src case)
+            # Otherwise, only include files that start with "{repo}/"
+            if repo != "." and not path.startswith(f"{repo}/"):
+                logger.info(f"Skipping path '{path}' - doesn't start with '{repo}/'")
                 continue
+            logger.info(f"Generating diff for '{path}'")
             a = await parent_vfs.read(path)
             b = await vfs.read(path)
-            diff_chunk = (await virtual_diff(os.path.relpath(path, repo), a, b)).expect("diff failed")
+            # (aastham) For repo=".", path is already relative to repo root
+            # For other repos, make path relative to repo
+            rel_path = path if repo == "." else os.path.relpath(path, repo)
+            diff_chunk = (await virtual_diff(rel_path, a, b)).expect("diff failed")
             chunks.append(diff_chunk)
-        return "".join(chunks)
+        
+        result = "".join(chunks)
+        logger.info(f"get_repo_diff returning {len(result)} characters")
+        return result
 
     def fixup_line(self, path: str, line: int, is_start: bool = False) -> int:
         for patch in self.patches:
