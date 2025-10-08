@@ -1,5 +1,5 @@
 {
-  "vuln_id": 23,
+  "vuln_id": 3,
   "crash_result": {
     "output": "+ FUZZER=fuzz_json_decode\n+ shift\n+ '[' '!' -v TESTCASE ']'\n+ TESTCASE=/testcase\n+ '[' '!' -f /testcase ']'\n+ export RUN_FUZZER_MODE=interactive\n+ RUN_FUZZER_MODE=interactive\n+ export FUZZING_ENGINE=libfuzzer\n+ FUZZING_ENGINE=libfuzzer\n+ export SKIP_SEED_CORPUS=1\n+ SKIP_SEED_CORPUS=1\n+ run_fuzzer fuzz_json_decode /testcase\nsysctl: setting key \"vm.mmap_rnd_bits\", ignoring: Read-only file system\n/out/fuzz_json_decode: Running 1 inputs 1 time(s) each.\nRunning: /testcase\n============================",
     "stack": "#0 in String_clear /src/open62541/src/ua_types.c:140:24\n#1 in LocalizedText_clear /src/open62541/src/ua_types.c:797\n#2 in UA_clear /src/open62541/src/ua_types.c:1041:5\n#3 in UA_Array_delete /src/open62541/src/ua_types.c:1108\n#4 in Variant_clear /src/open62541/src/ua_types.c:421\n#5 in UA_clear /src/open62541/src/ua_types.c:1041:5\n#6 in UA_decodeJson /src/open62541/src/ua_types_encoding_json.c:3340:9\n#7 in LLVMFuzzerTestOneInput /src/open62541/tests/fuzz/fuzz_json_decode.cc:26:28\n#8 in fuzzer::Fuz",
@@ -22,14 +22,14 @@
     "dedup": "String_clear--LocalizedText_clear--UA_clear--UA_Array_delete--Variant_clear==free--Variant_decodeJsonUnwrapExtensionObject--decodeFields--Variant_decodeJson--UA_decodeJson==__interceptor_calloc--UA_memoryManager_calloc--Variant_decodeJsonUnwrapExtensionObject--decodeFields--Variant_decodeJson"
   },
   "analyzed_vuln": {
-    "function": "Variant_clear",
-    "file": "open62541/src/ua_types.c",
-    "description": "The vulnerability is a heap-use-after-free caused by a memory management issue in the 'Variant_clear' function, which attempts to access freed memory. Specifically, the 'p->data' field is accessed after it has already been freed, leading to undefined behavior when 'p->arrayLength' is zero. This is triggered by improper handling of memory in 'Variant_decodeJsonUnwrapExtensionObject' that can lead to a premature free of the 'data' field.",
-    "conditions": "The vulnerability can be triggered when the function 'Variant_decodeJson' calls 'Variant_clear' without proper checks on the 'p->data' and 'p->arrayLength' fields, particularly when decoding JSON structures that result in an empty variant."
+    "function": "Variant_decodeJsonUnwrapExtensionObject",
+    "file": "open62541/src/ua_types_encoding_json.c",
+    "description": "Heap use-after-free vulnerability occurs when the Variant_clear function is called on a UA_Variant structure that holds a pointer to already freed memory. Specifically, the issue arises in the Variant_clear function when it tries to delete the data in a UA_Variant without checking if the data has already been freed, leading to an attempt to access and clear freed memory.",
+    "conditions": "This vulnerability is triggered when the UA_decodeJson function processes a JSON input that leads to the UA_Variant structure being cleared without proper memory management. If the JSON parsing does not correctly allocate or manage memory for the variants, it can result in freeing memory that is still referenced, causing subsequent calls to access invalid memory."
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/ua_types_encoding_json.c\n+++ b/src/ua_types_encoding_json.c\n@@ -2735,6 +2735,8 @@\n         \n         DecodeEntry entries[2] = {{UA_JSONKEY_TYPE, NULL, NULL, false, NULL},\n             {UA_JSONKEY_BODY, dst->data, (decodeJsonSignature) decodeJsonInternal, false, NULL}};\n+        if (dst->arrayLength == 0) // Check for empty array length to avoid use-after-free\n+            return UA_STATUSCODE_BADDECODINGERROR;\n         ret = decodeFields(ctx, parseCtx, entries, 2, bodyType);\n     } else { /* extensionObject */\n         DecodeEntry entries[2] = {{UA_JSONKEY_TYPE, NULL, NULL, false, NULL},\n--- a/src/ua_types.c\n+++ b/src/ua_types.c\n@@ -417,6 +417,7 @@\n         return;\n     if(p->type && p->data > UA_EMPTY_ARRAY_SENTINEL) {\n         if(p->arrayLength == 0)\n+            return; // Prevent accessing freed memory when arrayLength is zero\n             p->arrayLength = 1;\n         UA_Array_delete(p->data, p->arrayLength, p->type);\n         p->data = NULL;\n",
+    "patch": "--- a/src/ua_types.c\n+++ b/src/ua_types.c\n@@ -415,7 +415,7 @@\n Variant_clear(UA_Variant *p, const UA_DataType *_) {\n     if(p->storageType != UA_VARIANT_DATA)\n         return;\n-    if(p->type && p->data > UA_EMPTY_ARRAY_SENTINEL) {\n+    if(p->type && p->data != NULL && p->data > UA_EMPTY_ARRAY_SENTINEL) {\n         if(p->arrayLength == 0)\n             p->arrayLength = 1;\n         UA_Array_delete(p->data, p->arrayLength, p->type);\n",
     "build_artifacts_count": 0,
     "tested_povs_count": 1
   },
@@ -39,28 +39,15 @@
       {
         "tool_name": "read_definition",
         "args": [
-          "Variant_decodeJson",
-          "open62541/src/ua_types_encoding_json.c",
-          2753,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 13571.119795856,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found, extra=None))"
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "Variant_clear",
+          "UA_clear",
           "open62541/src/ua_types.c",
-          726,
+          null,
           true
         ],
         "kwargs": {},
-        "timestamp": 13572.657482023,
+        "timestamp": 338.101914611,
         "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n415 Variant_clear(UA_Variant *p, const UA_DataType *_) {, extra=None))"
+        "result_summary": "Ok({'contents': '1039 void\\n1040 UA_clear(void *p, const UA_DataType *type) {\\n1041     clearJumpTable[type->typeKind](p, type);\\n1042     memset(p, 0, type->memSize); /* init */\\n1043 }', 'line_start..."
       },
       {
         "tool_name": "read_definition",
@@ -71,147 +58,61 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 13576.414049483,
+        "timestamp": 339.564784903,
         "success": true,
         "result_summary": "Ok({'contents': '414 static void\\n415 Variant_clear(UA_Variant *p, const UA_DataType *_) {\\n416     if(p->storageType != UA_VARIANT_DATA)\\n417         return;\\n418     if(p->type && p->data > UA_EMPTY..."
       },
       {
         "tool_name": "read_definition",
         "args": [
-          "Variant_decodeJson",
+          "Variant_decodeJsonUnwrapExtensionObject",
           "open62541/src/ua_types_encoding_json.c",
           null,
           true
         ],
         "kwargs": {},
-        "timestamp": 13577.960475234,
+        "timestamp": 342.122550946,
         "success": true,
-        "result_summary": "Err(CRSError(Definition not found, extra=None))"
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "Variant_decodeJson",
-          "open62541/src/ua_types_encoding_json.c",
-          null,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 13580.531467068,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found, extra=None))"
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "Variant_decodeJson",
-          "open62541/src/ua_types_encoding_json.c",
-          2753,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 13584.69691507,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found, extra=None))"
+        "result_summary": "Ok({'contents': '2917 static status\\n2918 Variant_decodeJsonUnwrapExtensionObject(UA_Variant *dst, const UA_DataType *type, \\n2919                                         CtxJson *ctx, ParseCtx *parse..."
       }
     ],
-    "read_source": [
-      {
-        "tool_name": "read_source",
-        "args": [
-          "open62541/src/ua_types_encoding_json.c",
-          2700
-        ],
-        "kwargs": {},
-        "timestamp": 13585.459388154,
-        "success": true,
-        "result_summary": "Ok({'contents': '2601     return UA_STATUSCODE_GOOD;\\n2602 }\\n2603 \\n2604 DECODE_JSON(StatusCode) {\\n2605     status ret = DECODE_DIRECT_JSON(dst, UInt32);\\n2606     if(ret != UA_STATUSCODE_GOOD)\\n260..."
-      }
-    ],
+    "read_source": [],
     "find_references": [
       {
         "tool_name": "find_references",
         "args": [
-          "Variant_decodeJson",
-          "src/open62541/src/ua_types_encoding_json.c",
-          false
-        ],
-        "kwargs": {},
-        "timestamp": 13552.595810848,
-        "success": true,
-        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: open62541/src/ua_types_encoding_json.c, extra=None))"
-      },
-      {
-        "tool_name": "find_references",
-        "args": [
           "Variant_clear",
-          "src/open62541/src/ua_types.c",
+          "open62541/src/ua_types_encoding_json.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 13552.597842389,
+        "timestamp": 325.220144272,
         "success": true,
         "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: open62541/src/ua_types.c, extra=None))"
       },
       {
         "tool_name": "find_references",
         "args": [
-          "Variant_decodeJson",
-          "src/open62541/src/ua_types_encoding_json.c",
-          true
+          "UA_clear",
+          "open62541/src/ua_types.c",
+          false
         ],
         "kwargs": {},
-        "timestamp": 13554.907237432,
+        "timestamp": 332.742748734,
         "success": true,
-        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: open62541/src/ua_types_encoding_json.c, extra=None))"
+        "result_summary": "Ok([FileReferences(file_name='open62541/src/ua_types.c', refs=[FileReference(line=977, content='        UA_clear(dst, type);', enclosing_definition='UA_copy'), FileReference(line=1108, content='      ..."
       },
       {
         "tool_name": "find_references",
         "args": [
           "Variant_clear",
-          "src/open62541/src/ua_types.c",
-          true
+          "open62541/src/ua_types.c",
+          false
         ],
         "kwargs": {},
-        "timestamp": 13554.90810239,
-        "success": true,
-        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: open62541/src/ua_types.c, extra=None))"
-      },
-      {
-        "tool_name": "find_references",
-        "args": [
-          "Variant_decodeJson",
-          null,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 13564.099458936,
-        "success": true,
-        "result_summary": "Ok([FileReferences(file_name='open62541/src/ua_types_encoding_json.c', refs=[FileReference(line=2753, content='       {UA_JSONKEY_VALUE, &dst->value, (decodeJsonSignature) Variant_decodeJson, false, N..."
-      },
-      {
-        "tool_name": "find_references",
-        "args": [
-          "Variant_clear",
-          null,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 13567.402114312,
+        "timestamp": 334.230763193,
         "success": true,
         "result_summary": "Ok([FileReferences(file_name='open62541/src/ua_types.c', refs=[FileReference(line=726, content='            Variant_clear(dst, NULL);', enclosing_definition='UA_Variant_copyRange'), FileReference(line..."
-      },
-      {
-        "tool_name": "find_references",
-        "args": [
-          "Variant_decodeJson",
-          "open62541/src/ua_types_encoding_json.c",
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 13581.951086194,
-        "success": true,
-        "result_summary": "Ok([FileReferences(file_name='open62541/src/ua_types_encoding_json.c', refs=[FileReference(line=2753, content='       {UA_JSONKEY_VALUE, &dst->value, (decodeJsonSignature) Variant_decodeJson, false, N..."
       }
     ],
     "apply_patch": [
@@ -219,76 +120,23 @@
         "tool_name": "apply_patch",
         "args": [
           "open62541/src/ua_types.c",
-          "@@ -414,8 +414,10 @@\n static void\n Variant_clear(UA_Variant *p, const UA_DataType *_)\n {\n     if(p->storageType != UA_VARIANT_DATA)\n         return;\n     if(p->type && p->data > UA_EMPTY_ARRAY_SENTINEL) {\n         if(p->arrayLength == 0)\n -            p->arrayLength = 1;\n +            return; // Prevent accessing freed memory when arrayLength is zero\n         UA_Array_delete(p->data, p->arrayLength, p->type);\n         p->data = NULL;\n     }\n     if((void*)p->arrayDimensions > UA_EMPTY_ARRAY_SENTINEL)\n         UA_free(p->arrayDimensions);\n }"
+          "@@ -414,7 +414,9 @@\n static void\n Variant_clear(UA_Variant *p, const UA_DataType *_) {\n     if(p->storageType != UA_VARIANT_DATA)\n         return;\n-    if(p->type && p->data > UA_EMPTY_ARRAY_SENTINEL) {\n+    if(p->type && p->data != NULL && p->data > UA_EMPTY_ARRAY_SENTINEL) {\n         if(p->arrayLength == 0)\n             p->arrayLength = 1;\n         UA_Array_delete(p->data, p->arrayLength, p->type);"
         ],
         "kwargs": {},
-        "timestamp": 13596.17087345,
-        "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 414): The patch context lines have introduced a typographic error. The context you provided removed `)`. Please double check ..."
-      },
-      {
-        "tool_name": "apply_patch",
-        "args": [
-          "open62541/src/ua_types_encoding_json.c",
-          "@@ -2738,6 +2738,8 @@\n         }\n         \n         DecodeEntry entries[2] = {{UA_JSONKEY_TYPE, NULL, NULL, false, NULL},\n             {UA_JSONKEY_BODY, dst->data, (decodeJsonSignature) decodeJsonInternal, false, NULL}};\n +        if (dst->arrayLength == 0) // Check for empty array length to avoid use-after-free\n +            return UA_STATUSCODE_BADDECODINGERROR;\n         ret = decodeFields(ctx, parseCtx, entries, 2, bodyType);\n     } else { /* extensionObject */"
-        ],
-        "kwargs": {},
-        "timestamp": 13596.181024367,
+        "timestamp": 356.082154328,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
-      },
-      {
-        "tool_name": "apply_patch",
-        "args": [
-          "open62541/src/ua_types.c",
-          "@@ -414,8 +414,10 @@\n static void\n Variant_clear(UA_Variant *p, const UA_DataType *_)\n {\n     if(p->storageType != UA_VARIANT_DATA)\n         return;\n     if(p->type && p->data > UA_EMPTY_ARRAY_SENTINEL) {\n         if(p->arrayLength == 0)\n +            return; // Prevent accessing freed memory when arrayLength is zero\n         UA_Array_delete(p->data, p->arrayLength, p->type);\n         p->data = NULL;\n     }\n     if((void*)p->arrayDimensions > UA_EMPTY_ARRAY_SENTINEL)\n         UA_free(p->arrayDimensions);\n }"
-        ],
-        "kwargs": {},
-        "timestamp": 13603.782079204,
-        "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 414): The patch context lines have introduced a typographic error. The context you provided removed `)`. Please double check ..."
-      },
-      {
-        "tool_name": "apply_patch",
-        "args": [
-          "open62541/src/ua_types.c",
-          "@@ -415,8 +415,10 @@\n Variant_clear(UA_Variant *p, const UA_DataType *_)\n {\n     if(p->storageType != UA_VARIANT_DATA)\n         return;\n     if(p->type && p->data > UA_EMPTY_ARRAY_SENTINEL) {\n         if(p->arrayLength == 0)\n +            return; // Prevent accessing freed memory when arrayLength is zero\n         UA_Array_delete(p->data, p->arrayLength, p->type);\n         p->data = NULL;\n     }\n     if((void*)p->arrayDimensions > UA_EMPTY_ARRAY_SENTINEL)\n         UA_free(p->arrayDimensions);\n }"
-        ],
-        "kwargs": {},
-        "timestamp": 13607.589636664,
-        "success": true,
-        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
-      },
-      {
-        "tool_name": "apply_patch",
-        "args": [
-          "open62541/src/ua_types_encoding_json.c",
-          "@@ -2738,6 +2738,8 @@\n         }\n         \n         DecodeEntry entries[2] = {{UA_JSONKEY_TYPE, NULL, NULL, false, NULL},\n             {UA_JSONKEY_BODY, dst->data, (decodeJsonSignature) decodeJsonInternal, false, NULL}};\n +        if (dst->arrayLength == 0) // Check for empty array length to avoid use-after-free\n +            return UA_STATUSCODE_BADDECODINGERROR;\n         ret = decodeFields(ctx, parseCtx, entries, 2, bodyType);\n     } else { /* extensionObject */"
-        ],
-        "kwargs": {},
-        "timestamp": 13615.182883709,
-        "success": true,
-        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
     ],
-    "undo_last_patch": [
-      {
-        "tool_name": "undo_last_patch",
-        "args": [],
-        "kwargs": {},
-        "timestamp": 13596.765457742,
-        "success": true,
-        "result_summary": "Ok({'total_edits': 0})"
-      }
-    ],
+    "undo_last_patch": [],
     "list_current_edits": [
       {
         "tool_name": "list_current_edits",
         "args": [],
         "kwargs": {},
-        "timestamp": 13618.281695044,
+        "timestamp": 357.32228862,
         "success": true,
-        "result_summary": "Ok({'edits': ['@@ -415,8 +415,10 @@\\n Variant_clear(UA_Variant *p, const UA_DataType *_)\\n {\\n    if(p->storageType != UA_VARIANT_DATA)\\n        return;\\n    if(p->type && p->data > UA_EMPTY_ARRAY_SEN..."
+        "result_summary": "Ok({'edits': ['@@ -414,7 +414,9 @@\\n static void\\n Variant_clear(UA_Variant *p, const UA_DataType *_) {\\n     if(p->storageType != UA_VARIANT_DATA)\\n         return;\\n-    if(p->type && p->data > UA_E..."
       }
     ]
   }
