@@ -4,32 +4,31 @@ This directory contains scripts to automatically set up and run vulnerability an
 
 ## Overview
 
-The system fetches vulnerability metadata from ARVO, downloads the corresponding testcase files and OSS-Fuzz project configurations, sets up the vulnerable version of the code, and runs the complete CRS workflow for vulnerability analysis and patch generation.
+The system uses **ARVO prebuilt Docker images** (`n132/arvo:{id}-vul`) which contain vulnerable versions of projects with pre-compiled binaries. This eliminates the need to build projects from source, significantly speeding up the workflow.
+
+The scripts fetch vulnerability metadata from ARVO, download testcase files, pull prebuilt Docker images, and run the complete CRS workflow for vulnerability analysis and patch generation.
 
 ## Directory Structure
 
 ```
 crs/arvo-patching-agent/
 ├── README.md                           # This file
-├── setup_arvo_project.py              # Setup script (downloads metadata, testcases, project files)
-├── arvo_to_crs_integration.py         # Main workflow script (runs CRS analysis and patching)
+├── setup_arvo_project.py              # Setup script (downloads metadata, testcase, project.yaml)
+├── arvo_to_crs_integration.py         # Main workflow script (uses ARVO prebuilt images)
 ├── arvo_65027/                        # ARVO-specific directory (created automatically)
 │   ├── config.json                    # Configuration for this ARVO ID
+│   ├── testcase_5110826180411392.bin  # Downloaded POC file
 │   ├── workflow_data.json             # Complete workflow execution data
 │   ├── context_retrieval_data.json    # Context retrieval calls made by patching agent
 │   └── generated_patch.diff           # Generated patch (if successful)
 ├── arvo_12345/                        # Another ARVO ID directory
 │   └── ...
-└── projects/                          # Project directories (created in parent folder)
-    ├── libraw/
-    │   ├── Dockerfile                 # Modified to clone vulnerable version
-    │   ├── Dockerfile.original        # Backup of original Dockerfile
-    │   ├── build.sh                   # OSS-Fuzz build script
-    │   ├── project.yaml               # OSS-Fuzz project configuration
-    │   ├── libraw_fuzzer.cc           # OSS-Fuzz fuzzer harness
-    │   └── testcase_5110826180411392.bin  # ARVO testcase file
-    └── ...
+└── ../../projects/                    # Project directories (minimal, in parent folder)
+    └── libraw/
+        └── project.yaml               # OSS-Fuzz project configuration (downloaded)
 ```
+
+**Note:** No Dockerfile or build scripts needed - everything comes from ARVO prebuilt images!
 
 ## Quick Start
 
@@ -47,11 +46,10 @@ python3 crs/arvo-patching-agent/setup_arvo_project.py 65027
 
 This will:
 - Fetch ARVO metadata for the specified ID
-- Download the testcase file with `testcase_` prefix
-- Download OSS-Fuzz project files (Dockerfile, build.sh, project.yaml, fuzzer harness)
-- Modify the Dockerfile to clone the vulnerable version (parent of fix commit)
-- Create an ARVO-specific directory with configuration
-- Save all configuration to `arvo_<ID>/config.json`
+- Download the testcase file to `arvo_<ID>/` directory
+- Download project.yaml from OSS-Fuzz
+- Create ARVO-specific directory with configuration
+- Save all configuration to `arvo_<ID>/config.json` including ARVO image name
 
 ### 2. Run CRS Integration
 
@@ -67,8 +65,10 @@ docker-compose exec crs-main bash -c "source /crs/.venv/bin/activate && python3 
 
 This will:
 - Load configuration from `arvo_<ID>/config.json`
+- Pull ARVO prebuilt image (`n132/arvo:{id}-vul`)
+- Extract source code and binaries from image (no building!)
 - Run the complete CRS workflow:
-  1. Setup project and harnesses
+  1. Setup project and harnesses (using ARVO prebuilt)
   2. Test PoC and get crash result
   3. Create POVRunData from crash
   4. Decode POV
@@ -78,72 +78,79 @@ This will:
   8. Generate patches
 - Save all outputs to the ARVO-specific directory
 
+**Fast:** No Dockerfile build, no compilation - just extract and run!
+
 ## Detailed Workflow
 
 ### Phase 1: Project Setup (`setup_arvo_project.py`)
 
 1. **Fetch ARVO Metadata**
    - Downloads metadata from `https://raw.githubusercontent.com/n132/ARVO-Meta/main/archive_data/meta/<ARVO_ID>.json`
-   - Extracts project name, fuzzer name, fix commit, testcase URL, etc.
+   - Extracts project name, fuzzer name (from "Fuzz target binary"), testcase URL, etc.
 
 2. **Download Testcase File**
-   - Downloads the testcase from OSS-Fuzz
-   - Renames with `testcase_` prefix (e.g., `testcase_5110826180411392.bin`)
+   - Downloads the testcase from OSS-Fuzz to `arvo_<ID>/` directory
+   - Saves with `testcase_` prefix (e.g., `testcase_5110826180411392.bin`)
 
-3. **Download OSS-Fuzz Project Files**
-   - Downloads from `https://raw.githubusercontent.com/google/oss-fuzz/master/projects/<project>`
-   - Files: `Dockerfile`, `build.sh`, `project.yaml`, `<project>_fuzzer.cc`
+3. **Download project.yaml**
+   - Downloads from `https://raw.githubusercontent.com/google/oss-fuzz/master/projects/<project>/project.yaml`
+   - This is the only OSS-Fuzz file needed (provides metadata like language, main_repo)
 
-4. **Modify Dockerfile for Vulnerable Version**
-   - Changes git clone command to checkout the vulnerable commit (parent of fix commit)
-   - Preserves original Dockerfile as `Dockerfile.original`
-
-5. **Create Configuration**
+4. **Create Configuration**
    - Creates `arvo_<ID>/` directory
-   - Saves configuration to `arvo_<ID>/config.json`
+   - Saves configuration to `arvo_<ID>/config.json` including:
+     - `arvo_image_name`: Docker image to pull (e.g., `n132/arvo:65027-vul`)
+     - `use_prebuilt_image`: true (default)
 
 ### Phase 2: CRS Integration (`arvo_to_crs_integration.py`)
 
-1. **Load Configuration**
-   - Reads configuration from `arvo_<ID>/config.json`
-   - Sets up project directory, POC file, and fuzzer name
+1. **Pull ARVO Prebuilt Image**
+   - Checks if `n132/arvo:{id}-vul` exists locally
+   - Pulls image if needed (contains vulnerable version + prebuilt binaries)
 
-2. **Setup Project and Harnesses**
-   - Loads the project using CRS TestProject
-   - Builds the project
+2. **Extract from ARVO Image**
+   - Extracts `/src` → source code (skips Dockerfile build!)
+   - Extracts `/out` → prebuilt vulnerable binaries (skips compilation!)
+   - Gets workdir from image metadata
+   - Sets `build_image` to ARVO image for all operations
+
+3. **Setup Project and Harnesses**
+   - Loads project using CRS TestProject
+   - Uses cached source and binaries from ARVO
    - Initializes harness information
    - Finds the specified fuzzer harness
 
-3. **Test PoC and Get Crash Result**
-   - Runs the testcase against the vulnerable version
+4. **Test PoC and Get Crash Result**
+   - Runs the testcase against ARVO's prebuilt vulnerable binaries
    - Captures crash output, stack trace, and deduplication ID
 
-4. **Create POVRunData**
+5. **Create POVRunData**
    - Creates POVRunData structure exactly like CRS does
    - Includes task UUID, project name, harness, sanitizer, engine, etc.
 
-5. **Decode POV**
+6. **Decode POV**
    - Uses CRS decode_pov function to decode the crash
    - Extracts vulnerability information
 
-6. **Triage Vulnerability**
+7. **Triage Vulnerability**
    - Runs CRS Triage Agent with LLM
    - Analyzes the vulnerability and identifies the vulnerable function/file
+   - Uses text-based code navigation (bear build skipped for ARVO)
 
-7. **Store in Database**
+8. **Store in Database**
    - Stores vulnerability in CRS products database
    - Returns vulnerability ID for tracking
 
-8. **Run Patching Agent**
+9. **Run Patching Agent**
    - Creates CRS Patcher instance
    - Runs patching agent with context retrieval
    - Captures all context retrieval calls (source_questions, read_definition, find_references, etc.)
    - Generates patches for the vulnerable code
 
-9. **Save Outputs**
-   - Saves workflow data to `arvo_<ID>/workflow_data.json`
-   - Saves context retrieval data to `arvo_<ID>/context_retrieval_data.json`
-   - Saves generated patch to `arvo_<ID>/generated_patch.diff`
+10. **Save Outputs**
+    - Saves workflow data to `arvo_<ID>/workflow_data.json`
+    - Saves context retrieval data to `arvo_<ID>/context_retrieval_data.json`
+    - Saves generated patch to `arvo_<ID>/generated_patch.diff`
 
 ## Configuration
 
@@ -172,7 +179,9 @@ The system respects the model configuration in `configs/models-best.toml`. Make 
   "fix_commit": "a6f212a4a1fe19dce1f83c83384f171fd7babb0a",
   "repo_addr": "https://github.com/libraw/libraw",
   "project_dir": "projects/libraw",
-  "poc_file": "testcase_5110826180411392.bin"
+  "poc_file": "crs/arvo-patching-agent/arvo_65027/testcase_5110826180411392.bin",
+  "arvo_image_name": "n132/arvo:65027-vul",
+  "use_prebuilt_image": true
 }
 ```
 
@@ -208,27 +217,31 @@ The actual patch generated by the CRS patching agent (if successful).
    ```
    **Solution**: Run `setup_arvo_project.py` first to create the configuration.
 
-2. **Project build fails**
-   - Check that the Dockerfile was modified correctly
-   - Verify the vulnerable commit exists in the repository
-   - Check build dependencies in the OSS-Fuzz project files
+2. **ARVO image pull fails**
+   - Check Docker is running and has internet access
+   - Verify the ARVO ID exists (image `n132/arvo:{id}-vul` must exist on Docker Hub)
+   - Check Docker daemon can access public registries
 
 3. **Testcase doesn't crash**
    - Verify the testcase file was downloaded correctly
-   - Check that the vulnerable version is actually vulnerable
-   - Ensure the fuzzer harness is correct
+   - Check that ARVO prebuilt binaries are being used (not stale cache)
+   - Ensure the fuzzer harness name matches ARVO metadata
+   - Clear cache if needed: `rm -rf /cache/data/*/project_name/*.tar`
 
 4. **Patching agent fails**
    - Check model configuration in `models-best.toml`
    - Verify the vulnerable function/file exists in the vulnerable version
    - Check context retrieval data for errors
+   - Note: Bear build is skipped for ARVO (uses text-based navigation)
 
 ### Debugging
 
-1. **Check ARVO metadata**: Verify the ARVO ID exists and has the expected data
-2. **Check project files**: Ensure all OSS-Fuzz files were downloaded correctly
-3. **Check Dockerfile**: Verify the git clone command was modified correctly
-4. **Check logs**: Look at the detailed output from both scripts for error messages
+1. **Check ARVO metadata**: Verify the ARVO ID exists at `https://raw.githubusercontent.com/n132/ARVO-Meta/main/archive_data/meta/{id}.json`
+2. **Check ARVO image**: Verify `n132/arvo:{id}-vul` exists on Docker Hub
+3. **Check testcase**: Ensure POC file was downloaded to `arvo_{id}/` directory
+4. **Check project.yaml**: Ensure it was downloaded and has `main_repo` field
+5. **Check logs**: Look at the detailed output from both scripts for error messages
+6. **Check cache**: If using old cached builds, clear: `rm -rf /cache/data/*/project_name/*.tar`
 
 ## Workflow Examples
 
@@ -243,11 +256,13 @@ docker-compose exec crs-main bash -c "source /crs/.venv/bin/activate && python3 
 ```
 
 This will:
-- Download libraw project files
-- Set up vulnerable version (parent of commit `a6f212a4a1fe19dce1f83c83384f171fd7babb0a`)
-- Test testcase `testcase_5110826180411392.bin`
+- Pull ARVO image `n132/arvo:65027-vul` (has vulnerable libraw prebuilt)
+- Extract source code and binaries from image (no build needed!)
+- Test testcase `testcase_5110826180411392.bin` against vulnerable binary
 - Analyze vulnerability in `libraw_tagtype_dataunit_bytes` function
 - Generate patches for the vulnerable code
+
+**Time:** ~8-10 minutes (no build time!)
 
 ### Example 2: Different ARVO ID
 
@@ -261,10 +276,25 @@ docker-compose exec crs-main bash -c "source /crs/.venv/bin/activate && python3 
 
 ## Notes
 
+### Using ARVO Prebuilt Images
+
+- **Faster:** No Dockerfile build (~5-10 min saved), no compilation (~10-20 min saved)
+- **Reliable:** ARVO images are pre-tested and guaranteed to work
+- **Simple:** Just pull image, extract, and run
+
+### Bear Build
+
+- **Skipped for ARVO:** Bear build (generates `compile_commands.json`) is skipped when using ARVO prebuilt images
+- **Why:** ARVO images can't be reliably rebuilt (stale build state, 2.6GB /src)
+- **Impact:** Uses text-based code navigation instead of AST (slightly less precise but works well)
+- **Trade-off:** Save 2-3 minutes per vulnerability, accept ~5-15% less precise code navigation
+
+### Organization
+
 - Each ARVO ID gets its own directory to keep data organized
 - The system automatically handles different projects, fuzzers, and testcases
 - All outputs are saved in the ARVO-specific directory for easy analysis
-- The vulnerable version setup ensures realistic vulnerability analysis
+- Testcases stored in arvo directories (not in project directories)
 - Context retrieval data provides insights into how the patching agent works
 
 ## Contributing
