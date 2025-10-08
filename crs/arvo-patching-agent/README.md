@@ -305,9 +305,3 @@ When adding new features:
 2. Ensure directory structure remains consistent
 3. Update this README with any new functionality
 4. Test with multiple ARVO IDs to ensure compatibility
-
-## Related Documentation
-
-- [CRS Architecture](docs/crs-architecture.md)
-- [ARVO Projects](docs/arvo-projects.md)
-- [OSS-Fuzz Integration](https://github.com/google/oss-fuzz)
