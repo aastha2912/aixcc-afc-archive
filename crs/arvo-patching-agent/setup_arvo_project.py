@@ -15,7 +15,6 @@ import re
 # =============================================================================
 
 ARVO_META_BASE_URL = "https://raw.githubusercontent.com/n132/ARVO-Meta/main/archive_data/meta"
-OSS_FUZZ_DOWNLOAD_BASE_URL = "https://oss-fuzz.com/download"
 OSS_FUZZ_BASE_URL = "https://raw.githubusercontent.com/google/oss-fuzz/master/projects"
 
 # Directory structure
@@ -59,21 +58,27 @@ def extract_project_info(metadata: dict) -> dict:
     for comment_entry in metadata.get("report", {}).get("comments", []):
         content = comment_entry.get("content", "")
         
-        # Extract Fuzz Target
-        fuzzer_match = re.search(r"Fuzz Target: (\S+)", content)
+        # Extract Fuzz target binary (multiple patterns to handle variations)
+        # Pattern 1: "Fuzz target binary: fuzzshark_ip"
+        fuzzer_match = re.search(r"Fuzz target binary:\s*(\S+)", content, re.IGNORECASE)
         if fuzzer_match:
             project_info["fuzzer_name"] = fuzzer_match.group(1)
+        # Pattern 2: "Fuzz Target: libraw_fuzzer" (older format)
+        if not project_info["fuzzer_name"]:
+            fuzzer_match = re.search(r"Fuzz Target:\s*(\S+)", content, re.IGNORECASE)
+            if fuzzer_match:
+                project_info["fuzzer_name"] = fuzzer_match.group(1)
         
         # Extract Reproducer Testcase URL
-        poc_match = re.search(r"Reproducer Testcase: (https://oss-fuzz.com/download\?testcase_id=\d+)", content)
+        poc_match = re.search(r"Reproducer Testcase:\s*(https://oss-fuzz.com/download\?testcase_id=\d+)", content)
         if poc_match:
             project_info["poc_download_url"] = poc_match.group(1)
             break # Stop after finding the first POC URL
 
     return project_info
 
-def download_testcase_file(poc_url: str, project_dir: str) -> tuple[bool, str]:
-    """Download testcase file and save it to the project directory with testcase_ prefix"""
+def download_testcase_file(poc_url: str, arvo_dir: Path) -> tuple[bool, str]:
+    """Download testcase file and save it to the ARVO config directory"""
     if not poc_url:
         print("No POC download URL found")
         return False, None
@@ -85,14 +90,8 @@ def download_testcase_file(poc_url: str, project_dir: str) -> tuple[bool, str]:
     else:
         original_filename = "testcase.bin"
     
-    # Create project directory if it doesn't exist (relative to script location)
-    script_dir = Path(__file__).parent
-    project_path = script_dir / "../.." / project_dir
-    project_path = project_path.resolve()  # Convert to absolute path
-    project_path.mkdir(parents=True, exist_ok=True)
-    
-    # Download the POC file with original filename
-    poc_file_path = project_path / original_filename
+    # Download the POC file to ARVO directory
+    poc_file_path = arvo_dir / original_filename
     
     print(f"Downloading testcase from: {poc_url}")
     print(f"Saving to: {poc_file_path}")
@@ -111,182 +110,7 @@ def download_testcase_file(poc_url: str, project_dir: str) -> tuple[bool, str]:
         print(f"Error downloading testcase file: {e}")
         return False, None
 
-def get_project_files_list(project_name: str) -> list:
-    """Get list of files in the OSS-Fuzz project directory"""
-    # Common OSS-Fuzz project files
-    common_files = [
-        "Dockerfile",
-        "build.sh", 
-        "project.yaml",
-        f"{project_name}_fuzzer.cc",
-        f"{project_name}_fuzzer.cpp",
-        f"{project_name}_fuzzer.c",
-        "fuzzer.cc",
-        "fuzzer.cpp", 
-        "fuzzer.c"
-    ]
-    
-    return common_files
 
-def download_project_file(project_name: str, filename: str, target_dir: Path) -> bool:
-    """Download a single project file"""
-    url = f"{OSS_FUZZ_BASE_URL}/{project_name}/{filename}"
-    
-    print(f"Downloading: {filename}")
-    
-    try:
-        with urllib.request.urlopen(url) as response:
-            data = response.read()
-            
-            # Save the file
-            file_path = target_dir / filename
-            with open(file_path, 'wb') as f:
-                f.write(data)
-            
-            print(f"Downloaded: {file_path}")
-            return True
-            
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            print(f"File not found: {filename} (404)")
-            return False
-        else:
-            print(f"Error downloading {filename}: {e}")
-            return False
-    except urllib.error.URLError as e:
-        print(f"Error downloading {filename}: {e}")
-        return False
-
-def download_oss_fuzz_project(project_name: str, target_dir: str) -> bool:
-    """Download all OSS-Fuzz project files"""
-    print(f"\nDownloading OSS-Fuzz project files for: {project_name}")
-    print("-" * 50)
-    
-    # Create target directory (relative to script location)
-    script_dir = Path(__file__).parent
-    project_path = script_dir / "../.." / target_dir
-    project_path = project_path.resolve()  # Convert to absolute path
-    project_path.mkdir(parents=True, exist_ok=True)
-    
-    # Get list of files to download
-    files_to_download = get_project_files_list(project_name)
-    
-    downloaded_count = 0
-    total_files = len(files_to_download)
-    
-    for filename in files_to_download:
-        success = download_project_file(project_name, filename, project_path)
-        if success:
-            downloaded_count += 1
-        print()  # Add spacing between files
-    
-    print(f"Download Summary: {downloaded_count}/{total_files} files downloaded")
-    
-    return downloaded_count > 0
-
-def modify_dockerfile_for_vulnerable_version(project_info: dict, project_dir: str) -> bool:
-    """Modify the Dockerfile to clone the vulnerable version instead of latest"""
-    if not project_info.get('repo_addr') or not project_info.get('fix_commit'):
-        print("No repository address or fix commit found in metadata")
-        return False
-    
-    repo_url = project_info['repo_addr']
-    fix_commit = project_info['fix_commit']
-    
-    print(f"\nModifying Dockerfile for vulnerable version...")
-    print(f"Repository: {repo_url}")
-    print(f"Fix commit: {fix_commit}")
-    print("-" * 50)
-    
-    # Create project directory (relative to script location)
-    script_dir = Path(__file__).parent
-    project_path = script_dir / "../.." / project_dir
-    project_path = project_path.resolve()
-    
-    dockerfile_path = project_path / "Dockerfile"
-    
-    if not dockerfile_path.exists():
-        print(f"Dockerfile not found: {dockerfile_path}")
-        return False
-    
-    try:
-        # Read the current Dockerfile
-        with open(dockerfile_path, 'r') as f:
-            dockerfile_content = f.read()
-        
-        # Find the git clone line and modify it
-        # Original: RUN git clone --depth 1 https://github.com/libraw/libraw
-        # Modified: RUN git clone https://github.com/libraw/libraw && cd libraw && git checkout <vulnerable_commit>
-        
-        # Get the parent commit (vulnerable version) - we'll need to do this in the Dockerfile
-        # For now, let's modify the git clone line to checkout the vulnerable commit
-        
-        # Replace the git clone line
-        old_clone_line = "RUN git clone --depth 1 https://github.com/libraw/libraw"
-        new_clone_line = f"""RUN git clone https://github.com/libraw/libraw && \\
-    cd libraw && \\
-    git checkout {fix_commit}^ && \\
-    cd .."""
-        
-        if old_clone_line in dockerfile_content:
-            dockerfile_content = dockerfile_content.replace(old_clone_line, new_clone_line)
-            
-            # Write the modified Dockerfile
-            with open(dockerfile_path, 'w') as f:
-                f.write(dockerfile_content)
-            
-            print(f"Modified Dockerfile to checkout vulnerable version")
-            print(f"Vulnerable commit: {fix_commit}^ (parent of fix commit)")
-            
-            # Create a backup of the original
-            backup_path = project_path / "Dockerfile.original"
-            with open(backup_path, 'w') as f:
-                f.write(dockerfile_content.replace(new_clone_line, old_clone_line))
-            print(f"Original Dockerfile backed up to: {backup_path}")
-            
-            return True
-        else:
-            print(f"Could not find expected git clone line in Dockerfile")
-            return False
-            
-    except Exception as e:
-        print(f"Error modifying Dockerfile: {e}")
-        return False
-
-def generate_config_info(project_info: dict, testcase_filename: str, arvo_id: str) -> str:
-    """Generate configuration information for the main script"""
-    if not project_info:
-        return None
-
-    config_info = f"""
-# Generated configuration for ARVO ID: {arvo_id}
-# Project: {project_info.get('project_name', 'N/A')}
-# Fuzzer: {project_info.get('fuzzer_name', 'N/A')}
-# Sanitizer: {project_info.get('sanitizer', 'N/A')}
-# Crash Type: {project_info.get('crash_type', 'N/A')}
-
-# Update these parameters in arvo_to_crs_integration.py:
-PROJECT_DIR = "projects/{project_info.get('project_name', 'N/A')}"
-POC_FILE = "{testcase_filename}"
-FUZZER_NAME = "{project_info.get('fuzzer_name', 'N/A')}"
-
-# Repository and commit info:
-# Fix commit: {project_info.get('fix_commit', 'N/A')}
-# Vulnerable version: Check projects/{project_info.get('project_name', 'N/A')}/src/VULNERABLE_VERSION_INFO.md
-# Repo: {project_info.get('repo_addr', 'N/A')}
-
-# Directory structure:
-# projects/{project_info.get('project_name', 'N/A')}/
-# ├── Dockerfile             # OSS-Fuzz build configuration (modified to clone vulnerable version)
-# ├── Dockerfile.original    # Backup of original Dockerfile
-# ├── build.sh               # OSS-Fuzz build script
-# ├── project.yaml           # OSS-Fuzz project config
-# ├── {project_info.get('fuzzer_name', 'N/A')}.cc  # OSS-Fuzz fuzzer harness
-# └── {testcase_filename}    # ARVO testcase file
-#
-# Note: When Docker builds, it will clone the vulnerable version (parent of fix commit)
-"""
-    return config_info
 
 # =============================================================================
 # MAIN EXECUTION
@@ -320,13 +144,17 @@ def main():
     for key, value in project_info.items():
         print(f"{key}: {value}")
     
-    # Step 2: Download testcase file
-    print("\nStep 2: Downloading testcase file...")
+    # Step 2: Create ARVO directory and download testcase
+    print("\nStep 2: Setting up ARVO directory and downloading testcase...")
+    script_dir = Path(__file__).parent
+    arvo_dir = script_dir / ARVO_CONFIG_DIR_NAME.format(arvo_id=arvo_id)
+    arvo_dir.mkdir(exist_ok=True)
+    print(f"Created directory: {arvo_dir}")
+    
     if project_info["poc_download_url"]:
-        project_dir = f"projects/{project_info['project_name']}"
         success, testcase_filename = download_testcase_file(
             project_info["poc_download_url"], 
-            project_dir
+            arvo_dir
         )
         
         if not success:
@@ -336,34 +164,48 @@ def main():
         print("No POC download URL found in metadata")
         sys.exit(1)
     
-    # Step 3: Download OSS-Fuzz project files
-    print("\nStep 3: Downloading OSS-Fuzz project files...")
-    success = download_oss_fuzz_project(project_info['project_name'], project_dir)
-    
-    if not success:
-        print("Failed to download any project files")
-        sys.exit(1)
-    
-    # Step 4: Modify Dockerfile for vulnerable version
-    print("\nStep 4: Modifying Dockerfile for vulnerable version...")
-    success = modify_dockerfile_for_vulnerable_version(project_info, project_dir)
-    
-    if not success:
-        print("Failed to modify Dockerfile")
-        sys.exit(1)
-    
-    # Step 5: Generate configuration info
-    print("\nStep 5: Generating configuration...")
-    config_info = generate_config_info(project_info, testcase_filename, arvo_id)
-    
-    print("\nConfiguration for arvo_to_crs_integration.py:")
-    print("-" * 50)
-    print(config_info)
-    
-    # Save configuration to a JSON file for the integration script
+    # Step 3: Create project directory and download project.yaml
+    print("\nStep 3: Setting up project configuration...")
     script_dir = Path(__file__).parent
-    arvo_dir = script_dir / ARVO_CONFIG_DIR_NAME.format(arvo_id=arvo_id)
-    arvo_dir.mkdir(exist_ok=True)
+    project_dir_path = script_dir / "../.." / f"projects/{project_info['project_name']}"
+    project_dir_path = project_dir_path.resolve()
+    project_dir_path.mkdir(parents=True, exist_ok=True)
+    
+    # Download project.yaml from OSS-Fuzz
+    print("Downloading project.yaml from OSS-Fuzz...")
+    
+    # Download the real project.yaml from OSS-Fuzz
+    project_yaml_path = project_dir_path / "project.yaml"
+    project_yaml_url = f"{OSS_FUZZ_BASE_URL}/{project_info['project_name']}/project.yaml"
+    
+    print(f"Downloading from: {project_yaml_url}")
+    try:
+        with urllib.request.urlopen(project_yaml_url) as response:
+            project_yaml_content = response.read()
+            
+            with open(project_yaml_path, 'wb') as f:
+                f.write(project_yaml_content)
+            
+            print(f"✓ Downloaded: {project_yaml_path}")
+    except (urllib.error.URLError, urllib.error.HTTPError) as e:
+        print(f"Warning: Could not download project.yaml: {e}")
+        print("Creating fallback project.yaml...")
+        # Fallback to minimal version if download fails
+        repo_url = project_info.get('repo_addr', 'https://github.com/google/oss-fuzz')
+        project_yaml_content = f"""homepage: "{repo_url}"
+language: c++
+main_repo: "{repo_url}"
+primary_contact: "arvo@test.com"
+sanitizers:
+  - address
+  - undefined
+"""
+        with open(project_yaml_path, 'w') as f:
+            f.write(project_yaml_content)
+        print(f"Created fallback: {project_yaml_path}")
+    
+    # Step 4: Save configuration
+    print("\nStep 4: Saving configuration...")
     
     config_data = {
         "arvo_id": arvo_id,
@@ -374,7 +216,9 @@ def main():
         "fix_commit": project_info.get('fix_commit', 'N/A'),
         "repo_addr": project_info.get('repo_addr', 'N/A'),
         "project_dir": f"projects/{project_info.get('project_name', 'N/A')}",
-        "poc_file": testcase_filename
+        "poc_file": f"crs/arvo-patching-agent/arvo_{arvo_id}/{testcase_filename}",  # Relative path from workspace root
+        "arvo_image_name": f"n132/arvo:{arvo_id}-vul",  # ARVO prebuilt vulnerable image
+        "use_prebuilt_image": True  # Set to False to build from source instead
     }
     
     config_file = arvo_dir / ARVO_CONFIG_FILE_NAME
@@ -387,11 +231,22 @@ def main():
     print("\n" + "="*60)
     print("ARVO PROJECT SETUP COMPLETE")
     print("="*60)
-    print(f"Project directory: {project_dir}")
-    print(f"Testcase file: {testcase_filename}")
-    print(f"Configuration file: {ARVO_CONFIG_DIR_NAME.format(arvo_id=arvo_id)}/{ARVO_CONFIG_FILE_NAME}")
-    print("\nTo run the integration script:")
-    print(f"python3 arvo_to_crs_integration.py {arvo_id}")
+    print(f"ARVO ID: {arvo_id}")
+    print(f"Project: {project_info['project_name']}")
+    print(f"Fuzzer: {project_info['fuzzer_name']}")
+    print(f"Testcase: {arvo_dir / testcase_filename}")
+    print(f"Docker Image: {config_data['arvo_image_name']}")
+    print(f"Config: {config_file}")
+    print("\n" + "="*60)
+    print("NEXT STEPS:")
+    print("="*60)
+    print(f"Run: python3 arvo_to_crs_integration.py {arvo_id}")
+    print("\nThe script will:")
+    print(f"  1. Pull prebuilt image: {config_data['arvo_image_name']}")
+    print("  2. Extract /src (source code) - NO Dockerfile build needed")
+    print("  3. Extract /out (binaries) - NO compilation needed")
+    print("  4. Test PoC and generate patches")
+    print("\nNote: Everything comes from ARVO prebuilt image - no building required!")
 
 if __name__ == "__main__":
     main()
