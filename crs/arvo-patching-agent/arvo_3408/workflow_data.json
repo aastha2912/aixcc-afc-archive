@@ -1,5 +1,5 @@
 {
-  "vuln_id": 24,
+  "vuln_id": 4,
   "crash_result": {
     "output": "+ FUZZER=fuzzshark_ip\n+ shift\n+ '[' '!' -v TESTCASE ']'\n+ TESTCASE=/testcase\n+ '[' '!' -f /testcase ']'\n+ export RUN_FUZZER_MODE=interactive\n+ RUN_FUZZER_MODE=interactive\n+ export FUZZING_ENGINE=libfuzzer\n+ FUZZING_ENGINE=libfuzzer\n+ export SKIP_SEED_CORPUS=1\n+ SKIP_SEED_CORPUS=1\n+ run_fuzzer fuzzshark_ip /testcase\nsysctl: setting key \"vm.mmap_rnd_bits\", ignoring: Read-only file system\noss-fuzzshark: configured for dissector: ip\n/out/fuzzshark_ip: Running 1 inputs 1 time(s) each.\nRunning: /testc",
     "stack": "#0 in __interceptor_memcmp.part.76 /src/llvm/projects/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc:774\n#1 in zbee_sec_add_key_to_keyring /src/wireshark/epan/dissectors/packet-zbee-security.c:1253:21\n#2 in dissect_zbee_aps_transport_key /src/wireshark/epan/dissectors/packet-zbee-aps.c:1313:5\n#3 in dissect_zbee_aps_cmd /src/wireshark/epan/dissectors/packet-zbee-aps.c:1155:22\n#4 in dissect_zbee_aps /src/wireshark/epan/dissectors/packet-zbee-aps.c:1090:13\n#5 in call_dis",
@@ -24,12 +24,12 @@
   "analyzed_vuln": {
     "function": "zbee_sec_add_key_to_keyring",
     "file": "wireshark/epan/dissectors/packet-zbee-security.c",
-    "description": "This function attempts to access a key in the key ring based on the provided key length. A stack buffer overflow occurs if the provided key's size exceeds the defined length (16 bytes) in the ZBEE_APS_CMD_KEY_LENGTH macro, which is not validated before being used in memory operations.",
-    "conditions": "The vulnerability is triggered when the dissect_zbee_aps_transport_key function calls zbee_sec_add_key_to_keyring with a key that is larger than 16 bytes, leading to an overflow during the memcpy operation."
+    "description": "The vulnerability is caused by a stack buffer overflow in the `zbee_sec_add_key_to_keyring` function, which occurs when the function attempts to copy data into a key record buffer without proper bounds checking. Specifically, the `memcmp` operation can read beyond the allocated buffer size if the input key is larger than the expected length, leading to a crash due to accessing invalid memory.",
+    "conditions": "The vulnerability can be triggered by the `dissect_zbee_aps_transport_key` function, which calls `zbee_sec_add_key_to_keyring` with a key that may exceed the expected length (ZBEE_APS_CMD_KEY_LENGTH). If the input key provided is malformed or excessively large, it can cause the overflow, resulting in a crash."
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/epan/dissectors/packet-zbee-aps.c\n+++ b/epan/dissectors/packet-zbee-aps.c\n@@ -1312,6 +1312,14 @@\n     /* Update the key ring for this pan */\n     zbee_sec_add_key_to_keyring(pinfo, key);\n \n+    /* Validate key length before adding to keyring */\n+    if (sizeof(key) <= ZBEE_APS_CMD_KEY_LENGTH) {\n+        zbee_sec_add_key_to_keyring(pinfo, key);\n+    } else {\n+        // Handle error: key is too long.\n+        return offset;\n+    }\n+\n     /* Parse the rest of the key descriptor. */\n     switch (key_type) {\n         case ZBEE_APS_CMD_KEY_STANDARD_NWK:\n",
+    "patch": "--- a/epan/dissectors/packet-zbee-security.c\n+++ b/epan/dissectors/packet-zbee-security.c\n@@ -1255,7 +1255,11 @@\n                 /* Store a new or different key in the key ring */\n                 key_record.frame_num = pinfo->num;\n                 key_record.label = NULL;\n-                memcpy(&key_record.key, key, ZBEE_APS_CMD_KEY_LENGTH);\n+    if (key != NULL && key_length <= ZBEE_APS_CMD_KEY_LENGTH) {\n+        memcpy(&key_record.key, key, key_length);\n+    } else {\n+        // Handle error case or log a warning\n+    }\n                 *nwk_keyring = g_slist_prepend(*nwk_keyring, g_memdup(&key_record, sizeof(key_record_t)));\n             }\n         }\n",
     "build_artifacts_count": 0,
     "tested_povs_count": 1
   },
@@ -45,7 +45,7 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 13944.925780525,
+        "timestamp": 3028.60017763,
         "success": true,
         "result_summary": "Ok({'contents': '1235 void zbee_sec_add_key_to_keyring(packet_info *pinfo, const guint8 *key)\\n1236 {\\n1237     GSList            **nwk_keyring;\\n1238     key_record_t        key_record;\\n1239     zbe..."
       },
@@ -58,22 +58,35 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 13950.460842902,
+        "timestamp": 3043.899272553,
         "success": true,
         "result_summary": "Ok({'contents': '1291 static guint\\n1292 dissect_zbee_aps_transport_key(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree, guint offset)\\n1293 {\\n1294     guint8              key_type;\\n1295    ..."
       }
     ],
     "read_source": [],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "dissect_zbee_aps_transport_key",
+          "wireshark/epan/dissectors/packet-zbee-aps.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 3036.105679966,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='wireshark/epan/dissectors/packet-zbee-aps.c', refs=[FileReference(line=1155, content='            offset = dissect_zbee_aps_transport_key(tvb, pinfo, cmd_tree, offset);',..."
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
-          "wireshark/epan/dissectors/packet-zbee-aps.c",
-          "@@ -1313,6 +1313,12 @@\n     zbee_sec_add_key_to_keyring(pinfo, key);\n \n +    /* Validate key length before adding to keyring */\n +    if (sizeof(key) <= ZBEE_APS_CMD_KEY_LENGTH) {\n +        zbee_sec_add_key_to_keyring(pinfo, key);\n +    } else {\n +        // Handle error: key is too long.\n +        return offset;\n +    }\n \n     /* Parse the rest of the key descriptor. */"
+          "wireshark/epan/dissectors/packet-zbee-security.c",
+          "@@ -1256,7 +1256,10 @@\n     key_record.frame_num = pinfo->num;\n     key_record.label = NULL;\n-    memcpy(&key_record.key, key, ZBEE_APS_CMD_KEY_LENGTH);\n+    if (key != NULL && key_length <= ZBEE_APS_CMD_KEY_LENGTH) {\n+        memcpy(&key_record.key, key, key_length);\n+    } else {\n+        // Handle error case or log a warning\n+    }\n"
         ],
         "kwargs": {},
-        "timestamp": 13959.339955864,
+        "timestamp": 3058.491579018,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -84,9 +97,9 @@
         "tool_name": "list_current_edits",
         "args": [],
         "kwargs": {},
-        "timestamp": 13960.035184448,
+        "timestamp": 3059.800670644,
         "success": true,
-        "result_summary": "Ok({'edits': ['@@ -1313,6 +1313,12 @@\\n    zbee_sec_add_key_to_keyring(pinfo, key);\\n \\n+    /* Validate key length before adding to keyring */\\n+    if (sizeof(key) <= ZBEE_APS_CMD_KEY_LENGTH) {\\n+  ..."
+        "result_summary": "Ok({'edits': ['@@ -1256,7 +1256,10 @@\\n     key_record.frame_num = pinfo->num;\\n     key_record.label = NULL;\\n-    memcpy(&key_record.key, key, ZBEE_APS_CMD_KEY_LENGTH);\\n+    if (key != NULL && key_..."
       }
     ]
   }
