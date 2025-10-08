@@ -1,5 +1,5 @@
 {
-  "vuln_id": 16,
+  "vuln_id": 18,
   "crash_result": {
     "output": "+ FUZZER=fuzzshark_ip\n+ shift\n+ '[' '!' -v TESTCASE ']'\n+ TESTCASE=/testcase\n+ '[' '!' -f /testcase ']'\n+ export RUN_FUZZER_MODE=interactive\n+ RUN_FUZZER_MODE=interactive\n+ export FUZZING_ENGINE=libfuzzer\n+ FUZZING_ENGINE=libfuzzer\n+ export SKIP_SEED_CORPUS=1\n+ SKIP_SEED_CORPUS=1\n+ run_fuzzer fuzzshark_ip /testcase\nsysctl: setting key \"vm.mmap_rnd_bits\", ignoring: Read-only file system\noss-fuzzshark: configured for dissector: ip\n/out/fuzzshark_ip: Running 1 inputs 1 time(s) each.\nRunning: /testc",
     "stack": "#0 in __interceptor_memcmp.part.76 /src/llvm/projects/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc:774\n#1 in zbee_sec_add_key_to_keyring /src/wireshark/epan/dissectors/packet-zbee-security.c:1253:21\n#2 in dissect_zbee_aps_transport_key /src/wireshark/epan/dissectors/packet-zbee-aps.c:1313:5\n#3 in dissect_zbee_aps_cmd /src/wireshark/epan/dissectors/packet-zbee-aps.c:1155:22\n#4 in dissect_zbee_aps /src/wireshark/epan/dissectors/packet-zbee-aps.c:1090:13\n#5 in call_dis",
@@ -24,44 +24,30 @@
   "analyzed_vuln": {
     "function": "zbee_sec_add_key_to_keyring",
     "file": "wireshark/epan/dissectors/packet-zbee-security.c",
-    "description": "The vulnerability is a stack-buffer-overflow caused by reading beyond the allocated size of the key array in the zbee_sec_add_key_to_keyring function. Specifically, the function uses memcmp to compare a key of size ZBEE_APS_CMD_KEY_LENGTH (16 bytes) without ensuring that the provided key argument is also of the same size, leading to a potential overflow if an invalid key is passed.",
-    "conditions": "This vulnerability can be triggered when dissecting ZBEE APS transport commands that include a key longer than expected. If the provided key in the dissect_zbee_aps_transport_key function exceeds the defined ZBEE_APS_CMD_KEY_LENGTH, it can lead to a stack buffer overflow in zbee_sec_add_key_to_keyring."
+    "description": "The vulnerability is caused by a stack buffer overflow in the `zbee_sec_add_key_to_keyring` function where a fixed-size buffer is used to store keys. If the input key exceeds the expected length, it results in a stack overflow when accessing memory beyond the allocated space, leading to a crash.",
+    "conditions": "This vulnerability can be triggered when a specially crafted input is provided to the `dissect_zbee_aps_transport_key` function, which calls `zbee_sec_add_key_to_keyring` with an oversized key, specifically when the key being added exceeds the `ZBEE_APS_CMD_KEY_LENGTH`."
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/epan/dissectors/packet-zbee-security.c\n+++ b/epan/dissectors/packet-zbee-security.c\n@@ -1252,6 +1252,12 @@\n             if ( !*nwk_keyring ||\n                     memcmp( ((key_record_t *)((GSList *)(*nwk_keyring))->data)->key, &key,\n                         ZBEE_APS_CMD_KEY_LENGTH) ) {\n+        // Validate key size\n+        if (key == NULL || strlen((const char*)key) != ZBEE_APS_CMD_KEY_LENGTH) {\n+            // Invalid key size, return early\n+            return;\n+        }\n+\n                 /* Store a new or different key in the key ring */\n                 key_record.frame_num = pinfo->num;\n                 key_record.label = NULL;\n",
+    "patch": "--- a/epan/dissectors/packet-zbee-aps.c\n+++ b/epan/dissectors/packet-zbee-aps.c\n@@ -1310,7 +1310,12 @@\n     offset += ZBEE_APS_CMD_KEY_LENGTH;\n \n     /* Update the key ring for this pan */\n-    zbee_sec_add_key_to_keyring(pinfo, key);\n+        // Key length validation\n+        if (ZBEE_APS_CMD_KEY_LENGTH > sizeof(key)) {\n+            // Log an error or handle the invalid key case\n+            return offset; // Skip further processing\n+        }\n+        zbee_sec_add_key_to_keyring(pinfo, key);\n \n     /* Parse the rest of the key descriptor. */\n     switch (key_type) {\n",
     "build_artifacts_count": 0,
     "tested_povs_count": 1
   },
   "context_retrieval": {
-    "source_questions": [],
+    "source_questions": [
+      {
+        "tool_name": "source_questions",
+        "args": [
+          "What is the definition and implementation of the function `zbee_sec_add_key_to_keyring`?",
+          "The vulnerability is caused by a stack buffer overflow in the `zbee_sec_add_key_to_keyring` function where a fixed-size buffer is used to store keys."
+        ],
+        "kwargs": {},
+        "timestamp": 9146.133695585,
+        "success": true,
+        "result_summary": "Ok(SourceQuestionsResult(answer='The function `zbee_sec_add_key_to_keyring` is defined in the file `wireshark/epan/dissectors/packet-zbee-security.c` starting from line 1235. Below is the implementati..."
+      }
+    ],
     "read_definition": [
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "dissect_zbee_nwk_report",
-          "wireshark/epan/dissectors/packet-zbee-nwk.c",
-          null,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 3815.557925403,
-        "success": true,
-        "result_summary": "Ok({'contents': '1361 static guint\\n1362 dissect_zbee_nwk_report(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, guint offset)\\n1363 {\\n1364     guint8  options;\\n1365     guint8  report_type;\\n1..."
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "zbee_sec_add_key_to_keyring",
-          "wireshark/epan/dissectors/packet-zbee-security.c",
-          null,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 3815.558789862,
-        "success": true,
-        "result_summary": "Ok({'contents': '1235 void zbee_sec_add_key_to_keyring(packet_info *pinfo, const guint8 *key)\\n1236 {\\n1237     GSList            **nwk_keyring;\\n1238     key_record_t        key_record;\\n1239     zbe..."
-      },
       {
         "tool_name": "read_definition",
         "args": [
@@ -71,71 +57,104 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 3815.560613737,
+        "timestamp": 9152.112699172,
         "success": true,
         "result_summary": "Ok({'contents': '1291 static guint\\n1292 dissect_zbee_aps_transport_key(tvbuff_t *tvb, packet_info *pinfo _U_, proto_tree *tree, guint offset)\\n1293 {\\n1294     guint8              key_type;\\n1295    ..."
       }
     ],
-    "read_source": [],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "wireshark/epan/dissectors/packet-zbee-aps.c",
+          1300
+        ],
+        "kwargs": {},
+        "timestamp": 9167.367294178,
+        "success": true,
+        "result_summary": "Ok({'contents': '1201             /* Confirm Key  Command. */\\n1202             offset = dissect_zbee_aps_confirm_key(tvb, pinfo, cmd_tree, offset);\\n1203             break;\\n1204 \\n1205         defau..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "wireshark/epan/dissectors/packet-zbee-aps.c",
+          1310
+        ],
+        "kwargs": {},
+        "timestamp": 9173.773712639,
+        "success": true,
+        "result_summary": "Ok({'contents': '1211         /* There are leftover bytes! */\\n1212         proto_tree  *root;\\n1213         tvbuff_t    *leftover_tvb   = tvb_new_subset_remaining(tvb, offset);\\n1214 \\n1215         /..."
+      }
+    ],
     "find_references": [
       {
         "tool_name": "find_references",
         "args": [
-          "zbee_sec_add_key_to_keyring",
+          "ZBEE_APS_CMD_KEY_LENGTH",
           "wireshark/epan/dissectors/packet-zbee-security.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 3809.479455026,
+        "timestamp": 9149.20072792,
         "success": true,
-        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: wireshark/epan/dissectors/packet-zbee-aps.c, wireshark/epan/dissectors/packet-zbee-nwk.c, wireshark/epan/dissecto..."
+        "result_summary": "Ok([FileReferences(file_name='wireshark/epan/dissectors/packet-zbee-security.c', refs=[FileReference(line=1254, content='                        ZBEE_APS_CMD_KEY_LENGTH) ) {', enclosing_definition='zb..."
       },
       {
         "tool_name": "find_references",
         "args": [
-          "zbee_sec_add_key_to_keyring",
+          "dissect_zbee_aps_transport_key",
+          "wireshark/epan/dissectors/packet-zbee-security.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 9149.211512129,
+        "success": true,
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: wireshark/epan/dissectors/packet-zbee-aps.c, extra=None))"
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "dissect_zbee_aps_transport_key",
           "wireshark/epan/dissectors/packet-zbee-aps.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 3812.81032136,
+        "timestamp": 9150.801126713,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='wireshark/epan/dissectors/packet-zbee-aps.c', refs=[FileReference(line=1313, content='    zbee_sec_add_key_to_keyring(pinfo, key);', enclosing_definition='dissect_zbee_ap..."
-      },
-      {
-        "tool_name": "find_references",
-        "args": [
-          "zbee_sec_add_key_to_keyring",
-          "wireshark/epan/dissectors/packet-zbee-nwk.c",
-          false
-        ],
-        "kwargs": {},
-        "timestamp": 3812.814987569,
-        "success": true,
-        "result_summary": "Ok([FileReferences(file_name='wireshark/epan/dissectors/packet-zbee-nwk.c', refs=[FileReference(line=1398, content='        zbee_sec_add_key_to_keyring(pinfo, key);', enclosing_definition='dissect_zbe..."
-      },
-      {
-        "tool_name": "find_references",
-        "args": [
-          "zbee_sec_add_key_to_keyring",
-          "wireshark/epan/dissectors/packet-zbee-security.h",
-          false
-        ],
-        "kwargs": {},
-        "timestamp": 3812.818729527,
-        "success": true,
-        "result_summary": "Ok([FileReferences(file_name='wireshark/epan/dissectors/packet-zbee-security.h', refs=[FileReference(line=83, content='extern void zbee_sec_add_key_to_keyring(packet_info *, const guint8 *);', enclosi..."
+        "result_summary": "Ok([FileReferences(file_name='wireshark/epan/dissectors/packet-zbee-aps.c', refs=[FileReference(line=1155, content='            offset = dissect_zbee_aps_transport_key(tvb, pinfo, cmd_tree, offset);',..."
       }
     ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
-          "wireshark/epan/dissectors/packet-zbee-security.c",
-          "@@ -1254,6 +1254,12 @@\n     if ( !*nwk_keyring ||\n             memcmp( ((key_record_t *)((GSList *)(*nwk_keyring))->data)->key, &key,\n                 ZBEE_APS_CMD_KEY_LENGTH) ) {\n+        // Validate key size\n+        if (key == NULL || strlen((const char*)key) != ZBEE_APS_CMD_KEY_LENGTH) {\n+            // Invalid key size, return early\n+            return;\n+        }\n+\n         /* Store a new or different key in the key ring */\n         key_record.frame_num = pinfo->num;\n         key_record.label = NULL;"
+          "wireshark/epan/dissectors/packet-zbee-aps.c",
+          "@@ -1312,7 +1312,13 @@\n     /* Update the key ring for this pan */\n     if (key_type == ZBEE_APS_CMD_KEY_STANDARD_NWK || key_type == ZBEE_APS_CMD_KEY_HIGH_SEC_NWK) {\n         zbee_sec_add_key_to_keyring(pinfo, key);\n+    } else {\n+        // Key length validation\n+        if (ZBEE_APS_CMD_KEY_LENGTH > sizeof(key)) {\n+            // Log an error or handle the invalid key case\n+            return offset; // Skip further processing\n+        }\n     }"
         ],
         "kwargs": {},
-        "timestamp": 3824.719427616,
+        "timestamp": 9165.972754386,
+        "success": true,
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 1312): The patch context lines have introduced a typographic error. The context you provided inserted `{` when no such line e..."
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "wireshark/epan/dissectors/packet-zbee-aps.c",
+          "@@ -1312,7 +1312,14 @@\n     /* Update the key ring for this pan */\n     if (key_type == ZBEE_APS_CMD_KEY_STANDARD_NWK || key_type == ZBEE_APS_CMD_KEY_HIGH_SEC_NWK) {\n-        zbee_sec_add_key_to_keyring(pinfo, key);\n+        // Key length validation\n+        if (ZBEE_APS_CMD_KEY_LENGTH > sizeof(key)) {\n+            // Log an error or handle the invalid key case\n+            return offset; // Skip further processing\n+        }\n+        zbee_sec_add_key_to_keyring(pinfo, key);\n     }"
+        ],
+        "kwargs": {},
+        "timestamp": 9172.157638347,
+        "success": true,
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 1312): The patch context lines have introduced a typographic error. The context you provided inserted `{` when no such line e..."
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "wireshark/epan/dissectors/packet-zbee-aps.c",
+          "@@ -1312,7 +1312,15 @@\n     /* Update the key ring for this pan */\n-        zbee_sec_add_key_to_keyring(pinfo, key);\n+        // Key length validation\n+        if (ZBEE_APS_CMD_KEY_LENGTH > sizeof(key)) {\n+            // Log an error or handle the invalid key case\n+            return offset; // Skip further processing\n+        }\n+        zbee_sec_add_key_to_keyring(pinfo, key);\n     }"
+        ],
+        "kwargs": {},
+        "timestamp": 9178.110102391,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -146,9 +165,9 @@
         "tool_name": "list_current_edits",
         "args": [],
         "kwargs": {},
-        "timestamp": 3826.303586492,
+        "timestamp": 9179.096284225,
         "success": true,
-        "result_summary": "Ok({'edits': ['@@ -1254,6 +1254,12 @@\\n     if ( !*nwk_keyring ||\\n             memcmp( ((key_record_t *)((GSList *)(*nwk_keyring))->data)->key, &key,\\n                 ZBEE_APS_CMD_KEY_LENGTH) ) {\\n+..."
+        "result_summary": "Ok({'edits': ['@@ -1312,7 +1312,15 @@\\n     /* Update the key ring for this pan */\\n-        zbee_sec_add_key_to_keyring(pinfo, key);\\n+        // Key length validation\\n+        if (ZBEE_APS_CMD_KEY_..."
       }
     ]
   }
