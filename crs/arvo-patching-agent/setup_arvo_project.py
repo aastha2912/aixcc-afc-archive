@@ -54,9 +54,17 @@ def extract_project_info(metadata: dict) -> dict:
         "poc_download_url": None,
     }
 
-    # Parse comments for fuzzer target and reproducer testcase URL
+    # Parse comments for OSS-Fuzz project name, fuzzer target, and reproducer testcase URL
     for comment_entry in metadata.get("report", {}).get("comments", []):
         content = comment_entry.get("content", "")
+        
+        # Extract actual OSS-Fuzz project name from comment text
+        # Example: metadata has "project": "binutils-gdb" (git repo)
+        #          but comment says "Project: binutils" (OSS-Fuzz project name)
+        # We need the OSS-Fuzz project name for correct project.yaml download
+        project_match = re.search(r"^Project:\s*(\S+)", content, re.MULTILINE)
+        if project_match:
+            project_info["project_name"] = project_match.group(1)
         
         # Extract Fuzz target binary (multiple patterns to handle variations)
         # Pattern 1: "Fuzz target binary: fuzzshark_ip"
@@ -73,7 +81,10 @@ def extract_project_info(metadata: dict) -> dict:
         poc_match = re.search(r"Reproducer Testcase:\s*(https://oss-fuzz.com/download\?testcase_id=\d+)", content)
         if poc_match:
             project_info["poc_download_url"] = poc_match.group(1)
-            break # Stop after finding the first POC URL
+        
+        # Break after finding POC and project name (everything we need from first comment)
+        if project_info["poc_download_url"] and project_match:
+            break
 
     return project_info
 
