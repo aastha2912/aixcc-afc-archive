@@ -456,6 +456,129 @@ with open("input.bin", "wb") as f:
     return pov_python
 
 
+async def run_arvo_and_capture_crash(arvo_image_name: str, testcase_path: Path, fuzzer_name: str) -> str:
+    """
+    Run ARVO to test the PoC and capture the crash output.
+    
+    This uses ARVO's prebuilt vulnerable binary, avoiding the rebuild problem.
+    
+    Args:
+        arvo_image_name: ARVO Docker image (e.g., "n132/arvo:65027-vul")
+        testcase_path: Path to PoC testcase file
+        fuzzer_name: Name of the fuzzer to run
+    
+    Returns:
+        Raw output from ARVO run including crash info
+    """
+    from crs.common import docker
+    import asyncio
+    
+    print("Running ARVO to get authentic crash...")
+    print(f"  Image: {arvo_image_name}")
+    print(f"  Fuzzer: {fuzzer_name}")
+    print(f"  Testcase: {testcase_path}")
+    
+    try:
+        # Read testcase data
+        with open(testcase_path, 'rb') as f:
+            testcase_data = f.read()
+        
+        # Run ARVO container
+        async with docker.run(arvo_image_name, timeout=120, group=docker.DockerGroup.Misc) as run:
+            # Write testcase to container
+            from crs.common.docker import vwrite
+            from crs.common.types import Ok, Err
+            result = await vwrite(run, {"/testcase": testcase_data})
+            if result.is_err():
+                print(f"Failed to write testcase: {result.err()}")
+                return ""
+            
+            # Run ARVO reproduce command
+            proc = await run.exec("arvo", "run", fuzzer_name, "/testcase", 
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.STDOUT)
+            stdout, _ = await proc.communicate()
+            output = stdout.decode(errors='replace')
+            
+            print("✓ ARVO run completed")
+            return output
+            
+    except Exception as e:
+        print(f"Error running ARVO: {e}")
+        import traceback
+        traceback.print_exc()
+        return ""
+
+
+async def create_crash_result_from_arvo(task, harness_list, fuzzer_index, arvo_crash_output: str):
+    """
+    Phase 2: Create CrashResult directly from ARVO run output.
+    
+    This bypasses the CRS test_pov() which would rebuild binaries and potentially
+    trigger a different crash. Instead, we use the authentic ARVO crash data.
+    
+    Args:
+        arvo_crash_output: Raw output from 'arvo run' command containing crash info
+    
+    Returns:
+        (crash_result, pov_python) tuple
+    """
+    print("\n" + "="*60)
+    print("PHASE 2: CREATING CrashResult FROM ARVO OUTPUT")
+    print("="*60)
+    print("Skipping CRS test_pov() to avoid rebuilding binaries")
+    print("Using authentic ARVO crash data instead")
+    
+    from crs.modules.project import CrashResult
+    from crs.common.types import BuildConfig
+    
+    # Parse ARVO output to extract crash information
+    lines = arvo_crash_output.split('\n')
+    
+    # Extract stack trace (lines starting with #)
+    stack_lines = []
+    dedup_token = None
+    
+    for i, line in enumerate(lines):
+        if line.strip().startswith('#'):
+            stack_lines.append(line.strip())
+        elif 'DEDUP_TOKEN:' in line:
+            dedup_token = line.split('DEDUP_TOKEN:', 1)[1].strip()
+    
+    if not stack_lines:
+        print("ERROR: No stack trace found in ARVO output")
+        return None, None
+    
+    stack = '\n'.join(stack_lines)
+    
+    # Use the dedup from ARVO or generate from stack
+    if not dedup_token:
+        from hashlib import sha256
+        dedup_token = sha256(stack.encode()).hexdigest()
+    
+    # Get build config (use address sanitizer as default for ARVO)
+    build_config = task.project.info.default_build_config
+    
+    # Prepare POV python script
+    pov_python = prepare_poc_data()
+    
+    # Create CrashResult matching CRS format
+    crash_result = CrashResult(
+        config=build_config,
+        input=b"",  # Not needed for triage
+        output=arvo_crash_output,  # Full ARVO output
+        dedup=dedup_token,
+        stack=stack
+    )
+    
+    print("✓ Created CrashResult from ARVO data:")
+    print(f"  Dedup: {crash_result.dedup[:80]}...")
+    print(f"  Stack frames: {len(stack_lines)}")
+    print(f"  Stack preview: {stack[:200]}...")
+    
+    return crash_result, pov_python
+
+
 async def test_poc_crash(task, harness_list, fuzzer_index):
     """Phase 2: Test PoC and get crash result"""
     print("\n" + "="*60)
@@ -778,7 +901,7 @@ def print_summary(vuln_id, analyzed_vuln, decoded_pov, workflow_data):
     print("COMPLETE CRS WORKFLOW FINISHED")
     print("="*60)
     print("Completed Full CRS Workflow:")
-    print("  1. test_pov() - PoC triggered crash")
+    print("  1. arvo run - PoC triggered crash (using authentic ARVO binary)")
     print("  2. Created POVRunData (like handle_pov_produce_result)")
     print("  3. decode_pov() - Decoded the POV")
     print("  4. CRSTriage.pov_triage() - Analyzed vulnerability with LLM")
@@ -812,8 +935,36 @@ async def test_poc(arvo_id):
     if task is None:
         return None
     
-    # Phase 2: Test PoC and get crash result
-    crash_result, pov_python = await test_poc_crash(task, harness_list, fuzzer_index)
+    # Phase 2: Get crash from ARVO (not from CRS rebuild)
+    # This uses ARVO's prebuilt vulnerable binary to get the authentic crash
+    use_arvo_crash = CONFIG.get('use_prebuilt_image', True)
+    
+    if use_arvo_crash and CONFIG.get('arvo_image_name'):
+        print("\n" + "="*60)
+        print("Using ARVO run output (skipping CRS test_pov)")
+        print("="*60)
+        
+        # Run ARVO to get authentic crash
+        arvo_crash_output = await run_arvo_and_capture_crash(
+            arvo_image_name=CONFIG['arvo_image_name'],
+            testcase_path=Path(POC_FILE),
+            fuzzer_name=FUZZER_NAME
+        )
+        
+        if not arvo_crash_output:
+            print("Failed to get ARVO crash output, falling back to CRS test")
+            crash_result, pov_python = await test_poc_crash(task, harness_list, fuzzer_index)
+        else:
+            # Create CrashResult from ARVO output
+            crash_result, pov_python = await create_crash_result_from_arvo(
+                task, harness_list, fuzzer_index, arvo_crash_output
+            )
+    else:
+        print("\n" + "="*60)
+        print("Using CRS test_pov (may rebuild binaries)")
+        print("="*60)
+        crash_result, pov_python = await test_poc_crash(task, harness_list, fuzzer_index)
+    
     if crash_result is None:
         return None
     
