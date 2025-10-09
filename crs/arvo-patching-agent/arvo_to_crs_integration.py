@@ -541,7 +541,11 @@ async def create_crash_result_from_arvo(task, harness_list, fuzzer_index, arvo_c
     
     for i, line in enumerate(lines):
         if line.strip().startswith('#'):
-            stack_lines.append(line.strip())
+            # Strip /src/ prefix from file paths to match VFS paths
+            # ARVO shows: /src/ghostpdl/pdf/file.c
+            # VFS expects: ghostpdl/pdf/file.c
+            cleaned_line = line.replace(' /src/', ' ')
+            stack_lines.append(cleaned_line.strip())
         elif 'DEDUP_TOKEN:' in line:
             dedup_token = line.split('DEDUP_TOKEN:', 1)[1].strip()
     

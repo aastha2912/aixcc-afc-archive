@@ -1,8 +1,8 @@
 {
-  "vuln_id": 13,
+  "vuln_id": 15,
   "crash_result": {
-    "output": "INFO: Running with entropic power schedule (0xFF, 100).\nINFO: Seed: 878299919\nINFO: Loaded 3 modules   (182523 inline 8-bit counters): 13708 [0x7fffff7679e0, 0x7fffff76af6c), 959 [0x7fffff7caa40, 0x7fffff7cadff), 167856 [0x2d97c90, 0x2dc0c40), \nINFO: Loaded 3 PC tables (182523 PCs): 13708 [0x7fffff76af70,0x7fffff7a0830), 959 [0x7fffff7cae00,0x7fffff7ce9f0), 167856 [0x24c5430,0x2754f30), \n/out/gstoraster_fuzzer: Running 1 inputs 1 time(s) each.\nRunning: /tmp/poc\nAddressSanitizer:DEADLYSIGNAL\n====",
-    "stack": "#0 0xebd5c4 in pdfi_countdown_impl /src/ghostpdl/./pdf/pdf_stack.h:56:18\n#1 0xebd5c4 in pdfi_free_array /src/ghostpdl/./pdf/pdf_array.c:34:13\n#2 0x1004e79 in pdfi_free_object /src/ghostpdl/./pdf/pdf_obj.c:257:13\n#3 0xeb1c9e in pdfi_countdown_impl /src/ghostpdl/./pdf/pdf_stack.h:83:13\n#4 0xeb1c9e in pdfi_free_dict /src/ghostpdl/./pdf/pdf_dict.c:40:13\n#5 0x1004c7b in pdfi_free_object /src/ghostpdl/./pdf/pdf_obj.c:260:13\n#6 0xf75bd3 in pdfi_countdown_impl /src/ghostpdl/./pdf/pdf_stack.h:83:13\n#7 0x",
+    "output": "INFO: Running with entropic power schedule (0xFF, 100).\nINFO: Seed: 3168922697\nINFO: Loaded 3 modules   (182523 inline 8-bit counters): 13708 [0x7fffff7679e0, 0x7fffff76af6c), 959 [0x7fffff7caa40, 0x7fffff7cadff), 167856 [0x2d97c90, 0x2dc0c40), \nINFO: Loaded 3 PC tables (182523 PCs): 13708 [0x7fffff76af70,0x7fffff7a0830), 959 [0x7fffff7cae00,0x7fffff7ce9f0), 167856 [0x24c5430,0x2754f30), \n/out/gstoraster_fuzzer: Running 1 inputs 1 time(s) each.\nRunning: /tmp/poc\nAddressSanitizer:DEADLYSIGNAL\n===",
+    "stack": "#0 0xebd5c4 in pdfi_countdown_impl ghostpdl/./pdf/pdf_stack.h:56:18\n#1 0xebd5c4 in pdfi_free_array ghostpdl/./pdf/pdf_array.c:34:13\n#2 0x1004e79 in pdfi_free_object ghostpdl/./pdf/pdf_obj.c:257:13\n#3 0xeb1c9e in pdfi_countdown_impl ghostpdl/./pdf/pdf_stack.h:83:13\n#4 0xeb1c9e in pdfi_free_dict ghostpdl/./pdf/pdf_dict.c:40:13\n#5 0x1004c7b in pdfi_free_object ghostpdl/./pdf/pdf_obj.c:260:13\n#6 0xf75bd3 in pdfi_countdown_impl ghostpdl/./pdf/pdf_stack.h:83:13\n#7 0xf75bd3 in pdfi_free_font_type1 ghos",
     "dedup": "pdfi_countdown_impl--pdfi_free_array--pdfi_free_object"
   },
   "pov_run_data": {
@@ -22,9 +22,158 @@
     "dedup": "pdfi_countdown_impl--pdfi_free_array--pdfi_free_object"
   },
   "analyzed_vuln": {
-    "function": "pdfi_free_object",
-    "file": "/src/ghostpdl/pdf/pdf_obj.c",
-    "description": "The vulnerability is due to improper memory management in the function pdfi_free_object, which calls pdfi_free_array without checking if the object is valid, leading to a potential use-after-free issue when freeing objects that are already freed.",
-    "conditions": "The vulnerability can be triggered when the fuzzer sends inputs that cause the program to attempt freeing the same object multiple times, potentially leading to a segmentation fault."
+    "function": "pdfi_free_dict",
+    "file": "ghostpdl/pdf/pdf_dict.c",
+    "description": "The vulnerability arises from improper handling of memory de-allocation in the `pdfi_free_dict` function. The function does not ensure that all keys and values are properly freed before the dictionary object itself is freed, which can lead to a use-after-free scenario when objects are accessed after being freed. This is particularly evident when the dictionary is expected to clear its entries but attempts to access already freed pointers.",
+    "conditions": "The vulnerability can be triggered when an object is passed to `pdfi_free_dict` that has already been partially freed or when the internal references are not properly managed, leading to attempts to access deallocated memory. This can occur in various contexts where dictionaries are manipulated or freed without appropriate safeguards."
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/pdf/pdf_dict.c\n+++ b/pdf/pdf_dict.c\n@@ -38,8 +38,10 @@\n #endif\n         if (d->values[i] != NULL)\n             pdfi_countdown(d->values[i]);\n+            d->values[i] = NULL; // Prevent double free\n         if (d->keys[i] != NULL)\n             pdfi_countdown(d->keys[i]);\n+            d->keys[i] = NULL; // Prevent double free\n     }\n     gs_free_object(OBJ_MEMORY(d), d->keys, \"pdf interpreter free dictionary keys\");\n     gs_free_object(OBJ_MEMORY(d), d->values, \"pdf interpreter free dictioanry values\");\n",
+    "build_artifacts_count": 0,
+    "tested_povs_count": 1
+  },
+  "context_retrieval": {
+    "source_questions": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "pdfi_free_dict",
+          "ghostpdl/pdf/pdf_dict.c",
+          null,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 20943.417192532,
+        "success": true,
+        "result_summary": "Ok({'contents': '27 void pdfi_free_dict(pdf_obj *o)\\n28 {\\n29     pdf_dict *d = (pdf_dict *)o;\\n30     int i;\\n31 #if DEBUG_DICT\\n32     pdf_name *name;\\n33 #endif\\n34 \\n35     for (i=0;i < d->entries..."
+      }
+    ],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "ghostpdl/pdf/pdf_dict.c",
+          35
+        ],
+        "kwargs": {},
+        "timestamp": 20945.353502324,
+        "success": true,
+        "result_summary": "Ok({'contents': '  1 /* Copyright (C) 2018-2021 Artifex Software, Inc.\\n  2    All Rights Reserved.\\n  3 \\n  4    This software is provided AS-IS with no warranty, either express or\\n  5    implied.\\n..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "pdfi_free_dict",
+          "ghostpdl/pdf/pdf_dict.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 20939.151893155,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='ghostpdl/pdf/pdf_dict.c', refs=[FileReference(line=163, content='                    pdfi_free_dict((pdf_obj *)d);', enclosing_definition='pdfi_dict_from_stack'), FileRef..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "pdfi_countdown",
+          "ghostpdl/pdf/pdf_dict.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 21062.086754961,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='ghostpdl/pdf/pdf_dict.c', refs=[FileReference(line=40, content='            pdfi_countdown(d->values[i]);', enclosing_definition='pdfi_free_dict'), FileReference(line=42,..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "pdfi_countdown",
+          "ghostpdl/pdf/pdf_dict.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 21098.109463977,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='ghostpdl/pdf/pdf_dict.c', refs=[FileReference(line=40, content='            pdfi_countdown(d->values[i]);', enclosing_definition='pdfi_free_dict'), FileReference(line=42,..."
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "ghostpdl/pdf/pdf_dict.c",
+          "@@ -39,32 +39,39 @@\n         if (d->values[i] != NULL) {\n             pdfi_countdown(d->values[i]);\n +            d->values[i] = NULL; // Prevent double free\n         }\n         if (d->keys[i] != NULL) {\n             pdfi_countdown(d->keys[i]);\n +            d->keys[i] = NULL; // Prevent double free\n         }\n     }"
+        ],
+        "kwargs": {},
+        "timestamp": 20963.494120499,
+        "success": true,
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 39): The patch context lines have introduced a typographic error. The context you provided inserted `{`. Please double check ..."
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "ghostpdl/pdf/pdf_dict.c",
+          "@@ -39,32 +39,39 @@\n         if (d->values[i] != NULL)\n             pdfi_countdown(d->values[i]);\n +            d->values[i] = NULL; // Prevent double free\n         if (d->keys[i] != NULL)\n             pdfi_countdown(d->keys[i]);\n +            d->keys[i] = NULL; // Prevent double free\n     }"
+        ],
+        "kwargs": {},
+        "timestamp": 20968.177786043,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "ghostpdl/pdf/pdf_dict.c",
+          "@@ -39,32 +39,39 @@\n         if (d->values[i] != NULL) {\n             pdfi_countdown(d->values[i]);\n +            d->values[i] = NULL; // Prevent double free\n         }\n         if (d->keys[i] != NULL) {\n             pdfi_countdown(d->keys[i]);\n +            d->keys[i] = NULL; // Prevent double free\n         }\n     }"
+        ],
+        "kwargs": {},
+        "timestamp": 21069.359244964,
+        "success": true,
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 39): sw_align failed: Context lines did not match OR matched multiple locations. Please double-check the correctness of the c..."
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "ghostpdl/pdf/pdf_dict.c",
+          "@@ -39,32 +39,39 @@\n         if (d->values[i] != NULL)\n             pdfi_countdown(d->values[i]);\n+            d->values[i] = NULL; // Prevent double free\n         if (d->keys[i] != NULL)\n             pdfi_countdown(d->keys[i]);\n+            d->keys[i] = NULL; // Prevent double free\n     }"
+        ],
+        "kwargs": {},
+        "timestamp": 21088.007391348,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "undo_last_patch": [
+      {
+        "tool_name": "undo_last_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 21081.114239012,
+        "success": true,
+        "result_summary": "Ok({'total_edits': 0})"
+      }
+    ],
+    "list_current_edits": [
+      {
+        "tool_name": "list_current_edits",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 20969.731419377,
+        "success": true,
+        "result_summary": "Ok({'edits': ['@@ -39,32 +39,39 @@\\n        if (d->values[i] != NULL)\\n            pdfi_countdown(d->values[i]);\\n+            d->values[i] = NULL; // Prevent double free\\n        if (d->keys[i] != NU..."
+      },
+      {
+        "tool_name": "list_current_edits",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 21089.401169974,
+        "success": true,
+        "result_summary": "Ok({'edits': ['@@ -39,32 +39,39 @@\\n         if (d->values[i] != NULL)\\n             pdfi_countdown(d->values[i]);\\n+            d->values[i] = NULL; // Prevent double free\\n         if (d->keys[i] !=..."
+      }
+    ]
   }
 }
