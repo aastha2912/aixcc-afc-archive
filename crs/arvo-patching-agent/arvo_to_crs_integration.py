@@ -162,24 +162,36 @@ async def extract_arvo_source_and_workdir(arvo_image_name: str, project_name: st
     # Extract /src from ARVO image if not already cached
     if not src_tar_path.exists():
         print(f"Extracting source code from ARVO image to {src_tar_path}...")
-        async with docker.run(arvo_image_name, timeout=60, group=docker.DockerGroup.Misc) as run:
-            # Run tar inside ARVO container to package /src
-            proc = await run.exec(
-                "tar", "cf", "-", "--transform", r"s/^\.\///", "-C", "/src", ".",
-                stdout=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await proc.communicate()
-            
-            if proc.returncode != 0:
-                print(f"Failed to extract /src from ARVO image")
-                return False
-            
-            # Save to cache location where project.py expects it
-            # When project.py checks "if src.tar exists", it will find this and skip Dockerfile build
-            with open(src_tar_path, "wb") as f:
-                f.write(stdout)
-            print(f"Extracted source code from ARVO image")
-            print(f"CRS will detect src.tar and skip Dockerfile build entirely")
+        try:
+            async with docker.run(arvo_image_name, timeout=600, group=docker.DockerGroup.Misc) as run:
+                # Stream directly to file to avoid memory issues with huge projects
+                with open(src_tar_path, "wb") as f:
+                    proc = await run.exec(
+                        "tar", "cf", "-", "--transform", r"s/^\.\///", "-C", "/src", ".",
+                        stdout=f,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    _, stderr = await proc.communicate()
+                
+                if proc.returncode != 0:
+                    print(f"Failed to extract /src: {stderr.decode(errors='replace')[:200]}")
+                    if src_tar_path.exists():
+                        src_tar_path.unlink()
+                    return False
+                
+                if not src_tar_path.exists() or src_tar_path.stat().st_size == 0:
+                    print(f"ERROR: No data extracted from /src")
+                    return False
+                
+                size_mb = src_tar_path.stat().st_size / (1024 * 1024)
+                print(f"Extracted source code from ARVO image ({size_mb:.1f} MB)")
+                print(f"CRS will detect src.tar and skip Dockerfile build entirely")
+        except asyncio.TimeoutError:
+            print(f"ERROR: Source extraction timed out (600s)")
+            return False
+        except Exception as e:
+            print(f"ERROR: Source extraction failed: {e}")
+            return False
     else:
         print(f"Source code already cached at {src_tar_path}")
     
@@ -216,25 +228,28 @@ async def extract_arvo_binaries(task, arvo_image_name: str) -> bool:
                     continue
                 
                 # Run a container from the ARVO image and copy /out directory
-                async with docker.run(arvo_image_name, timeout=60, group=docker.DockerGroup.Misc) as run:
-                    # Extract /out from the container (contains prebuilt fuzzers)
-                    proc = await run.exec(
-                        "tar", "cf", "-", "--transform", r"s/^\.\///", "-C", "/out", ".",
-                        stdout=asyncio.subprocess.PIPE,
-                    )
-                    
-                    # Write tar to file
-                    stdout, _ = await proc.communicate()
+                async with docker.run(arvo_image_name, timeout=120, group=docker.DockerGroup.Misc) as run:
+                    # Stream directly to file to avoid memory issues
+                    with open(build_tar_path, "wb") as f:
+                        proc = await run.exec(
+                            "tar", "cf", "-", "--transform", r"s/^\.\///", "-C", "/out", ".",
+                            stdout=f,
+                            stderr=asyncio.subprocess.PIPE,
+                        )
+                        _, stderr = await proc.communicate()
                     
                     if proc.returncode != 0:
-                        print(f"Failed to extract build artifacts for {build_config.SANITIZER}")
+                        print(f"Failed to extract /out: {stderr.decode(errors='replace')[:200]}")
+                        if await build_tar_path.exists():
+                            await build_tar_path.unlink()
                         return False
                     
-                    # Write to the expected build tar path so build() will use the cache
-                    # When CRS calls build(), it will find this and skip compilation
-                    with open(build_tar_path, "wb") as f:
-                        f.write(stdout)
-                    print(f"Extracted prebuilt binaries for {build_config.SANITIZER}")
+                    if not await build_tar_path.exists() or (await build_tar_path.stat()).st_size == 0:
+                        print(f"ERROR: No binaries extracted for {build_config.SANITIZER}")
+                        return False
+                    
+                    size_mb = (await build_tar_path.stat()).st_size / (1024 * 1024)
+                    print(f"Extracted prebuilt binaries for {build_config.SANITIZER} ({size_mb:.1f} MB)")
             
             print("\n✓ Successfully setup from ARVO prebuilt image:")
             print("  - Source code extracted from /src (Dockerfile build skipped)")
@@ -1000,4 +1015,14 @@ async def test_poc(arvo_id):
 if __name__ == "__main__":
     # Get ARVO ID from command line arguments (already loaded in CONFIG)
     arvo_id = CONFIG['arvo_id']
-    asyncio.run(test_poc(arvo_id))
+    try:
+        asyncio.run(test_poc(arvo_id))
+    except Exception as e:
+        print(f"\n{'='*60}")
+        print(f"FATAL ERROR: Uncaught exception")
+        print(f"{'='*60}")
+        print(f"Exception: {e}")
+        import traceback
+        traceback.print_exc()
+        print(f"{'='*60}")
+        sys.exit(1)
