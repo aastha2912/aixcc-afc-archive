@@ -699,9 +699,16 @@ class Project:
             arvo_marker = data_dir / "arvo_workdir.txt"
             is_arvo_mode = await arvo_marker.exists()
             
-            # wrap ALL compiles with theori_compile.sh to allow commands to run before build.sh
-            mounts[config.THEORI_COMPILE] = "/usr/local/bin/theori_compile.sh"
-            compile_commands = ["theori_compile.sh"]
+            # (aastham) Set compile command based on whether it's ARVO or Theori
+            # ARVO images use 'arvo compile', while Theori projects use 'theori_compile.sh'
+            if is_arvo_mode:
+                compile_commands = ["arvo", "compile"]
+                logger.info(f"ARVO mode: Using 'arvo compile' for build")
+            else:
+                # wrap ALL compiles with theori_compile.sh to allow commands to run before build.sh
+                mounts[config.THEORI_COMPILE] = "/usr/local/bin/theori_compile.sh"
+                compile_commands = ["theori_compile.sh"]
+            
             copies: list[tuple[str, Path, list[str]]] = []
 
             if using_bear:
@@ -709,14 +716,13 @@ class Project:
                     mounts[config.BEAR_PATH / "usr/lib/x86_64-linux-gnu/bear/"] = "/usr/lib/x86_64-linux-gnu/bear/"
                     mounts[config.BEAR_PATH / "usr/bin/bear"] = "/opt/bear"
                     
-                    # (aastham) ARVO Integration: Use 'arvo compile' instead of 'theori_compile.sh' for ARVO
-                    # ARVO images have their own compilation workflow via 'arvo compile'
-                    # This command knows how to rebuild the project correctly in the ARVO environment
+                    # (aastham) Wrap the compile command with bear to generate compile_commands.json
+                    # compile_commands was already set above based on ARVO vs Theori mode
                     if is_arvo_mode:
-                        compile_commands = ["/opt/bear", "-o", "/src/compile_commands.json", "arvo", "compile"]
-                        logger.info(f"ARVO bear build: Using 'bear arvo compile' instead of 'bear theori_compile.sh'")
+                        compile_commands = ["/opt/bear", "-o", "/src/compile_commands.json"] + compile_commands
+                        logger.info(f"ARVO bear build: Using 'bear {' '.join(compile_commands[3:])}'")
                     else:
-                        compile_commands = ["python3", "/opt/bear", "-o", "/src/compile_commands.json","theori_compile.sh"]
+                        compile_commands = ["python3", "/opt/bear", "-o", "/src/compile_commands.json"] + compile_commands
                     
                     include_dirs = ["compile_commands.json"]
                     workdir = await self.get_working_dir()
@@ -727,26 +733,26 @@ class Project:
 
             reader = process.Reader()
             try:
-                # (aastham) ARVO Integration: Don't override environment for ARVO bear builds
+                # (aastham) ARVO Integration: Don't override environment for ARVO builds
                 # ARVO images have their own environment setup (CXXFLAGS, compiler paths, etc.)
-                # If we override with build_config.to_dict(), it breaks C++ compilation
-                build_env = {} if (using_bear and is_arvo_mode) else build_config.to_dict()
+                # If we override with build_config.to_dict(), it breaks compilation
+                build_env = {} if is_arvo_mode else build_config.to_dict()
                 
                 async with docker.run(self.build_image, env=build_env, mounts=mounts, timeout=timeout, scope=scope) as run:
-                    # (aastham) ARVO Integration: Skip /src overwrite for ARVO bear builds
+                    # (aastham) ARVO Integration: Skip /src overwrite for ARVO builds
                     # Background: ARVO images have prebuilt binaries with a specific build state in /src
                     # If we overwrite /src with our VFS, it breaks 'arvo compile' because:
                     # 1. Build artifacts (.o files, Makefiles state, etc.) get replaced
                     # 2. 'arvo compile' expects the original build configuration
                     # 3. Mismatch causes compilation failures
                     # 
-                    # Solution: For ARVO bear builds, preserve original /src so 'bear arvo compile' succeeds
-                    skip_src_overwrite = using_bear and is_arvo_mode
+                    # Solution: For ARVO builds, preserve original /src so 'arvo compile' succeeds
+                    skip_src_overwrite = is_arvo_mode
                     
                     if skip_src_overwrite:
-                        logger.info(f"ARVO bear build: Preserving original /src to maintain build state")
+                        logger.info(f"ARVO build: Preserving original /src to maintain build state")
                     
-                    # materialize /src vfs in container (skip for ARVO bear builds)
+                    # materialize /src vfs in container (skip for ARVO builds)
                     if not skip_src_overwrite:
                         vfs = self.vfs.parent if using_bear else self.vfs
                         require(await docker.vwrite_layers(run, "/src", await vfs.layers()))
