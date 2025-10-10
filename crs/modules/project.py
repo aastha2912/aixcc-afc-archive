@@ -699,17 +699,6 @@ class Project:
             arvo_marker = data_dir / "arvo_workdir.txt"
             is_arvo_mode = await arvo_marker.exists()
             
-            # (aastham) Override build_image with ARVO image if marker exists
-            # This ensures bear builds and all other operations use the correct ARVO image
-            # instead of the default CRS-generated image name that doesn't exist
-            if is_arvo_mode:
-                arvo_image_marker = data_dir / "arvo_image.txt"
-                if await arvo_image_marker.exists():
-                    arvo_image_name = (await arvo_image_marker.read_text()).strip()
-                    if arvo_image_name and arvo_image_name != self.build_image:
-                        logger.info(f"Overriding build_image: {self.build_image} → {arvo_image_name}")
-                        self.build_image = arvo_image_name
-            
             # (aastham) Set compile command based on whether it's ARVO or Theori
             # ARVO images use 'arvo compile', while Theori projects use 'theori_compile.sh'
             if is_arvo_mode:
@@ -841,21 +830,15 @@ class Project:
         # These projects have massive parallel compilation that exceeds container memory (7.65GB)
         # Evidence: "clang-7: error: unable to execute command: Killed" → OOM killer
         # 
-        # List of ARVO IDs to skip (image size, reason):
-        # - 9120 (Skia, 8.15GB): 20+ clang processes, needs 40-80GB
-        # - 35422 (16.1GB): Extremely large project
-        SKIP_BEAR_ARVO_IDS = ["9120", "35422"]
+        # Skip list: Project names (simpler and more reliable than ARVO IDs)
+        SKIP_BEAR_PROJECTS = ["skia"]  # 9120 (8.15GB image, needs 40-80GB to compile)
         
-        # Check if this is an ARVO image by looking for the marker
+        # Check if this is an ARVO project that should skip bear
         data_dir = config.CACHE_DIR / "data" / self.ossfuzz_hash / self.name
         arvo_marker = data_dir / "arvo_workdir.txt"
-        if await arvo_marker.exists():
-            # Extract ARVO ID from build image name (e.g., "n132/arvo:9120-vul" → "9120")
-            if "arvo:" in self.build_image and "-vul" in self.build_image:
-                arvo_id = self.build_image.split("arvo:")[1].split("-")[0]
-                if arvo_id in SKIP_BEAR_ARVO_IDS:
-                    logger.info(f"Skipping bear build for ARVO {arvo_id} (prevents OOM, using text search)")
-                    return None
+        if await arvo_marker.exists() and self.name in SKIP_BEAR_PROJECTS:
+            logger.info(f"Skipping bear build for ARVO project '{self.name}' (prevents OOM, using text search)")
+            return None
         
         build_config = self.info.default_build_config
         state = await self.edit_state()
