@@ -63,10 +63,20 @@ class CRSTriage(CRSDynamicDebug):
                 "</important>"
             )
             res = await agent.run(max_iters=1)
+        
+        # Store the agent for cost analysis access
+        self._last_agent = agent
+        
         if res.response is not None:
             return Ok(res.response)
         else:
             return Err(CRSError("no response was produced"))
+    
+    def get_llm_calls(self):
+        """Get LLM call data from the last triage agent"""
+        if hasattr(self, '_last_agent'):
+            return self._last_agent.get_llm_calls()
+        return []
 
 
 class DedupClassifier(Classifier[int | Literal["NEW"]]):

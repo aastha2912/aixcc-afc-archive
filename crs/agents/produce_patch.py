@@ -365,3 +365,9 @@ class CRSPatcher(CRSPovProducer, CRSSourceQuestions):
         if hasattr(self, '_last_agent'):
             return self._last_agent.get_context_capture()
         return {}
+    
+    def get_llm_calls(self):
+        """Get LLM call data from the last patching agent"""
+        if hasattr(self, '_last_agent'):
+            return self._last_agent.get_llm_calls()
+        return []

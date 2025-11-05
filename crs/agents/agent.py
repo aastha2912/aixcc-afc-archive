@@ -172,6 +172,8 @@ class AgentGeneric[T](ABC):
         self.id = f"{id(self)}_{time.time()}"
         self._log_creation()
         self.model_idx = 0
+        # Track LLM calls for cost analysis
+        self.llm_calls: List[Dict[str, Any]] = []
 
         names: list[str] = []
         bases = [self.__class__]
@@ -212,6 +214,61 @@ class AgentGeneric[T](ABC):
         self.tool_errors += 1
         if self.parent is not None:
             self.parent._add_tool_error()
+
+    def _capture_llm_call(self, model_response: 'ModelResponse', msg: Message):
+        """Capture LLM call data for cost analysis"""
+        import time as time_module
+        import litellm
+        
+        # Extract usage data
+        usage = model_response.usage
+        
+        # Get pricing information for this model
+        try:
+            model_info = litellm.get_model_info(self.model)
+            input_cost_per_token = model_info.get("input_cost_per_token", 0)
+            output_cost_per_token = model_info.get("output_cost_per_token", 0)
+            cache_cost_per_token = model_info.get("cache_read_input_token_cost", 0)
+        except Exception:
+            # If we can't get model info, use zeros
+            input_cost_per_token = 0
+            output_cost_per_token = 0
+            cache_cost_per_token = 0
+        
+        # Determine if this is from a tool call or regular response
+        has_tool_calls = bool(msg.tool_calls)
+        
+        # Extract tool call information if present
+        tool_calls_info = []
+        if has_tool_calls:
+            for tool_call in msg.tool_calls:
+                tool_calls_info.append({
+                    "tool_name": tool_call.function.name,
+                    "tool_call_id": tool_call.id,
+                })
+        
+        call_data = {
+            "timestamp": time_module.time(),
+            "model": self.model,
+            "cost": model_response.cost,
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0),
+            "cached_tokens": usage.get("prompt_tokens_details", {}).get("cached_tokens", 0) if isinstance(usage.get("prompt_tokens_details"), dict) else 0,
+            "input_cost_per_token": input_cost_per_token,
+            "output_cost_per_token": output_cost_per_token,
+            "cache_cost_per_token": cache_cost_per_token,
+            "has_tool_calls": has_tool_calls,
+            "tool_call_count": len(msg.tool_calls) if has_tool_calls else 0,
+            "tool_calls": tool_calls_info if tool_calls_info else None,
+            "finish_reason": model_response.choices[0].finish_reason if model_response.choices else None,
+        }
+        
+        self.llm_calls.append(call_data)
+        
+        # Propagate to parent agent if exists
+        if self.parent is not None and hasattr(self.parent, '_capture_llm_call'):
+            self.parent.llm_calls.append(call_data)
 
     async def _do_tool_call(self, tool_name: str, tool_call_id: str, tool: Tool, **kwargs: Dict[str, Any]) -> ToolResult[Any]:
         # create a new task (with new context) for each tool call
@@ -358,6 +415,9 @@ class AgentGeneric[T](ABC):
         model_response = (await self.completion()).unwrap() # no choice but to unwrap()
         msg = model_response.choices[0].message
         self._append_msg(msg)
+        
+        # Capture LLM call data for cost analysis
+        self._capture_llm_call(model_response, msg)
 
         tool_calls = msg.tool_calls or []
         handle_tools = [self._handle_tool_call(tool_call) for tool_call in tool_calls]
@@ -433,6 +493,10 @@ class AgentGeneric[T](ABC):
             filter=lambda res: res.response,
             stop_condition=stop_condition
         )
+
+    def get_llm_calls(self) -> List[Dict[str, Any]]:
+        """Get LLM call data for cost analysis"""
+        return self.llm_calls
 
     def fork(self: Self):
         return self.__class__.deserialize(self.serialize())
