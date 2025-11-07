@@ -693,7 +693,7 @@ async def triage_vulnerability(task, decoded_pov):
     
     if analyzed_vuln_result.is_err():
         print(f"CRS Triage Agent failed: {analyzed_vuln_result.err()}")
-        return None
+        return None, None
     
     analyzed_vuln = analyzed_vuln_result.unwrap()
     print(f"Vulnerability Analysis Complete:")
@@ -702,7 +702,19 @@ async def triage_vulnerability(task, decoded_pov):
     print(f"  Description: {analyzed_vuln.description[:200]}...")
     print(f"  Conditions: {len(analyzed_vuln.conditions)} conditions")
     
-    return analyzed_vuln
+    # Get LLM cost data from triage agent
+    llm_calls = triage_agent.get_llm_calls()
+    total_cost = sum(call.get('cost', 0) for call in llm_calls)
+    total_input_tokens = sum(call.get('input_tokens', 0) for call in llm_calls)
+    total_output_tokens = sum(call.get('output_tokens', 0) for call in llm_calls)
+    
+    print(f"\nTriage Agent Cost Analysis:")
+    print(f"  Total LLM calls: {len(llm_calls)}")
+    print(f"  Total cost: ${total_cost:.4f}")
+    print(f"  Total input tokens: {total_input_tokens}")
+    print(f"  Total output tokens: {total_output_tokens}")
+    
+    return analyzed_vuln, llm_calls
 
 
 async def store_vulnerability_in_database(crs_instance, task, analyzed_vuln):
@@ -733,7 +745,7 @@ async def store_vulnerability_in_database(crs_instance, task, analyzed_vuln):
     return vuln_id
 
 
-def save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyzed_vuln, arvo_id):
+def save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyzed_vuln, arvo_id, triage_llm_calls):
     """Phase 7: Save workflow data"""
     print("\n" + "="*60)
     print("PHASE 7: SAVING WORKFLOW DATA")
@@ -767,6 +779,16 @@ def save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyze
             "file": analyzed_vuln.file,
             "description": analyzed_vuln.description,
             "conditions": analyzed_vuln.conditions
+        },
+        "cost_analysis": {
+            "triage": {
+                "total_llm_calls": len(triage_llm_calls),
+                "total_cost": sum(call.get('cost', 0) for call in triage_llm_calls),
+                "total_input_tokens": sum(call.get('input_tokens', 0) for call in triage_llm_calls),
+                "total_output_tokens": sum(call.get('output_tokens', 0) for call in triage_llm_calls),
+                "total_cached_tokens": sum(call.get('cached_tokens', 0) for call in triage_llm_calls),
+                "llm_calls": triage_llm_calls
+            }
         }
     }
     
@@ -824,6 +846,39 @@ async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow
             
             # Get context capture data from the patching agent
             context_capture = patcher.get_context_capture() if hasattr(patcher, 'get_context_capture') else {}
+            
+            # Get LLM cost data from patching agent
+            patching_llm_calls = patcher.get_llm_calls() if hasattr(patcher, 'get_llm_calls') else []
+            total_patch_cost = sum(call.get('cost', 0) for call in patching_llm_calls)
+            total_patch_input_tokens = sum(call.get('input_tokens', 0) for call in patching_llm_calls)
+            total_patch_output_tokens = sum(call.get('output_tokens', 0) for call in patching_llm_calls)
+            
+            print(f"\nPatching Agent Cost Analysis:")
+            print(f"  Total LLM calls: {len(patching_llm_calls)}")
+            print(f"  Total cost: ${total_patch_cost:.4f}")
+            print(f"  Total input tokens: {total_patch_input_tokens}")
+            print(f"  Total output tokens: {total_patch_output_tokens}")
+            
+            # Add patching cost to workflow data
+            if "cost_analysis" not in workflow_data:
+                workflow_data["cost_analysis"] = {}
+            workflow_data["cost_analysis"]["patching"] = {
+                "total_llm_calls": len(patching_llm_calls),
+                "total_cost": total_patch_cost,
+                "total_input_tokens": total_patch_input_tokens,
+                "total_output_tokens": total_patch_output_tokens,
+                "total_cached_tokens": sum(call.get('cached_tokens', 0) for call in patching_llm_calls),
+                "llm_calls": patching_llm_calls
+            }
+            
+            # Calculate overall cost
+            total_triage_cost = workflow_data.get("cost_analysis", {}).get("triage", {}).get("total_cost", 0)
+            workflow_data["cost_analysis"]["total"] = {
+                "total_cost": total_triage_cost + total_patch_cost,
+                "total_input_tokens": workflow_data.get("cost_analysis", {}).get("triage", {}).get("total_input_tokens", 0) + total_patch_input_tokens,
+                "total_output_tokens": workflow_data.get("cost_analysis", {}).get("triage", {}).get("total_output_tokens", 0) + total_patch_output_tokens,
+                "total_llm_calls": workflow_data.get("cost_analysis", {}).get("triage", {}).get("total_llm_calls", 0) + len(patching_llm_calls)
+            }
             
             # Check if we got a ConfirmedPatchResult (with actual patch) or just PatchResult
             if hasattr(patch_response, 'patch') and patch_response.success:
@@ -889,6 +944,22 @@ async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow
             # Get context capture data from the patching agent even on failure
             context_capture = patcher.get_context_capture() if hasattr(patcher, 'get_context_capture') else {}
             
+            # Get LLM cost data even on failure
+            patching_llm_calls = patcher.get_llm_calls() if hasattr(patcher, 'get_llm_calls') else []
+            total_patch_cost = sum(call.get('cost', 0) for call in patching_llm_calls)
+            
+            # Add patching cost to workflow data even on failure
+            if "cost_analysis" not in workflow_data:
+                workflow_data["cost_analysis"] = {}
+            workflow_data["cost_analysis"]["patching"] = {
+                "total_llm_calls": len(patching_llm_calls),
+                "total_cost": total_patch_cost,
+                "total_input_tokens": sum(call.get('input_tokens', 0) for call in patching_llm_calls),
+                "total_output_tokens": sum(call.get('output_tokens', 0) for call in patching_llm_calls),
+                "total_cached_tokens": sum(call.get('cached_tokens', 0) for call in patching_llm_calls),
+                "llm_calls": patching_llm_calls
+            }
+            
             workflow_data["patch_result"] = {
                 "success": False,
                 "error": str(patch_result.err())
@@ -902,6 +973,22 @@ async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow
         
         # Get context capture data from the patching agent even on exception
         context_capture = patcher.get_context_capture() if hasattr(patcher, 'get_context_capture') else {}
+        
+        # Get LLM cost data even on exception
+        patching_llm_calls = patcher.get_llm_calls() if hasattr(patcher, 'get_llm_calls') else []
+        total_patch_cost = sum(call.get('cost', 0) for call in patching_llm_calls)
+        
+        # Add patching cost to workflow data even on exception
+        if "cost_analysis" not in workflow_data:
+            workflow_data["cost_analysis"] = {}
+        workflow_data["cost_analysis"]["patching"] = {
+            "total_llm_calls": len(patching_llm_calls),
+            "total_cost": total_patch_cost,
+            "total_input_tokens": sum(call.get('input_tokens', 0) for call in patching_llm_calls),
+            "total_output_tokens": sum(call.get('output_tokens', 0) for call in patching_llm_calls),
+            "total_cached_tokens": sum(call.get('cached_tokens', 0) for call in patching_llm_calls),
+            "llm_calls": patching_llm_calls
+        }
         
         workflow_data["patch_result"] = {
             "success": False,
@@ -935,9 +1022,25 @@ def print_summary(vuln_id, analyzed_vuln, decoded_pov, workflow_data):
     print(f"  Crash Dedup: {decoded_pov.dedup}")
     print(f"  Patch Generated: {'YES' if 'patch_result' in workflow_data and workflow_data['patch_result']['success'] else 'NO'}")
     print()
+    
+    # Print cost analysis summary
+    if "cost_analysis" in workflow_data:
+        cost_data = workflow_data["cost_analysis"]
+        print("Cost Analysis:")
+        if "total" in cost_data:
+            print(f"  Total Cost: ${cost_data['total']['total_cost']:.4f}")
+            print(f"  Total LLM Calls: {cost_data['total']['total_llm_calls']}")
+            print(f"  Total Input Tokens: {cost_data['total']['total_input_tokens']}")
+            print(f"  Total Output Tokens: {cost_data['total']['total_output_tokens']}")
+        if "triage" in cost_data:
+            print(f"  Triage Cost: ${cost_data['triage']['total_cost']:.4f} ({cost_data['triage']['total_llm_calls']} calls)")
+        if "patching" in cost_data:
+            print(f"  Patching Cost: ${cost_data['patching']['total_cost']:.4f} ({cost_data['patching']['total_llm_calls']} calls)")
+        print()
+    
     print("Output Files Saved:")
     print(f"  Configuration: arvo_{CONFIG['arvo_id']}/config.json")
-    print(f"  Workflow Data: arvo_{CONFIG['arvo_id']}/workflow_data.json")
+    print(f"  Workflow Data: arvo_{CONFIG['arvo_id']}/workflow_data.json (includes cost analysis)")
     print(f"  Context Retrieval: arvo_{CONFIG['arvo_id']}/context_retrieval_data.json")
     if 'patch_result' in workflow_data and workflow_data['patch_result']['success']:
         print(f"  Generated Patch: arvo_{CONFIG['arvo_id']}/generated_patch.diff")
@@ -994,7 +1097,7 @@ async def test_poc(arvo_id):
     decoded_pov, crs_instance = await decode_pov(task, harness_list, pov_run_data)
     
     # Phase 5: Triage vulnerability with LLM
-    analyzed_vuln = await triage_vulnerability(task, decoded_pov)
+    analyzed_vuln, triage_llm_calls = await triage_vulnerability(task, decoded_pov)
     if analyzed_vuln is None:
         return None
     
@@ -1002,7 +1105,7 @@ async def test_poc(arvo_id):
     vuln_id = await store_vulnerability_in_database(crs_instance, task, analyzed_vuln)
     
     # Phase 7: Save workflow data
-    workflow_data, workflow_file = save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyzed_vuln, arvo_id)
+    workflow_data, workflow_file = save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyzed_vuln, arvo_id, triage_llm_calls)
     
     # Phase 8: Run patching agent
     workflow_data = await run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow_data, workflow_file, arvo_id)
