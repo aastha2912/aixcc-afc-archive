@@ -700,10 +700,10 @@ class Project:
             arvo_marker = data_dir / "arvo_workdir.txt"
             is_arvo_mode = await arvo_marker.exists()
             
-            # Prebuilt vuln images use 'vulnpatch compile', while Theori projects use 'theori_compile.sh'
+            # Prebuilt vuln images use 'vulpatch compile', while Theori projects use 'theori_compile.sh'
             if is_arvo_mode:
-                compile_commands = ["vulnpatch", "compile"]
-                logger.info("Prebuilt image mode: Using 'vulnpatch compile' for build")
+                compile_commands = ["vulpatch", "compile"]
+                logger.info("Prebuilt image mode: Using 'vulpatch compile' for build")
             else:
                 # wrap ALL compiles with theori_compile.sh to allow commands to run before build.sh
                 mounts[config.THEORI_COMPILE] = "/usr/local/bin/theori_compile.sh"
@@ -741,9 +741,9 @@ class Project:
                 async with docker.run(self.build_image, env=build_env, mounts=mounts, timeout=timeout, scope=scope) as run:
                     # Skip /src overwrite for prebuilt-image builds
                     # Background: prebuilt vuln images have a specific build state in /src.
-                    # If we overwrite /src with our VFS, it breaks 'vulnpatch compile' because:
+                    # If we overwrite /src with our VFS, it breaks 'vulpatch compile' because:
                     # 1. Build artifacts (.o files, Makefiles state, etc.) get replaced
-                    # 2. 'vulnpatch compile' expects the original build configuration
+                    # 2. 'vulpatch compile' expects the original build configuration
                     # 3. Mismatch causes compilation failures
                     # 
                     # Solution: For prebuilt-image builds, preserve original /src so the

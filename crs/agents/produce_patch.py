@@ -33,6 +33,11 @@ class ConfirmedPatchResult(PatchResult):
     tested_povs: list[DecodedPOV]
     build_artifacts: list[PatchArtifact]
 
+class ValidationStatus(BaseModel):
+    status: str
+    message: str
+    details: Optional[dict] = None
+
 class PatcherAgent(ToolRequiredAgent[PatchResult]):
     name = "patcher"
 
@@ -59,7 +64,6 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
     @requireable
     async def test_patch(self) -> Result[str]:
         result = await self.crs.project.build_all(capture_output=True)
-        self._capture_context_call("test_patch", (), {}, result)
         match result:
             case Err(BuildError(error=error)):
                 match await summarize_build_failure(error):
@@ -72,14 +76,18 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
             case Ok(_):
                 error = None
         if error is not None:
-            return Err(CRSError(
+            err = CRSError(
                 "the code failed to build",
                 extra={
+                    "validation_status": "build_failed",
                     "build_error": trim_tool_output(error),
                     "suggestion": "You may want to undo some edits before proceeding with the `undo_last_patch` tool",
                     "status": f"Currently there are {self.crs.project.editor.patch_num} edits"
                 }
-            ))
+            )
+            self._set_validation_status("build_failed", "Patch validation failed during build", err.extra)
+            self._capture_context_call("test_patch", (), {}, Err(err))
+            return Err(err)
 
         ran_tests = False
         match await self.crs.project.run_tests():
@@ -98,6 +106,9 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
                             e.extra["output"] = trim_tool_output(e.extra["output"])
                         case Ok(summary):
                             e.extra["output"] = summary
+                e.extra = (e.extra or {}) | {"validation_status": "functionality_tests_failed"}
+                self._set_validation_status("functionality_tests_failed", "Patch validation failed during functionality tests", e.extra)
+                self._capture_context_call("test_patch", (), {}, Err(e))
                 return Err(e)
 
         # check that it fixes known povs for the commit
@@ -108,7 +119,17 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
                 logger.error(f"failed to get harness for name {pov.harness}: {harnesses}")
             match await self.crs.project.test_pov_contents(harness[0], pov.input):
                 case Ok(_):
-                    return Err(CRSError(PATCH_SEC_FAILURE))
+                    err = CRSError(
+                        PATCH_SEC_FAILURE,
+                        extra={
+                            "validation_status": "pov_still_crashes",
+                            "harness": pov.harness,
+                            "dedup": pov.dedup,
+                        }
+                    )
+                    self._set_validation_status("pov_still_crashes", "Patch validation failed because a known PoV still reproduces", err.extra)
+                    self._capture_context_call("test_patch", (), {}, Err(err))
+                    return Err(err)
                 case _:
                     pass
 
@@ -131,6 +152,12 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
                 "If you believe the patch addressed the vulnerability without breaking intended functionality, "
                 "please terminate this session. Otherwise, it's not too late to make more changes.\n"
             )
+        self._set_validation_status(
+            "validated_patch_accepted",
+            "Patch validation succeeded",
+            {"ran_tests": ran_tests, "tested_povs_count": len(self.povs)},
+        )
+        self._capture_context_call("test_patch", (), {}, Ok(result))
         return Ok(result)
 
     async def sanity_patch_hook[R](self, path: str, patch: str) -> Optional[ToolResult[Editor.Note]]:
@@ -212,6 +239,9 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
             )]
         return res
 
+    def _set_validation_status(self, status: str, message: str, details: Optional[dict] = None):
+        self.last_validation = ValidationStatus(status=status, message=message, details=details)
+
     async def source_code_questions(self, question: str, additional_info: str = "") -> Result[SourceQuestionsResult]:
         result = await self.crs.source_code_questions(question, additional_info, self.rawdiff)
         self._capture_context_call("source_questions", (question, additional_info), {}, result)
@@ -229,6 +259,8 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
         
         if isinstance(result, ToolError):
             call_data["error"] = str(result.error)
+            if result.extra:
+                call_data["error_extra"] = result.extra
         else:
             # Capture a summary of the result (first 200 chars to avoid huge data)
             result_str = str(result)[:200] + "..." if len(str(result)) > 200 else str(result)
@@ -294,6 +326,7 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
         self.func_failure_count = 0
         self.sec_failure_count = 0
         self.patch: Optional[ConfirmedPatchResult] = None
+        self.last_validation: Optional[ValidationStatus] = None
         self.rawdiff = rawdiff
         # Context capture for debugging
         self.context_capture = {
@@ -349,6 +382,11 @@ class CRSPatcher(CRSPovProducer, CRSSourceQuestions):
         if hasattr(self, '_last_agent'):
             return self._last_agent.get_context_capture()
         return {}
+
+    def get_last_validation(self):
+        if hasattr(self, '_last_agent'):
+            return self._last_agent.last_validation
+        return None
     
     def get_llm_calls(self):
         """Get LLM call data from the last patching agent"""

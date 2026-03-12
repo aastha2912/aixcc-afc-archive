@@ -8,8 +8,8 @@ It can use prebuilt ARVO Docker images to avoid rebuilding projects from source.
 Prebuilt images (e.g., vulpatch:{id}-vul) contain:
   - Pre-compiled vulnerable version in /out
   - Source code in /src
-  - 'vulnpatch compile' command to rebuild after patching
-  - 'vulnpatch run' command to test with the PoC
+  - 'vulpatch compile' command to rebuild after patching
+  - 'vulpatch run' command to test with the PoC
 
 Configuration (in arvo_<id>/config.json):
   - use_prebuilt_image: Set to true to use prebuilt ARVO images (default)
@@ -953,6 +953,7 @@ async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow
             
             # Get context capture data from the patching agent
             context_capture = patcher.get_context_capture() if hasattr(patcher, 'get_context_capture') else {}
+            last_validation = patcher.get_last_validation() if hasattr(patcher, 'get_last_validation') else None
             
             # Get LLM cost data from patching agent
             patching_llm_calls = patcher.get_llm_calls() if hasattr(patcher, 'get_llm_calls') else []
@@ -1007,6 +1008,8 @@ async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow
                     "build_artifacts_count": len(patch_response.build_artifacts) if patch_response.build_artifacts else 0,
                     "tested_povs_count": len(patch_response.tested_povs)
                 }
+                if last_validation is not None:
+                    workflow_data["patch_result"]["last_validation"] = last_validation.model_dump()
                 
                 # Add context capture data
                 workflow_data["context_retrieval"] = context_capture
@@ -1020,6 +1023,10 @@ async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow
                     "success": patch_response.success,
                     "failure_reason": getattr(patch_response, 'failure_reason', 'Unknown failure')
                 }
+                if last_validation is not None:
+                    workflow_data["patch_result"]["last_validation"] = last_validation.model_dump()
+                    print(f"  Last validation status: {last_validation.status}")
+                    print(f"  Last validation message: {last_validation.message}")
                 
                 # Add context capture data
                 workflow_data["context_retrieval"] = context_capture
@@ -1050,6 +1057,7 @@ async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow
             
             # Get context capture data from the patching agent even on failure
             context_capture = patcher.get_context_capture() if hasattr(patcher, 'get_context_capture') else {}
+            last_validation = patcher.get_last_validation() if hasattr(patcher, 'get_last_validation') else None
             
             # Get LLM cost data even on failure
             patching_llm_calls = patcher.get_llm_calls() if hasattr(patcher, 'get_llm_calls') else []
@@ -1071,6 +1079,8 @@ async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow
                 "success": False,
                 "error": str(patch_result.err())
             }
+            if last_validation is not None:
+                workflow_data["patch_result"]["last_validation"] = last_validation.model_dump()
             # Add context capture data even on failure
             workflow_data["context_retrieval"] = context_capture
             workflow_file.write_text(json.dumps(workflow_data, indent=2))
@@ -1080,6 +1090,7 @@ async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow
         
         # Get context capture data from the patching agent even on exception
         context_capture = patcher.get_context_capture() if hasattr(patcher, 'get_context_capture') else {}
+        last_validation = patcher.get_last_validation() if hasattr(patcher, 'get_last_validation') else None
         
         # Get LLM cost data even on exception
         patching_llm_calls = patcher.get_llm_calls() if hasattr(patcher, 'get_llm_calls') else []
@@ -1101,6 +1112,8 @@ async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow
             "success": False,
             "error": str(e)
         }
+        if last_validation is not None:
+            workflow_data["patch_result"]["last_validation"] = last_validation.model_dump()
         # Add context capture data even on exception
         workflow_data["context_retrieval"] = context_capture
         workflow_file.write_text(json.dumps(workflow_data, indent=2))
@@ -1128,6 +1141,10 @@ def print_summary(vuln_id, analyzed_vuln, decoded_pov, workflow_data):
     print(f"  Vulnerable File: {analyzed_vuln.file}")
     print(f"  Crash Dedup: {decoded_pov.dedup}")
     print(f"  Patch Generated: {'YES' if 'patch_result' in workflow_data and workflow_data['patch_result']['success'] else 'NO'}")
+    if "patch_result" in workflow_data and workflow_data["patch_result"].get("last_validation"):
+        lv = workflow_data["patch_result"]["last_validation"]
+        print(f"  Last Validation Status: {lv.get('status')}")
+        print(f"  Last Validation Message: {lv.get('message')}")
     print()
     
     # Print cost analysis summary
