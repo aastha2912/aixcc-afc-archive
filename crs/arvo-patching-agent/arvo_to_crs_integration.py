@@ -8,8 +8,8 @@ It can use prebuilt ARVO Docker images to avoid rebuilding projects from source.
 Prebuilt images (e.g., vulpatch:{id}-vul) contain:
   - Pre-compiled vulnerable version in /out
   - Source code in /src
-  - 'arvo compile' command to rebuild after patching
-  - 'arvo run' command to test with the PoC
+  - 'vulnpatch compile' command to rebuild after patching
+  - 'vulnpatch run' command to test with the PoC
 
 Configuration (in arvo_<id>/config.json):
   - use_prebuilt_image: Set to true to use prebuilt ARVO images (default)

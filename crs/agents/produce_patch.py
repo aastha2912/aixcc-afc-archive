@@ -40,9 +40,27 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
     def return_type(self):
         return PatchResult
 
+    def get_result(self, msg: Message):
+        result = super().get_result(msg)
+        if self.patch is not None:
+            return result
+
+        if isinstance(result, PatchResult) and self.crs.project.editor.patch_num > 0:
+            return Message(
+                role="user",
+                content=(
+                    "You still have unapplied patch edits that have not been validated successfully. "
+                    "Do not terminate yet. Either run `test_patch` and get a successful validation, "
+                    "or use `undo_last_patch` / additional `apply_patch` calls to keep iterating."
+                ),
+            )
+        return result
+
     @requireable
     async def test_patch(self) -> Result[str]:
-        match await self.crs.project.build_all(capture_output=True):
+        result = await self.crs.project.build_all(capture_output=True)
+        self._capture_context_call("test_patch", (), {}, result)
+        match result:
             case Err(BuildError(error=error)):
                 match await summarize_build_failure(error):
                     case Err(CRSError(error=error)):
@@ -136,61 +154,17 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
                 return ToolError(f"{path} is a fuzzer harness file. Patching fuzzer harness files is prohibited.")
 
     async def apply_patch_hook[R](self, res: ToolResult[R], path: str, patch: str):
-        """Hook that finalizes the patch immediately after it's applied, skipping testing."""
+        """Hook that nudges the agent to validate a patch after it is applied."""
         if not isinstance(res, ToolError):
-            logger.info("FIRST PATCH GENERATED - Applying patch and finalizing immediately (skipping test phase)")
-            
-            # TODO: REVERT - Uncomment the build section below to restore build functionality
-            # Build the project to generate build artifacts
-            # match await self.crs.project.build_all(capture_output=True):
-            #     case Err(BuildError(error=error)):
-            #         match await summarize_build_failure(error):
-            #             case Err(CRSError(error=error)):
-            #                 pass
-            #             case Ok(error):
-            #                 pass
-            #     case Err(CRSError(error=error)):
-            #         pass
-            #     case Ok(_):
-            #         error = None
-            # 
-            # if error is not None:
-            #     logger.warning(f"Build failed after patch application: {error}")
-            #     # Still finalize the patch even if build fails
-            #     patch = await self.crs.project.editor.get_repo_diff(self.repo_base.as_posix())
-            #     build_artifacts: list[PatchArtifact] = []
-            #     self.patch = ConfirmedPatchResult(
-            #         success=True,
-            #         patch=patch,
-            #         tested_povs=self.povs,
-            #         build_artifacts=build_artifacts,
-            #     )
-            #     logger.info(f"PATCH FINALIZED - Successfully finalized patch with {len(build_artifacts)} build artifacts (build failed but patch accepted)")
-            # else:
-            #     # Build succeeded, generate build artifacts
-            #     patch = await self.crs.project.editor.get_repo_diff(self.repo_base.as_posix())
-            #     build_artifacts: list[PatchArtifact] = []
-            #     for config in self.crs.project.info.build_configs:
-            #         tar_path = await self.crs.project.get_build_tar(config)
-            #         build_artifacts.append(PatchArtifact(build_tar_path=tar_path.as_posix(), build_config=config))
-            #     self.patch = ConfirmedPatchResult(
-            #         success=True,
-            #         patch=patch,
-            #         tested_povs=self.povs,
-            #         build_artifacts=build_artifacts,
-            #     )
-            #     logger.info(f"PATCH FINALIZED - Successfully finalized patch with {len(build_artifacts)} build artifacts (no testing performed)")
-            
-            # TEMPORARY: Skip build for faster testing - just finalize the patch immediately
-            patch = await self.crs.project.editor.get_repo_diff(self.repo_base.as_posix())
-            build_artifacts: list[PatchArtifact] = []  # Empty - no build artifacts
-            self.patch = ConfirmedPatchResult(
-                success=True,
-                patch=patch,
-                tested_povs=self.povs,
-                build_artifacts=build_artifacts,
-            )
-            logger.info("PATCH FINALIZED - Successfully finalized patch (no build, no testing)")
+            logger.info("Patch applied. Validation is required before the patch can be finalized.")
+            res.action.append = [Message(
+                role="user",
+                content=(
+                    "The patch has been applied. You must now validate it using the `test_patch` tool. "
+                    "Only terminate after the patch has been validated successfully, or make additional "
+                    "changes if validation fails."
+                )
+            )]
         return res
 
     async def test_patch_hook[R](self, res: ToolResult[R]):
@@ -227,6 +201,15 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
                         "up with 3 ideas to patch, and then choose the one that seems the best."
                     )
                 )]
+        else:
+            res.action.append = [Message(
+                role="user",
+                content=(
+                    "Patch validation failed. This patch is not accepted yet. Do not terminate. "
+                    "Inspect the validation failure details, then either fix the patch or undo it "
+                    "and try a different approach. You may only terminate after `test_patch` succeeds."
+                )
+            )]
         return res
 
     async def source_code_questions(self, question: str, additional_info: str = "") -> Result[SourceQuestionsResult]:
@@ -298,7 +281,7 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
             "apply_patch": tool_wrap(self.apply_patch, pre_hooks=[self.sanity_patch_hook], post_hooks=[self.apply_patch_hook]),
             "undo_last_patch": tool_wrap(self.undo_last_patch),
             "list_current_edits": tool_wrap(self.list_current_edits),
-            # "test_patch": tool_wrap(self.test_patch, post_hooks=[self.test_patch_hook]),  # Removed to skip testing
+            "test_patch": tool_wrap(self.test_patch, post_hooks=[self.test_patch_hook]),
         }
 
     def __init__(self, crs: 'CRSPatcher', vuln: AnalyzedVuln, diff: Optional[str], povs: list[DecodedPOV], repo_base: Path, rawdiff: bool = False):
@@ -319,6 +302,7 @@ class PatcherAgent(ToolRequiredAgent[PatchResult]):
             "read_source": [],
             "find_references": [],
             "apply_patch": [],
+            "test_patch": [],
             "undo_last_patch": [],
             "list_current_edits": []
         }

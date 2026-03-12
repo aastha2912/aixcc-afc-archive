@@ -486,7 +486,8 @@ class Project:
         harnesses: Optional[list[Harness]] = None,
         builds: Optional[BuildMap] = None,
         workdir: Optional[str] = None,
-        gtags: Optional[GTagDB] = None
+        gtags: Optional[GTagDB] = None,
+        build_image: Optional[str] = None,
     ):
         self.project_dir = project_dir
         self.info = info or ProjectInfo(**yaml.safe_load(open(project_dir / PROJECT_YAML_FILE)))
@@ -496,7 +497,7 @@ class Project:
         self.searcher = Searcher(self, self.editor, gtags=gtags)
         self.harnesses = harnesses
         self.builds = builds or defaultdict(dict)
-        self.build_image = _build_image_name(project_dir.name, ossfuzz_hash)
+        self.build_image = build_image or _build_image_name(project_dir.name, ossfuzz_hash)
         self.ossfuzz_hash = ossfuzz_hash
         self._working_dir = workdir
 
@@ -694,16 +695,15 @@ class Project:
             else:
                 stdio_fd = None
 
-            # (aastham) ARVO Integration: Check if we're in ARVO mode
+            # (aastham) Prebuilt image integration: Check if we're in prebuilt-image mode
             data_dir = config.CACHE_DIR / "data" / self.ossfuzz_hash / self.name
             arvo_marker = data_dir / "arvo_workdir.txt"
             is_arvo_mode = await arvo_marker.exists()
             
-            # (aastham) Set compile command based on whether it's ARVO or Theori
-            # ARVO images use 'arvo compile', while Theori projects use 'theori_compile.sh'
+            # Prebuilt vuln images use 'vulnpatch compile', while Theori projects use 'theori_compile.sh'
             if is_arvo_mode:
-                compile_commands = ["arvo", "compile"]
-                logger.info(f"ARVO mode: Using 'arvo compile' for build")
+                compile_commands = ["vulnpatch", "compile"]
+                logger.info("Prebuilt image mode: Using 'vulnpatch compile' for build")
             else:
                 # wrap ALL compiles with theori_compile.sh to allow commands to run before build.sh
                 mounts[config.THEORI_COMPILE] = "/usr/local/bin/theori_compile.sh"
@@ -716,11 +716,11 @@ class Project:
                     mounts[config.BEAR_PATH / "usr/lib/x86_64-linux-gnu/bear/"] = "/usr/lib/x86_64-linux-gnu/bear/"
                     mounts[config.BEAR_PATH / "usr/bin/bear"] = "/opt/bear"
                     
-                    # (aastham) Wrap the compile command with bear to generate compile_commands.json
-                    # compile_commands was already set above based on ARVO vs Theori mode
+                    # Wrap the compile command with bear to generate compile_commands.json
+                    # compile_commands was already set above based on prebuilt-image vs Theori mode
                     if is_arvo_mode:
                         compile_commands = ["/opt/bear", "-o", "/src/compile_commands.json"] + compile_commands
-                        logger.info(f"ARVO bear build: Using 'bear {' '.join(compile_commands[3:])}'")
+                        logger.info(f"Prebuilt image bear build: Using 'bear {' '.join(compile_commands[3:])}'")
                     else:
                         compile_commands = ["python3", "/opt/bear", "-o", "/src/compile_commands.json"] + compile_commands
                     
@@ -733,24 +733,25 @@ class Project:
 
             reader = process.Reader()
             try:
-                # (aastham) ARVO Integration: Don't override environment for ARVO builds
-                # ARVO images have their own environment setup (CXXFLAGS, compiler paths, etc.)
+                # Don't override environment for prebuilt-image builds
+                # Prebuilt vuln images have their own environment setup (CXXFLAGS, compiler paths, etc.)
                 # If we override with build_config.to_dict(), it breaks compilation
                 build_env = {} if is_arvo_mode else build_config.to_dict()
                 
                 async with docker.run(self.build_image, env=build_env, mounts=mounts, timeout=timeout, scope=scope) as run:
-                    # (aastham) ARVO Integration: Skip /src overwrite for ARVO builds
-                    # Background: ARVO images have prebuilt binaries with a specific build state in /src
-                    # If we overwrite /src with our VFS, it breaks 'arvo compile' because:
+                    # Skip /src overwrite for prebuilt-image builds
+                    # Background: prebuilt vuln images have a specific build state in /src.
+                    # If we overwrite /src with our VFS, it breaks 'vulnpatch compile' because:
                     # 1. Build artifacts (.o files, Makefiles state, etc.) get replaced
-                    # 2. 'arvo compile' expects the original build configuration
+                    # 2. 'vulnpatch compile' expects the original build configuration
                     # 3. Mismatch causes compilation failures
                     # 
-                    # Solution: For ARVO builds, preserve original /src so 'arvo compile' succeeds
+                    # Solution: For prebuilt-image builds, preserve original /src so the
+                    # in-image compile command succeeds.
                     skip_src_overwrite = is_arvo_mode
                     
                     if skip_src_overwrite:
-                        logger.info(f"ARVO build: Preserving original /src to maintain build state")
+                        logger.info("Prebuilt image build: Preserving original /src to maintain build state")
                     
                     # materialize /src vfs in container (skip for ARVO builds)
                     if not skip_src_overwrite:
@@ -1063,7 +1064,18 @@ class Project:
     def new_fork(self, vfs: Optional[VFS] = None, preserve_gtags: bool = True) -> 'Project':
         vfs = EditableOverlayFS(vfs) if vfs else self.vfs.fork()
         gtags = self.searcher.gtags if preserve_gtags else None
-        return Project(self.project_dir, self.data_dir, vfs, self.info, self.ossfuzz_hash, self.harnesses, self.builds, workdir=self._working_dir, gtags=gtags)
+        return Project(
+            self.project_dir,
+            self.data_dir,
+            vfs,
+            self.info,
+            self.ossfuzz_hash,
+            self.harnesses,
+            self.builds,
+            workdir=self._working_dir,
+            gtags=gtags,
+            build_image=self.build_image,
+        )
 
     @requireable
     async def fork_with_source(self, source_vfs: VFS, repo_name: str) -> Result['Project']:

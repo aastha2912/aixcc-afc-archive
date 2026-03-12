@@ -150,7 +150,7 @@ def parse_model_map(path: Path | str) -> ModelMap:
 _default_model_map = parse_model_map(path) if (path := os.environ.get("MODEL_MAP")) else {}
 MODEL_MAP: ContextVar[ModelMap] = ContextVar('MODEL_MAP', default=_default_model_map)
 MODEL: ContextVar[str] = ContextVar('MODEL', default=os.environ.get("MODEL") or "gpt-5.3-codex")
-SMALLMODEL: ContextVar[str] = ContextVar('SMALLMODEL', default=os.environ.get("SMALLMODEL") or "claude-3-haiku-20240307")
+SMALLMODEL: ContextVar[str] = ContextVar('SMALLMODEL', default=os.environ.get("SMALLMODEL") or "gpt-5.3-codex")
 
 # Logging configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

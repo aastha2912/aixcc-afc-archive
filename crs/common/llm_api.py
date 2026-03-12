@@ -143,7 +143,7 @@ def _responses_input_from_messages(msgs: list[dict[str, Any]]) -> tuple[str | No
             if content:
                 input_items.append({
                     "role": "assistant",
-                    "content": [{"type": "input_text", "text": content}],
+                    "content": [{"type": "output_text", "text": content}],
                 })
             for tool_call in msg.get("tool_calls") or []:
                 fn = tool_call.get("function") or {}

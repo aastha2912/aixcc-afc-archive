@@ -84,6 +84,29 @@ This will:
 **Note:** This workflow is **prebuilt-image-only**. If the prebuilt image isn't available (inspect/pull/run fails),
 the script will **fail fast** rather than falling back to building from source.
 
+### 3. Run the Full Batch Workflow
+
+Use the batch runner when you want one command to:
+- create `arvo_<ID>/config.json` if missing
+- copy `vulpatch:<id>-vul` into the DinD daemon if missing
+- run the CRS integration
+- skip IDs that already have `arvo_<ID>/workflow_data.json`
+
+```bash
+# Run every ID in ids.csv
+python3 crs/arvo-patching-agent/run_arvo_workflow.py
+
+# Run one ID
+python3 crs/arvo-patching-agent/run_arvo_workflow.py --id 10881
+
+# Force a re-run
+python3 crs/arvo-patching-agent/run_arvo_workflow.py --id 10881 --force
+```
+
+The runner will use up to 5 workers only when the selected IDs map to distinct
+OSS-Fuzz projects. If multiple IDs target the same project, it automatically
+falls back to sequential execution to avoid CRS cache collisions.
+
 #### Loading images into DinD (required for this stack)
 
 This compose stack uses a Docker-in-Docker daemon (`docker-daemon`) via `DOCKER_HOST=tcp://docker-daemon:2375`.
