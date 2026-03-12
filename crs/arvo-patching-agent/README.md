@@ -84,6 +84,21 @@ This will:
 **Note:** This workflow is **prebuilt-image-only**. If the prebuilt image isn't available (inspect/pull/run fails),
 the script will **fail fast** rather than falling back to building from source.
 
+#### Loading images into DinD (required for this stack)
+
+This compose stack uses a Docker-in-Docker daemon (`docker-daemon`) via `DOCKER_HOST=tcp://docker-daemon:2375`.
+That daemon does **not** share images with the host Docker daemon, so if `vulpatch:<id>-vul` exists on the host, CRS
+still won’t see it until it’s loaded into DinD.
+
+Use the helper script (safe to rerun; skips images already present in DinD):
+
+```bash
+# If the script isn't executable, prefix with bash:
+bash crs/arvo-patching-agent/load_images_into_dind.sh 10084
+# or
+bash crs/arvo-patching-agent/load_images_into_dind.sh --file crs/arvo-patching-agent/ids.csv
+```
+
 ## Detailed Workflow
 
 ### Phase 1: Project Setup (`setup_arvo_project.py`)

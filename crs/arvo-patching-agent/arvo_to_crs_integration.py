@@ -20,6 +20,8 @@ import sys
 import json
 from pathlib import Path
 import traceback
+import subprocess
+import hashlib
 
 # Add current directory to Python path
 sys.path.insert(0, str(Path.cwd()))
@@ -48,7 +50,7 @@ def load_arvo_config(arvo_id: str) -> dict:
         print(f"Configuration file not found: {config_file}")
         print("Please run setup_arvo_project.py first to create the configuration.")
         sys.exit(1)
-    
+
     try:
         with open(config_file, 'r') as f:
             config = json.load(f)
@@ -56,6 +58,23 @@ def load_arvo_config(arvo_id: str) -> dict:
     except (json.JSONDecodeError, IOError) as e:
         print(f"Error loading configuration: {e}")
         sys.exit(1)
+
+
+def load_metadata_entry(arvo_id: str) -> dict:
+    """Load metadata for a given ARVO ID from the mounted /crs/metadata.json."""
+    metadata_path = Path("/crs/metadata.json")
+    if not metadata_path.exists():
+        raise RuntimeError(f"Required metadata file not found: {metadata_path}")
+
+    try:
+        metadata = json.loads(metadata_path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        raise RuntimeError(f"Error loading metadata file {metadata_path}: {e}") from e
+
+    entry = metadata.get(str(arvo_id))
+    if entry is None:
+        raise RuntimeError(f"No metadata entry found for ARVO ID {arvo_id} in {metadata_path}")
+    return entry
 
 def get_config_from_args():
     """Get configuration from command line arguments"""
@@ -77,6 +96,7 @@ def get_config_from_args():
 
 # Load configuration from command line arguments
 CONFIG = get_config_from_args()
+METADATA = load_metadata_entry(CONFIG["arvo_id"])
 
 # Extract configuration parameters
 PROJECT_DIR = CONFIG['project_dir']
@@ -89,38 +109,30 @@ FUZZER_NAME = CONFIG['fuzzer_name']
 
 def pull_arvo_image_if_needed(arvo_image_name: str) -> bool:
     """
-    Pull ARVO Docker image if it doesn't exist locally.
+    Ensure the prebuilt image exists in the active Docker daemon.
+    
+    NOTE: In this stack CRS typically talks to a DinD daemon (via DOCKER_HOST),
+    which does NOT share images with the host Docker daemon. This function does
+    not attempt to import from the host daemon. If the image is missing, load it
+    into DinD first (see README helper script).
     
     Returns:
-        True if image is available (existed or pulled successfully)
-        False if pull failed
+        True if image is available
+        False if unavailable
     """
-    import subprocess
-    
     print("Checking for ARVO image...")
     proc_check = subprocess.run(
         ["docker", "image", "inspect", arvo_image_name],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE
     )
-    
-    if proc_check.returncode != 0:
-        # Image does not exist locally, pull it
-        print(f"Pulling ARVO image: {arvo_image_name}")
-        proc_pull = subprocess.run(
-            ["docker", "pull", arvo_image_name],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        if proc_pull.returncode != 0:
-            print(f"Failed to pull ARVO image: {proc_pull.stderr.decode()}")
-            return False
-        else:
-            print(f"Successfully pulled ARVO image")
-            return True
-    else:
-        print(f"ARVO image already exists locally")
+    if proc_check.returncode == 0:
+        print("ARVO image already exists locally")
         return True
+
+    print(f"Prebuilt image not present in active Docker daemon: {arvo_image_name}")
+    print("Load it into DinD first (see crs/arvo-patching-agent/load_images_into_dind.sh).")
+    return False
 
 
 async def extract_arvo_source_and_workdir(arvo_image_name: str, project_name: str, ossfuzz_hash: str):
@@ -482,6 +494,42 @@ with open("input.bin", "wb") as f:
     return pov_python
 
 
+def normalize_stack_line(line: str) -> str:
+    """Normalize paths in sanitizer stack traces to match CRS VFS paths."""
+    return line.replace(" /src/", " ")
+
+
+def extract_stack_and_dedup(report_text: str) -> tuple[str, str]:
+    """Extract normalized stack trace and dedup token from a sanitizer report."""
+    stack_lines: list[str] = []
+    dedup_token = None
+
+    for line in report_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            stack_lines.append(normalize_stack_line(stripped))
+        elif "DEDUP_TOKEN:" in line and dedup_token is None:
+            dedup_token = line.split("DEDUP_TOKEN:", 1)[1].strip()
+
+    if not stack_lines:
+        raise RuntimeError("No stack trace found in sanitizer report")
+
+    stack = "\n".join(stack_lines)
+    if not dedup_token:
+        dedup_token = hashlib.sha256(stack.encode()).hexdigest()
+
+    return stack, dedup_token
+
+
+def resolve_build_config(task, sanitizer_name: str | None):
+    """Pick the build config matching the sanitizer from metadata/config, else use default."""
+    if sanitizer_name:
+        for build_config in task.project.info.build_configs:
+            if build_config.SANITIZER == sanitizer_name:
+                return build_config
+    return task.project.info.default_build_config
+
+
 async def run_arvo_and_capture_crash(arvo_image_name: str, testcase_path: Path, fuzzer_name: str) -> str:
     """
     Run ARVO to test the PoC and capture the crash output.
@@ -558,36 +606,13 @@ async def create_crash_result_from_arvo(task, harness_list, fuzzer_index, arvo_c
     from crs.modules.project import CrashResult
     from crs.common.types import BuildConfig
     
-    # Parse ARVO output to extract crash information
-    lines = arvo_crash_output.split('\n')
-    
-    # Extract stack trace (lines starting with #)
-    stack_lines = []
-    dedup_token = None
-    
-    for i, line in enumerate(lines):
-        if line.strip().startswith('#'):
-            # Strip /src/ prefix from file paths to match VFS paths
-            # ARVO shows: /src/ghostpdl/pdf/file.c
-            # VFS expects: ghostpdl/pdf/file.c
-            cleaned_line = line.replace(' /src/', ' ')
-            stack_lines.append(cleaned_line.strip())
-        elif 'DEDUP_TOKEN:' in line:
-            dedup_token = line.split('DEDUP_TOKEN:', 1)[1].strip()
-    
-    if not stack_lines:
-        print("ERROR: No stack trace found in ARVO output")
+    try:
+        stack, dedup_token = extract_stack_and_dedup(arvo_crash_output)
+    except RuntimeError as e:
+        print(f"ERROR: {e}")
         return None, None
-    
-    stack = '\n'.join(stack_lines)
-    
-    # Use the dedup from ARVO or generate from stack
-    if not dedup_token:
-        from hashlib import sha256
-        dedup_token = sha256(stack.encode()).hexdigest()
-    
-    # Get build config (use address sanitizer as default for ARVO)
-    build_config = task.project.info.default_build_config
+
+    build_config = resolve_build_config(task, CONFIG.get("sanitizer"))
     
     # Prepare POV python script
     pov_python = prepare_poc_data()
@@ -603,9 +628,48 @@ async def create_crash_result_from_arvo(task, harness_list, fuzzer_index, arvo_c
     
     print("✓ Created CrashResult from ARVO data:")
     print(f"  Dedup: {crash_result.dedup[:80]}...")
-    print(f"  Stack frames: {len(stack_lines)}")
+    print(f"  Stack frames: {len(stack.splitlines())}")
     print(f"  Stack preview: {stack[:200]}...")
     
+    return crash_result, pov_python
+
+
+async def create_crash_result_from_metadata_report(task, metadata_entry: dict):
+    """
+    Phase 2: Create CrashResult directly from sanitizer report text in metadata.json.
+    """
+    print("\n" + "="*60)
+    print("PHASE 2: CREATING CrashResult FROM METADATA SANITIZER REPORT")
+    print("="*60)
+    print("Skipping prebuilt-image crash reproduction")
+    print("Using sanitizer report from metadata.json")
+
+    from crs.modules.project import CrashResult
+
+    report_text = metadata_entry.get("sanitizer_report")
+    if not report_text:
+        raise RuntimeError("metadata.json entry is missing 'sanitizer_report'")
+
+    stack, dedup_token = extract_stack_and_dedup(report_text)
+    build_config = resolve_build_config(
+        task,
+        metadata_entry.get("sanitizer_type") or CONFIG.get("sanitizer"),
+    )
+    pov_python = prepare_poc_data()
+
+    crash_result = CrashResult(
+        config=build_config,
+        input=b"",
+        output=report_text,
+        dedup=dedup_token,
+        stack=stack,
+    )
+
+    print("✓ Created CrashResult from metadata report:")
+    print(f"  Dedup: {crash_result.dedup[:80]}...")
+    print(f"  Stack frames: {len(stack.splitlines())}")
+    print(f"  Stack preview: {stack[:200]}...")
+
     return crash_result, pov_python
 
 
@@ -1102,35 +1166,12 @@ async def test_poc(arvo_id):
         if task is None:
             raise RuntimeError("Project/harness setup returned None")
 
-        # Phase 2: Get crash from ARVO (not from CRS rebuild)
-        current_phase = "PHASE 2: GETTING CRASH FROM PREBUILT IMAGE"
-        use_arvo_crash = CONFIG.get('use_prebuilt_image', True)
-
-        if use_arvo_crash and CONFIG.get('arvo_image_name'):
-            print("\n" + "="*60)
-            print("Using ARVO run output (skipping CRS test_pov)")
-            print("="*60)
-
-            arvo_crash_output = await run_arvo_and_capture_crash(
-                arvo_image_name=CONFIG['arvo_image_name'],
-                testcase_path=Path(POC_FILE),
-                fuzzer_name=FUZZER_NAME
-            )
-
-            if not arvo_crash_output:
-                raise RuntimeError(
-                    "Prebuilt-image-only mode: failed to capture crash via 'arvo run' from the prebuilt image "
-                    f"({CONFIG.get('arvo_image_name')!r}). Not falling back to CRS test_pov()."
-                )
-
-            crash_result, pov_python = await create_crash_result_from_arvo(
-                task, harness_list, fuzzer_index, arvo_crash_output
-            )
-        else:
+        current_phase = "PHASE 2: BUILDING CRASH RESULT FROM METADATA"
+        if not METADATA.get("sanitizer_report"):
             raise RuntimeError(
-                "Prebuilt-image-only mode: configuration does not allow ARVO crash capture "
-                "(missing arvo_image_name or use_prebuilt_image is false)."
+                "metadata.json entry is missing sanitizer_report; metadata-driven mode requires it."
             )
+        crash_result, pov_python = await create_crash_result_from_metadata_report(task, METADATA)
 
         if crash_result is None:
             raise RuntimeError("CrashResult was None after ARVO crash processing")
