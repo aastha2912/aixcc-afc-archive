@@ -4,7 +4,7 @@ Standalone script to count tokens in ARVO Docker images.
 
 This script:
 1. Reads ARVO IDs from github_ids.csv
-2. For each ID, uses the ARVO Docker image (n132/arvo:{id}-vul)
+2. For each ID, uses the prebuilt vulnerable Docker image (default: vulpatch:{id}-vul)
 3. Extracts source code from the image
 4. Counts tokens
 5. Saves results to token_counts_summary.csv
@@ -30,6 +30,7 @@ import sys
 import tempfile
 import tarfile
 import time
+import os
 from pathlib import Path
 from collections import defaultdict
 
@@ -74,7 +75,9 @@ def pull_docker_image(image_name):
 def extract_source_from_docker(arvo_id, retry_count=0):
     """Extract source code from ARVO Docker image and count tokens"""
     
-    image_name = f"n132/arvo:{arvo_id}-vul"
+    image_prefix = os.environ.get("ARVO_IMAGE_PREFIX", "vulpatch")
+    image_tag_suffix = os.environ.get("ARVO_IMAGE_TAG_SUFFIX", "-vul")
+    image_name = f"{image_prefix}:{arvo_id}{image_tag_suffix}"
     max_retries = 3
     
     # Check if image exists, pull if needed

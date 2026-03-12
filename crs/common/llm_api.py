@@ -346,11 +346,21 @@ class ContextWindowExceeded(CRSError):
 class UnknownCompletionError(CRSError):
     pass
 
+class BudgetExceeded(CRSError):
+    def __init__(self, budget_usd: float, spend_usd: float):
+        super().__init__(f"LLM budget exceeded: spend=${spend_usd:.4f} >= budget=${budget_usd:.4f}")
+        self.budget_usd = budget_usd
+        self.spend_usd = spend_usd
+
 async def completion(**args: Unpack[CompletionArgs]) -> Result[ModelResponse]:
     retries = 0
     rate_retries = 0
     while True: # noqa: ASYNC913; false positive
         try:
+            budget = getattr(config, "LLM_BUDGET_USD", float("inf"))
+            spend = llm_spend_tracker.get().spend()
+            if spend >= budget:
+                return Err(BudgetExceeded(budget, spend))
             completion = await do_completion(args)
             response = ModelResponse(**completion)
             if not config.TELEGRAF:

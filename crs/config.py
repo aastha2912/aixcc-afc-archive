@@ -60,6 +60,14 @@ REGISTRY_DOMAIN = os.getenv("CRS_REGISTRY_DOMAIN")
 DEBUG = False
 MAX_ERROR_OUTPUT = 2048
 
+# Optional spend limit for LLM calls (USD) within a single process.
+# Intended usage: run one workflow per process (e.g., one ARVO ID) and set
+# CRS_LLM_BUDGET_USD=2.5 to cap spend for that run.
+try:
+    LLM_BUDGET_USD = float(os.getenv("CRS_LLM_BUDGET_USD", "inf"))
+except ValueError:
+    LLM_BUDGET_USD = float("inf")
+
 OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 OTEL_TELEGRAF_ENDPOINT = os.getenv("OTEL_TELEGRAF_ENDPOINT")
 TRACING = bool(OTEL_EXPORTER_OTLP_ENDPOINT or OTEL_TELEGRAF_ENDPOINT)

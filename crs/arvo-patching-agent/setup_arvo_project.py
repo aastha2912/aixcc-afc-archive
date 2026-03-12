@@ -228,7 +228,8 @@ sanitizers:
         "repo_addr": project_info.get('repo_addr', 'N/A'),
         "project_dir": f"projects/{project_info.get('project_name', 'N/A')}",
         "poc_file": f"crs/arvo-patching-agent/arvo_{arvo_id}/{testcase_filename}",  # Relative path from workspace root
-        "arvo_image_name": f"n132/arvo:{arvo_id}-vul",  # ARVO prebuilt vulnerable image
+        # Prebuilt vulnerable image (local or remote). Default matches the server's naming scheme.
+        "arvo_image_name": f"vulpatch:{arvo_id}-vul",
         "use_prebuilt_image": True  # Set to False to build from source instead
     }
     

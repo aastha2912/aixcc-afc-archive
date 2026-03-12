@@ -5,7 +5,7 @@ Test PoC against different projects - Following actual CRS workflow
 This script integrates ARVO vulnerability data with the CRS patching system.
 It can use prebuilt ARVO Docker images to avoid rebuilding projects from source.
 
-ARVO images (n132/arvo:{id}-vul) contain:
+Prebuilt images (e.g., vulpatch:{id}-vul) contain:
   - Pre-compiled vulnerable version in /out
   - Source code in /src
   - 'arvo compile' command to rebuild after patching
@@ -13,12 +13,13 @@ ARVO images (n132/arvo:{id}-vul) contain:
 
 Configuration (in arvo_<id>/config.json):
   - use_prebuilt_image: Set to true to use prebuilt ARVO images (default)
-  - arvo_image_name: Docker image name (format: n132/arvo:{id}-vul)
+  - arvo_image_name: Docker image name (e.g., vulpatch:{id}-vul)
 """
 import asyncio
 import sys
 import json
 from pathlib import Path
+import traceback
 
 # Add current directory to Python path
 sys.path.insert(0, str(Path.cwd()))
@@ -308,11 +309,19 @@ async def setup_project_and_harnesses():
     # =========================================================================
     use_prebuilt_image = CONFIG.get('use_prebuilt_image', True)
     arvo_image_name = CONFIG.get('arvo_image_name', None)
-    
-    if use_prebuilt_image and arvo_image_name:
-        print(f"  Using prebuilt ARVO image: {arvo_image_name}")
-    else:
-        print(f"  Will build project from source")
+
+    if not use_prebuilt_image:
+        raise RuntimeError(
+            "Prebuilt-image-only mode: config has use_prebuilt_image=false. "
+            "Set use_prebuilt_image=true and provide arvo_image_name."
+        )
+    if not arvo_image_name:
+        raise RuntimeError(
+            "Prebuilt-image-only mode: missing arvo_image_name in config.json. "
+            "Set arvo_image_name to your prebuilt image (e.g., vulpatch:<id>-vul)."
+        )
+
+    print(f"  Using prebuilt ARVO image: {arvo_image_name}")
     print("="*60)
     
     prebuilt_setup_done = False
@@ -326,8 +335,10 @@ async def setup_project_and_harnesses():
         
         # Pull image using helper function
         if not pull_arvo_image_if_needed(arvo_image_name):
-            print("Will build from source using Dockerfile...")
-            use_prebuilt_image = False
+            raise RuntimeError(
+                f"Prebuilt-image-only mode: failed to fetch prebuilt image {arvo_image_name!r}. "
+                "Ensure it exists locally (docker image inspect) or is pullable (docker login / registry access)."
+            )
         
         # =====================================================================
         # Step 3: Extract source code and workdir from ARVO image
@@ -369,15 +380,12 @@ async def setup_project_and_harnesses():
                 if await extract_arvo_source_and_workdir(arvo_image_name, project_name, ossfuzz_hash):
                     prebuilt_setup_done = True
                 else:
-                    use_prebuilt_image = False
-                    print("Will build from source using Dockerfile...")
+                    raise RuntimeError(
+                        f"Prebuilt-image-only mode: failed to extract /src or workdir from {arvo_image_name!r}."
+                    )
                     
             except Exception as e:
-                print(f"Error during ARVO setup: {e}")
-                import traceback
-                traceback.print_exc()
-                print("Will build from source using Dockerfile...")
-                use_prebuilt_image = False
+                raise RuntimeError(f"Prebuilt-image-only mode: error during prebuilt setup: {e}") from e
     
     # =========================================================================
     # Step 4: Load project using CRS
@@ -395,6 +403,8 @@ async def setup_project_and_harnesses():
         print(f"Setting build_image to ARVO image: {arvo_image_name}")
         task.project.build_image = arvo_image_name
         print(f"All build operations will now use ARVO prebuilt image")
+    else:
+        raise RuntimeError("Prebuilt-image-only mode: internal error (prebuilt_setup_done was false).")
     
     # =========================================================================
     # Step 6: Extract prebuilt binaries from ARVO /out
@@ -402,8 +412,9 @@ async def setup_project_and_harnesses():
     # Extract fuzzers for each sanitizer (address, undefined, etc.)
     if use_prebuilt_image and arvo_image_name and prebuilt_setup_done:
         if not await extract_arvo_binaries(task, arvo_image_name):
-            print("Falling back to building from source...")
-            use_prebuilt_image = False
+            raise RuntimeError(
+                f"Prebuilt-image-only mode: failed to extract /out binaries from {arvo_image_name!r}."
+            )
     
     # =========================================================================
     # Step 7: Initialize harnesses (CRS scans binaries to find fuzzers)
@@ -478,7 +489,7 @@ async def run_arvo_and_capture_crash(arvo_image_name: str, testcase_path: Path, 
     This uses ARVO's prebuilt vulnerable binary, avoiding the rebuild problem.
     
     Args:
-        arvo_image_name: ARVO Docker image (e.g., "n132/arvo:65027-vul")
+        arvo_image_name: Prebuilt vulnerable Docker image (e.g., "vulpatch:65027-vul")
         testcase_path: Path to PoC testcase file
         fuzzer_name: Name of the fuzzer to run
     
@@ -802,6 +813,38 @@ def save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyze
     return workflow_data, workflow_file
 
 
+def save_failure_data(arvo_id: str, phase: str, exc: BaseException) -> Path:
+    """
+    Save failure details to arvo_<ID>/workflow_data.json so failures are trackable
+    the same way successes are.
+    """
+    script_dir = Path(__file__).parent
+    arvo_dir = script_dir / ARVO_CONFIG_DIR_NAME.format(arvo_id=arvo_id)
+    arvo_dir.mkdir(parents=True, exist_ok=True)
+    workflow_file = arvo_dir / "workflow_data.json"
+
+    failure_data = {
+        "status": "failed",
+        "phase": phase,
+        "error_type": exc.__class__.__name__,
+        "error": str(exc),
+        "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+        "config": {
+            "arvo_id": CONFIG.get("arvo_id"),
+            "project_dir": CONFIG.get("project_dir"),
+            "project_name": CONFIG.get("project_name"),
+            "fuzzer_name": CONFIG.get("fuzzer_name"),
+            "poc_file": CONFIG.get("poc_file"),
+            "arvo_image_name": CONFIG.get("arvo_image_name"),
+            "use_prebuilt_image": CONFIG.get("use_prebuilt_image"),
+        },
+    }
+
+    workflow_file.write_text(json.dumps(failure_data, indent=2))
+    print(f"Saved failure data to: {workflow_file}")
+    return workflow_file
+
+
 async def run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow_data, workflow_file, arvo_id):
     """Phase 8: Run patching agent"""
     print("\n" + "="*60)
@@ -1052,68 +1095,80 @@ def print_summary(vuln_id, analyzed_vuln, decoded_pov, workflow_data):
 async def test_poc(arvo_id):
     """Test the PoC against the vulnerable version - Following CRS workflow"""
     
-    # Phase 1: Setup project and harnesses
-    task, harness_list, fuzzer_index = await setup_project_and_harnesses()
-    if task is None:
-        return None
-    
-    # Phase 2: Get crash from ARVO (not from CRS rebuild)
-    # This uses ARVO's prebuilt vulnerable binary to get the authentic crash
-    use_arvo_crash = CONFIG.get('use_prebuilt_image', True)
-    
-    if use_arvo_crash and CONFIG.get('arvo_image_name'):
-        print("\n" + "="*60)
-        print("Using ARVO run output (skipping CRS test_pov)")
-        print("="*60)
-        
-        # Run ARVO to get authentic crash
-        arvo_crash_output = await run_arvo_and_capture_crash(
-            arvo_image_name=CONFIG['arvo_image_name'],
-            testcase_path=Path(POC_FILE),
-            fuzzer_name=FUZZER_NAME
-        )
-        
-        if not arvo_crash_output:
-            print("Failed to get ARVO crash output, falling back to CRS test")
-            crash_result, pov_python = await test_poc_crash(task, harness_list, fuzzer_index)
-        else:
-            # Create CrashResult from ARVO output
+    current_phase = "PHASE 1: SETTING UP PROJECT AND HARNESSES"
+    try:
+        # Phase 1: Setup project and harnesses
+        task, harness_list, fuzzer_index = await setup_project_and_harnesses()
+        if task is None:
+            raise RuntimeError("Project/harness setup returned None")
+
+        # Phase 2: Get crash from ARVO (not from CRS rebuild)
+        current_phase = "PHASE 2: GETTING CRASH FROM PREBUILT IMAGE"
+        use_arvo_crash = CONFIG.get('use_prebuilt_image', True)
+
+        if use_arvo_crash and CONFIG.get('arvo_image_name'):
+            print("\n" + "="*60)
+            print("Using ARVO run output (skipping CRS test_pov)")
+            print("="*60)
+
+            arvo_crash_output = await run_arvo_and_capture_crash(
+                arvo_image_name=CONFIG['arvo_image_name'],
+                testcase_path=Path(POC_FILE),
+                fuzzer_name=FUZZER_NAME
+            )
+
+            if not arvo_crash_output:
+                raise RuntimeError(
+                    "Prebuilt-image-only mode: failed to capture crash via 'arvo run' from the prebuilt image "
+                    f"({CONFIG.get('arvo_image_name')!r}). Not falling back to CRS test_pov()."
+                )
+
             crash_result, pov_python = await create_crash_result_from_arvo(
                 task, harness_list, fuzzer_index, arvo_crash_output
             )
-    else:
-        print("\n" + "="*60)
-        print("Using CRS test_pov (may rebuild binaries)")
-        print("="*60)
-        crash_result, pov_python = await test_poc_crash(task, harness_list, fuzzer_index)
-    
-    if crash_result is None:
-        return None
-    
-    # Phase 3: Create POVRunData from crash
-    pov_run_data = await create_pov_run_data(task, harness_list, fuzzer_index, crash_result, pov_python)
-    
-    # Phase 4: Decode POV
-    decoded_pov, crs_instance = await decode_pov(task, harness_list, pov_run_data)
-    
-    # Phase 5: Triage vulnerability with LLM
-    analyzed_vuln, triage_llm_calls = await triage_vulnerability(task, decoded_pov)
-    if analyzed_vuln is None:
-        return None
-    
-    # Phase 6: Store vulnerability in database
-    vuln_id = await store_vulnerability_in_database(crs_instance, task, analyzed_vuln)
-    
-    # Phase 7: Save workflow data
-    workflow_data, workflow_file = save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyzed_vuln, arvo_id, triage_llm_calls)
-    
-    # Phase 8: Run patching agent
-    workflow_data = await run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow_data, workflow_file, arvo_id)
-    
-    # Print summary
-    print_summary(vuln_id, analyzed_vuln, decoded_pov, workflow_data)
-    
-    return crash_result, pov_run_data, decoded_pov, analyzed_vuln, vuln_id
+        else:
+            raise RuntimeError(
+                "Prebuilt-image-only mode: configuration does not allow ARVO crash capture "
+                "(missing arvo_image_name or use_prebuilt_image is false)."
+            )
+
+        if crash_result is None:
+            raise RuntimeError("CrashResult was None after ARVO crash processing")
+
+        # Phase 3: Create POVRunData from crash
+        current_phase = "PHASE 3: CREATING POVRunData FROM CRASH"
+        pov_run_data = await create_pov_run_data(task, harness_list, fuzzer_index, crash_result, pov_python)
+
+        # Phase 4: Decode POV
+        current_phase = "PHASE 4: DECODING POV"
+        decoded_pov, crs_instance = await decode_pov(task, harness_list, pov_run_data)
+
+        # Phase 5: Triage vulnerability with LLM
+        current_phase = "PHASE 5: TRIAGING POV WITH LLM"
+        analyzed_vuln, triage_llm_calls = await triage_vulnerability(task, decoded_pov)
+        if analyzed_vuln is None:
+            raise RuntimeError("Triage returned no analyzed vulnerability")
+
+        # Phase 6: Store vulnerability in database
+        current_phase = "PHASE 6: STORING VULNERABILITY IN DATABASE"
+        vuln_id = await store_vulnerability_in_database(crs_instance, task, analyzed_vuln)
+
+        # Phase 7: Save workflow data
+        current_phase = "PHASE 7: SAVING WORKFLOW DATA"
+        workflow_data, workflow_file = save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyzed_vuln, arvo_id, triage_llm_calls)
+
+        # Phase 8: Run patching agent
+        current_phase = "PHASE 8: RUNNING PATCHING AGENT"
+        workflow_data = await run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow_data, workflow_file, arvo_id)
+
+        # Print summary
+        current_phase = "FINAL SUMMARY"
+        print_summary(vuln_id, analyzed_vuln, decoded_pov, workflow_data)
+
+        return crash_result, pov_run_data, decoded_pov, analyzed_vuln, vuln_id
+    except Exception as e:
+        save_failure_data(arvo_id=arvo_id, phase=current_phase, exc=e)
+        raise
 
 if __name__ == "__main__":
     # Get ARVO ID from command line arguments (already loaded in CONFIG)
@@ -1121,11 +1176,11 @@ if __name__ == "__main__":
     try:
         asyncio.run(test_poc(arvo_id))
     except Exception as e:
+        # test_poc already persisted a failure record; this is the final fallback
         print(f"\n{'='*60}")
         print(f"FATAL ERROR: Uncaught exception")
         print(f"{'='*60}")
         print(f"Exception: {e}")
-        import traceback
         traceback.print_exc()
         print(f"{'='*60}")
         sys.exit(1)
