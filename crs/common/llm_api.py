@@ -40,6 +40,7 @@ CONCURRENCY = {
     "gpt-4.1-nano": 500,
     "gpt-4o": 500,
     "gpt-4o-mini": 500,
+    "gpt-5.3-codex": 500,
 
     # azure limits should be a different bucket
     "azure/o1-2024-12-17": 100,
@@ -96,6 +97,218 @@ BUDGET_TOKEN_PAIR = {
     "medium":4096,
     "high":8192,
 }
+
+CODEX_PRICING_FALLBACKS: dict[str, dict[str, float]] = {
+    "gpt-5.3-codex": {
+        "input_cost_per_token": 1.75e-06,
+        "output_cost_per_token": 1.4e-05,
+        "cache_read_input_token_cost": 1.75e-07,
+    },
+}
+
+
+def is_codex_model(model: str) -> bool:
+    model_name = DUPE_MODEL_MAP.get(model, model)
+    return "codex" in model_name
+
+
+def _msg_text_content(msg: dict[str, Any]) -> str:
+    content = msg.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                if text := item.get("text"):
+                    parts.append(str(text))
+        return "\n".join(parts)
+    return ""
+
+
+def _responses_input_from_messages(msgs: list[dict[str, Any]]) -> tuple[str | None, list[dict[str, Any]]]:
+    instructions_parts: list[str] = []
+    input_items: list[dict[str, Any]] = []
+
+    for msg in msgs:
+        role = msg.get("role")
+        content = _msg_text_content(msg)
+
+        if role == "system":
+            if content:
+                instructions_parts.append(content)
+            continue
+
+        if role == "assistant":
+            if content:
+                input_items.append({
+                    "role": "assistant",
+                    "content": [{"type": "input_text", "text": content}],
+                })
+            for tool_call in msg.get("tool_calls") or []:
+                fn = tool_call.get("function") or {}
+                input_items.append({
+                    "type": "function_call",
+                    "call_id": tool_call.get("id"),
+                    "name": fn.get("name"),
+                    "arguments": fn.get("arguments", "{}"),
+                })
+            continue
+
+        if role == "tool":
+            input_items.append({
+                "type": "function_call_output",
+                "call_id": msg.get("tool_call_id"),
+                "output": content,
+            })
+            continue
+
+        if role in {"user", "developer"}:
+            input_items.append({
+                "role": "user",
+                "content": [{"type": "input_text", "text": content}],
+            })
+
+    instructions = "\n\n".join(part for part in instructions_parts if part) or None
+    return instructions, input_items
+
+
+def _responses_tools(tools: Optional[list[dict[str, Any]]]) -> Optional[list[dict[str, Any]]]:
+    if not tools:
+        return None
+    result: list[dict[str, Any]] = []
+    for tool in tools:
+        if tool.get("type") != "function":
+            continue
+        fn = tool.get("function") or {}
+        result.append({
+            "type": "function",
+            "name": fn.get("name"),
+            "description": fn.get("description", ""),
+            "parameters": fn.get("parameters", {"type": "object", "properties": {}}),
+        })
+    return result or None
+
+
+def _responses_tool_choice(tool_choice: Optional[ToolChoice]) -> Any:
+    if tool_choice is None:
+        return None
+    if isinstance(tool_choice, str):
+        return tool_choice
+    if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+        fn = tool_choice.get("function") or {}
+        return {"type": "function", "name": fn.get("name")}
+    return tool_choice
+
+
+def _response_message_content(output: list[dict[str, Any]], fallback_text: str) -> Optional[str]:
+    parts: list[str] = []
+    for item in output:
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content") or []:
+            text = content.get("text") or content.get("content")
+            if text:
+                parts.append(str(text))
+    if parts:
+        return "\n".join(parts)
+    return fallback_text or None
+
+
+def _normalize_responses_usage(usage: dict[str, Any]) -> dict[str, Any]:
+    input_details = usage.get("input_tokens_details") or {}
+    return {
+        "prompt_tokens": usage.get("input_tokens", 0),
+        "completion_tokens": usage.get("output_tokens", 0),
+        "total_tokens": usage.get(
+            "total_tokens",
+            usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+        ),
+        "prompt_tokens_details": {
+            "cached_tokens": input_details.get("cached_tokens", 0),
+        },
+    }
+
+
+def _model_pricing(model: str) -> dict[str, float]:
+    try:
+        info = cast(dict[str, Any], litellm.get_model_info(model)) # type: ignore
+    except Exception:
+        info = {}
+    pricing = CODEX_PRICING_FALLBACKS.get(model, {})
+    return {
+        "input_cost_per_token": float(info.get("input_cost_per_token", pricing.get("input_cost_per_token", 0.0))),
+        "output_cost_per_token": float(info.get("output_cost_per_token", pricing.get("output_cost_per_token", 0.0))),
+        "cache_read_input_token_cost": float(info.get("cache_read_input_token_cost", pricing.get("cache_read_input_token_cost", 0.0))),
+    }
+
+
+def _responses_cost(model: str, usage: dict[str, Any]) -> float:
+    pricing = _model_pricing(model)
+    prompt_tokens = int(usage.get("prompt_tokens", 0))
+    completion_tokens = int(usage.get("completion_tokens", 0))
+    cached_tokens = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0))
+    uncached_input_tokens = max(prompt_tokens - cached_tokens, 0)
+    return (
+        uncached_input_tokens * pricing["input_cost_per_token"]
+        + cached_tokens * pricing["cache_read_input_token_cost"]
+        + completion_tokens * pricing["output_cost_per_token"]
+    )
+
+
+async def _responses_completion(args: 'CompletionArgs', tools: Optional[list[dict[str, Any]]]) -> dict[str, Any]:
+    from openai import AsyncOpenAI
+
+    instructions, input_items = _responses_input_from_messages(args["messages"])
+    client = AsyncOpenAI(
+        api_key=os.environ.get("OPENAI_API_KEY"),
+        base_url=os.environ.get("OPENAI_API_BASE") or None,
+    )
+
+    kwargs: dict[str, Any] = {
+        "model": args["model"],
+        "input": input_items,
+        "instructions": instructions,
+        "tools": _responses_tools(tools),
+        "tool_choice": _responses_tool_choice(args.get("tool_choice")),
+        "temperature": args.get("temperature"),
+        "max_output_tokens": args.get("max_completion_tokens"),
+        "top_logprobs": args.get("top_logprobs"),
+    }
+    if reasoning_effort := args.get("reasoning_effort"):
+        kwargs["reasoning"] = {"effort": reasoning_effort}
+    kwargs = {k: v for k, v in kwargs.items() if v is not None}
+
+    res = await client.responses.create(**kwargs)
+    data = res.model_dump()
+    output = cast(list[dict[str, Any]], data.get("output", []))
+    tool_calls = [
+        {
+            "id": item.get("call_id") or item.get("id") or "",
+            "type": "function",
+            "function": {
+                "name": item.get("name", ""),
+                "arguments": item.get("arguments", "{}"),
+            },
+        }
+        for item in output
+        if item.get("type") == "function_call"
+    ]
+    message = {
+        "role": "assistant",
+        "content": _response_message_content(output, getattr(res, "output_text", "")),
+        "tool_calls": tool_calls or None,
+    }
+    usage = _normalize_responses_usage(cast(dict[str, Any], data.get("usage", {})))
+    cost = _responses_cost(args["model"], usage)
+    return {
+        "choices": [{
+            "message": message,
+            "finish_reason": "tool_calls" if tool_calls else "stop",
+        }],
+        "usage": usage,
+        "cost": cost,
+    }
 
 
 class _LLMSpendTracker():
@@ -237,6 +450,43 @@ async def do_completion(args: CompletionArgs) -> dict[str, Any]:
     if "use_caching" in args:
         del args["use_caching"]
     tools: Optional[list[dict[str, Any]]] = args.get("tools")
+
+    if is_codex_model(model):
+        completion = await _responses_completion(args, tools)
+        usage = completion["usage"]
+        llm_spend_tracker.get().add(completion["cost"])
+        try:
+            model_attrs: dict[str, Any] = {
+                "model": model,
+                "model_dupe": DUPE_MODEL_MAP.get(model, ""),
+                "provider": "openai",
+            }
+
+            from crs.agents.agent_meta import running_agent
+            from crs.common import workdb_meta
+            agent = running_agent.get()
+            worktype = workdb_meta.cur_job_worktype.get()
+            worktype = getattr(worktype, "name", str(worktype))
+            task_attrs: dict[str, Any] = {
+                "task": str(task) if (task := workdb_meta.cur_job_task.get()) else "none",
+                "worktype": worktype,
+                "agent": agent.__class__.__name__ if agent else "none",
+            }
+
+            cost_counter.add(completion["cost"], task_attrs)
+            tokens_total_counter.add(usage["total_tokens"], task_attrs)
+            tokens_input_counter.add(usage["prompt_tokens"], task_attrs)
+            tokens_output_counter.add(usage["completion_tokens"], task_attrs)
+            tokens_cached_counter.add(usage["prompt_tokens_details"]["cached_tokens"], task_attrs)
+
+            cost_counter.add(completion["cost"], model_attrs)
+            tokens_total_counter.add(usage["total_tokens"], model_attrs)
+            tokens_input_counter.add(usage["prompt_tokens"], model_attrs)
+            tokens_output_counter.add(usage["completion_tokens"], model_attrs)
+            tokens_cached_counter.add(usage["prompt_tokens_details"]["cached_tokens"], model_attrs)
+        except Exception as e:
+            logger.exception("Exception while reporting Codex metrics", exception=e)
+        return completion
 
     # hack for anthropic API being annoying
     if not tools and model.startswith("claude"):

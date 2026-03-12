@@ -61,12 +61,12 @@ DEBUG = False
 MAX_ERROR_OUTPUT = 2048
 
 # Optional spend limit for LLM calls (USD) within a single process.
-# Intended usage: run one workflow per process (e.g., one ARVO ID) and set
-# CRS_LLM_BUDGET_USD=2.5 to cap spend for that run.
+# Intended usage: run one workflow per process (e.g., one ARVO ID).
+# This local/dev default is intentionally low to cap spend unless overridden.
 try:
-    LLM_BUDGET_USD = float(os.getenv("CRS_LLM_BUDGET_USD", "inf"))
+    LLM_BUDGET_USD = float(os.getenv("CRS_LLM_BUDGET_USD", "2.50"))
 except ValueError:
-    LLM_BUDGET_USD = float("inf")
+    LLM_BUDGET_USD = 2.50
 
 OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 OTEL_TELEGRAF_ENDPOINT = os.getenv("OTEL_TELEGRAF_ENDPOINT")
@@ -149,7 +149,7 @@ def parse_model_map(path: Path | str) -> ModelMap:
     return TypeAdapter(ModelMap).validate_python(tomllib.load(open(path, "rb")))
 _default_model_map = parse_model_map(path) if (path := os.environ.get("MODEL_MAP")) else {}
 MODEL_MAP: ContextVar[ModelMap] = ContextVar('MODEL_MAP', default=_default_model_map)
-MODEL: ContextVar[str] = ContextVar('MODEL', default=os.environ.get("MODEL") or "gpt-4o-mini-2024-07-18")
+MODEL: ContextVar[str] = ContextVar('MODEL', default=os.environ.get("MODEL") or "gpt-5.3-codex")
 SMALLMODEL: ContextVar[str] = ContextVar('SMALLMODEL', default=os.environ.get("SMALLMODEL") or "claude-3-haiku-20240307")
 
 # Logging configuration
