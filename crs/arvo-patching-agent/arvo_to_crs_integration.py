@@ -22,10 +22,12 @@ from pathlib import Path
 import traceback
 import subprocess
 import hashlib
+import re
 
 # Add current directory to Python path
 sys.path.insert(0, str(Path.cwd()))
 
+from crs.modules.project import Harness, HarnessType
 from crs.modules.testing import TestProject
 
 # =============================================================================
@@ -76,6 +78,32 @@ def load_metadata_entry(arvo_id: str) -> dict:
         raise RuntimeError(f"No metadata entry found for ARVO ID {arvo_id} in {metadata_path}")
     return entry
 
+def resolve_fuzzer_name_from_metadata(entry: dict) -> str:
+    """Resolve the harness/fuzzer target name from metadata.json."""
+    for key in ("fuzzer_name", "harness_name", "target_name"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    command = entry.get("command")
+    if isinstance(command, str) and command.strip():
+        first = command.strip().split()[0]
+        return Path(first).name
+
+    raise RuntimeError(
+        "metadata.json entry does not contain a usable harness target. "
+        "Expected one of: fuzzer_name, harness_name, target_name, or command."
+    )
+
+
+def extract_command_target(entry: dict) -> str | None:
+    """Extract the executable basename from metadata.json command."""
+    command = entry.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return None
+    first = command.strip().split()[0]
+    return Path(first).name or None
+
 def get_config_from_args():
     """Get configuration from command line arguments"""
     if len(sys.argv) < 2:
@@ -85,13 +113,15 @@ def get_config_from_args():
     
     arvo_id = sys.argv[1]
     config = load_arvo_config(arvo_id)
+    metadata = load_metadata_entry(arvo_id)
+    resolved_fuzzer_name = resolve_fuzzer_name_from_metadata(metadata)
     
     print(f"\nLoaded configuration for ARVO ID: {arvo_id}")
     print(f"Project: {config['project_name']}")
-    print(f"Fuzzer: {config['fuzzer_name']}")
+    print(f"Fuzzer: {resolved_fuzzer_name}")
     print(f"POC File: {config['poc_file']}")
     print("="*60)
-    
+    config["_resolved_fuzzer_name"] = resolved_fuzzer_name
     return config
 
 # Load configuration from command line arguments
@@ -101,7 +131,7 @@ METADATA = load_metadata_entry(CONFIG["arvo_id"])
 # Extract configuration parameters
 PROJECT_DIR = CONFIG['project_dir']
 POC_FILE = CONFIG['poc_file']
-FUZZER_NAME = CONFIG['fuzzer_name']
+FUZZER_NAME = CONFIG['_resolved_fuzzer_name']
 
 # =============================================================================
 # END CONFIGURATION LOADING
@@ -293,6 +323,126 @@ def find_fuzzer_index(harness_list, fuzzer_name: str) -> int:
     return None
 
 
+def normalize_harness_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def tokenize_harness_name(value: str) -> set[str]:
+    stop_words = {
+        "afl",
+        "file",
+        "for",
+        "fuzz",
+        "fuzzer",
+        "honggfuzz",
+        "input",
+        "libfuzzer",
+        "one",
+        "target",
+    }
+    return {
+        token
+        for token in re.split(r"[^a-z0-9]+", value.lower())
+        if token and token not in stop_words
+    }
+
+
+def infer_source_from_metadata(metadata_entry: dict) -> str:
+    """Use the first /src path from the sanitizer report as a source hint."""
+    report = metadata_entry.get("sanitizer_report")
+    if isinstance(report, str):
+        match = re.search(r"/src/([^\s:]+)", report)
+        if match:
+            return match.group(1)
+    return "unknown.c"
+
+
+def build_runtime_harness(
+    harness_list,
+    metadata_entry: dict,
+    requested_name: str,
+) -> tuple[list, int, str]:
+    """
+    Build a canonical harness entry whose name matches the real ARVO executable.
+
+    CRS discovery is still used for source/options/context when available, but
+    downstream execution should always use the runtime target from metadata.
+    """
+    runtime_name = extract_command_target(metadata_entry) or requested_name
+    if not runtime_name:
+        raise RuntimeError("Unable to determine runtime harness target from metadata")
+
+    exact_index = find_fuzzer_index(harness_list, runtime_name)
+    if exact_index is not None:
+        return harness_list, exact_index, "exact CRS harness match"
+
+    candidates = []
+    for raw_name in {requested_name, runtime_name}:
+        if not raw_name:
+            continue
+        normalized = normalize_harness_name(raw_name)
+        tokens = tokenize_harness_name(raw_name)
+        candidates.append((raw_name, normalized, tokens))
+
+    matched_harness = None
+    match_reason = "synthetic runtime harness"
+
+    for harness in harness_list:
+        harness_norm = normalize_harness_name(harness.name)
+        if any(harness_norm == normalized for _, normalized, _ in candidates):
+            matched_harness = harness
+            match_reason = f"normalized name match to CRS harness '{harness.name}'"
+            break
+
+    if matched_harness is None:
+        scored_matches: list[tuple[int, int, object]] = []
+        for index, harness in enumerate(harness_list):
+            harness_tokens = tokenize_harness_name(harness.name)
+            harness_tokens |= tokenize_harness_name(Path(harness.source).stem)
+            overlap = max(
+                len(tokens & harness_tokens)
+                for _, _, tokens in candidates
+            ) if candidates else 0
+            if overlap > 0:
+                scored_matches.append((overlap, -index, harness))
+
+        if scored_matches:
+            scored_matches.sort(reverse=True)
+            best_overlap, _, best_harness = scored_matches[0]
+            if len(scored_matches) == 1 or best_overlap > scored_matches[1][0]:
+                matched_harness = best_harness
+                match_reason = (
+                    f"token-overlap match to CRS harness '{best_harness.name}' "
+                    f"(score={best_overlap})"
+                )
+
+    if matched_harness is not None:
+        runtime_harness = Harness(
+            name=runtime_name,
+            type=matched_harness.type,
+            source=matched_harness.source,
+            options=matched_harness.options,
+            harness_func=matched_harness.harness_func,
+        )
+    else:
+        runtime_harness = Harness(
+            name=runtime_name,
+            type=HarnessType.LIBFUZZER,
+            source=infer_source_from_metadata(metadata_entry),
+            options="",
+            harness_func=None,
+        )
+
+    for index, harness in enumerate(harness_list):
+        if harness.name == runtime_harness.name:
+            updated = list(harness_list)
+            updated[index] = runtime_harness
+            return updated, index, match_reason
+
+    updated = list(harness_list) + [runtime_harness]
+    return updated, len(updated) - 1, match_reason
+
+
 async def setup_project_and_harnesses():
     """
     Phase 1: Setup project and find harnesses using ARVO prebuilt image.
@@ -448,14 +598,17 @@ async def setup_project_and_harnesses():
     # =========================================================================
     # Step 8: Find the fuzzer specified in configuration
     # =========================================================================
-    fuzzer_index = find_fuzzer_index(harness_list, FUZZER_NAME)
-    
-    if fuzzer_index is None:
-        print(f"Fuzzer harness '{FUZZER_NAME}' not found!")
-        print(f"Available harnesses: {harness_names}")
-        return None, None, None
-    
-    print(f"Using harness: {harness_list[fuzzer_index].name} (index {fuzzer_index})")
+    harness_list, fuzzer_index, resolution_reason = build_runtime_harness(
+        harness_list,
+        METADATA,
+        FUZZER_NAME,
+    )
+    task.project.harnesses = harness_list
+
+    print(f"Resolved runtime harness: {harness_list[fuzzer_index].name} (index {fuzzer_index})")
+    print(f"Resolution reason: {resolution_reason}")
+    if harness_list[fuzzer_index].source:
+        print(f"Harness source hint: {harness_list[fuzzer_index].source}")
     
     return task, harness_list, fuzzer_index
 

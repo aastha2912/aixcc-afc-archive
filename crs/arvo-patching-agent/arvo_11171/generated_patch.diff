@@ -1,0 +1,69 @@
+--- a/src/utils/SkPolyUtils.cpp
++++ b/src/utils/SkPolyUtils.cpp
+@@ -1450,13 +1450,18 @@
+             return false;
+         }
+         fHCount = SkTMax(SkTMin(SkScalarRoundToInt(hCount), vertexCount), 1);
+-        fVCount = vertexCount/fHCount;
++        fVCount = SkTMax(vertexCount/fHCount, 1);
+         fGridConversion.set(sk_ieee_float_divide(fHCount - 0.001f, bounds.width()),
+                             sk_ieee_float_divide(fVCount - 0.001f, bounds.height()));
+         if (!fGridConversion.isFinite()) {
+             return false;
+         }
+ 
++        // Guard against degenerate bounds producing negative conversion factors.
++        if (fGridConversion.fX < 0 || fGridConversion.fY < 0) {
++            return false;
++        }
++
+         fGrid.setCount(fHCount*fVCount);
+         for (int i = 0; i < fGrid.count(); ++i) {
+             fGrid[i].reset();
+@@ -1466,13 +1471,19 @@
+     }
+ 
+     void add(TriangulationVertex* v) {
+-        int index = hash(v);
++        int index = this->hash(v);
++        if (index < 0) {
++            return;
++        }
+         fGrid[index].addToTail(v);
+         ++fNumVerts;
+     }
+ 
+     void remove(TriangulationVertex* v) {
+-        int index = hash(v);
++        int index = this->hash(v);
++        if (index < 0) {
++            return;
++        }
+         fGrid[index].remove(v);
+         --fNumVerts;
+     }
+@@ -1511,12 +1522,20 @@
+ 
+ private:
+     int hash(TriangulationVertex* vert) const {
+-        int h = (vert->fPosition.fX - fBounds.fLeft)*fGridConversion.fX;
+-        int v = (vert->fPosition.fY - fBounds.fTop)*fGridConversion.fY;
+-        SkASSERT(v*fHCount + h >= 0);
+-        return v*fHCount + h;
++        int h = (vert->fPosition.fX - fBounds.fLeft) * fGridConversion.fX;
++        int v = (vert->fPosition.fY - fBounds.fTop) * fGridConversion.fY;
++        if (h < 0 || h >= fHCount || v < 0 || v >= fVCount) {
++            return -1;
++        }
++        int index = v * fHCount + h;
++        if (index < 0 || index >= fGrid.count()) {
++            return -1;
++        }
++        return index;
+     }
+ 
++
++
+     SkRect fBounds;
+     int fHCount;
+     int fVCount;

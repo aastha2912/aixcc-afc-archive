@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from hashlib import sha256
+import json
 import orjson
 import os
 from crs.common.aio import Path
@@ -137,6 +138,50 @@ class Harness(BaseModel):
     harness_func: Optional[str]
 
     model_config = ConfigDict(frozen=True)
+
+
+def _normalize_harness_token(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", name.lower())
+
+
+def _fallback_harness_match_from_source(src_files: list[str]) -> tuple[dict[str, list[str]], dict[str, str]]:
+    options_files = [p for p in src_files if p.endswith(".options")]
+    source_files = [p for p in src_files if p.endswith((".c", ".cc", ".cpp"))]
+    normalized_sources: list[tuple[str, str]] = [
+        (_normalize_harness_token(os.path.splitext(os.path.basename(p))[0]), p)
+        for p in source_files
+    ]
+
+    def candidate_keys(target: str) -> list[str]:
+        keys = [_normalize_harness_token(target)]
+        stem = target
+        if stem.startswith("api_"):
+            suffix = stem[len("api_"):]
+            camel = "".join(part.capitalize() for part in suffix.split("_") if part)
+            if camel:
+                keys.append(_normalize_harness_token(f"Fuzz{camel}"))
+                keys.append(_normalize_harness_token(camel))
+        if stem.startswith("fuzz_"):
+            suffix = stem[len("fuzz_"):]
+            camel = "".join(part.capitalize() for part in suffix.split("_") if part)
+            if camel:
+                keys.append(_normalize_harness_token(f"Fuzz{camel}"))
+                keys.append(_normalize_harness_token(camel))
+        return list(dict.fromkeys(keys))
+
+    matches: dict[str, list[str]] = {}
+    option_map: dict[str, str] = {}
+    for opt_path in options_files:
+        target = os.path.splitext(os.path.basename(opt_path))[0]
+        wanted = set(candidate_keys(target))
+        candidates = [src for norm, src in normalized_sources if norm in wanted]
+        if not candidates:
+            continue
+        prefer_oss_fuzz = [src for src in candidates if "/oss_fuzz/" in src]
+        ranked = prefer_oss_fuzz or candidates
+        matches[target] = [ranked[0]]
+        option_map[target] = opt_path
+    return matches, option_map
 
 class CrashResult(BaseModel):
     config: BuildConfig
@@ -582,12 +627,34 @@ class Project:
                     await f.path.replace(harness_info_path)
 
         j = await asyncio.to_thread(orjson.loads, harness_info_json)
+        source_option_map: dict[str, str] = {}
+        if not j:
+            logger.warning("harness_match returned no harnesses; attempting source-based fallback")
+            async with docker.run(SANDBOX_IMAGE_NAME, timeout=DEFAULT_INIT_TIMEOUT) as run:
+                require(await docker.vwrite_layers(run, "/src", await self.vfs.parent.layers()))
+                proc = await run.exec(
+                    "python3", "-c",
+                    (
+                        "import json, pathlib; "
+                        "files=[p.as_posix() for p in pathlib.Path('/src').rglob('*') if p.is_file()]; "
+                        "print(json.dumps(files))"
+                    ),
+                    stdout=PIPE, stderr=PIPE,
+                )
+                stdout, stderr = await proc.communicate()
+                if proc.returncode == 0:
+                    src_files = json.loads(stdout.decode())
+                    j, source_option_map = _fallback_harness_match_from_source(src_files)
+                else:
+                    logger.error(f"source-based harness fallback failed: {stderr[:config.MAX_ERROR_OUTPUT].decode(errors='replace')}")
         for path, matches in j.items():
             basename = os.path.basename(path)
             if len(matches) == 1:
                 source = matches.pop()
                 if await artifacts.build_vfs.is_file(f"{basename}.options"):
                     options = (await artifacts.build_vfs.read(f"{basename}.options")).decode(errors="replace")
+                elif basename in source_option_map:
+                    options = (await self.vfs.parent.read(source_option_map[basename].removeprefix("/src/"))).decode(errors="replace")
                 else:
                     options = ""
                 fuzz_function = None

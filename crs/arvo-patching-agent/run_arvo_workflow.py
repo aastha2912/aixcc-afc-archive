@@ -295,6 +295,31 @@ def ensure_image_in_dind(image_name: str) -> None:
         )
 
 
+def remove_image_from_dind(image_name: str) -> None:
+    proc = run_command(
+        ["docker", "compose", "exec", "-T", "docker-daemon", "docker", "image", "rm", "-f", image_name],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"failed to remove image from DinD: {image_name}\n{proc.stdout}"
+        )
+
+
+def remove_project_cache(project_name: str) -> None:
+    shell_cmd = f"rm -rf /cache/data/*/{shlex.quote(project_name)}"
+    proc = run_command(
+        ["docker", "compose", "exec", "-T", "crs-main", "bash", "-lc", shell_cmd],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"failed to remove project cache for {project_name}\n{proc.stdout}"
+        )
+
+
 def run_integration(arvo_id: str, log_file: Path) -> None:
     log_file.parent.mkdir(parents=True, exist_ok=True)
     update_status(arvo_id, stage="integration", status="running", detail="running arvo_to_crs_integration.py inside crs-main")
@@ -325,16 +350,30 @@ def process_id(arvo_id: str, *, force: bool) -> RunResult:
 
     update_status(arvo_id, stage="starting", status="running", detail="starting workflow")
     cfg = ensure_setup(arvo_id)
-    append_log(arvo_id, f"Ensuring image in DinD: {cfg.arvo_image_name}")
-    update_status(arvo_id, stage="image", status="running", detail=f"ensuring {cfg.arvo_image_name} is present in DinD")
-    ensure_image_in_dind(cfg.arvo_image_name)
-    append_log(arvo_id, f"Image ready in DinD: {cfg.arvo_image_name}")
-    update_status(arvo_id, stage="image", status="completed", detail=f"{cfg.arvo_image_name} present in DinD")
-    run_setup_script(arvo_id)
-    cfg = ensure_setup(arvo_id)
-    run_integration(arvo_id, log_path(arvo_id))
-    update_status(arvo_id, stage="done", status="completed", detail=cfg.project_name)
-    return RunResult(arvo_id=arvo_id, status="completed", detail=cfg.project_name)
+    try:
+        append_log(arvo_id, f"Ensuring image in DinD: {cfg.arvo_image_name}")
+        update_status(arvo_id, stage="image", status="running", detail=f"ensuring {cfg.arvo_image_name} is present in DinD")
+        ensure_image_in_dind(cfg.arvo_image_name)
+        append_log(arvo_id, f"Image ready in DinD: {cfg.arvo_image_name}")
+        update_status(arvo_id, stage="image", status="completed", detail=f"{cfg.arvo_image_name} present in DinD")
+        run_setup_script(arvo_id)
+        cfg = ensure_setup(arvo_id)
+        run_integration(arvo_id, log_path(arvo_id))
+        update_status(arvo_id, stage="done", status="completed", detail=cfg.project_name)
+        return RunResult(arvo_id=arvo_id, status="completed", detail=cfg.project_name)
+    finally:
+        try:
+            append_log(arvo_id, f"Removing image from DinD: {cfg.arvo_image_name}")
+            remove_image_from_dind(cfg.arvo_image_name)
+            append_log(arvo_id, f"Removed image from DinD: {cfg.arvo_image_name}")
+        except Exception as exc:  # noqa: BLE001
+            append_log(arvo_id, f"WARNING: failed to remove image from DinD: {exc}")
+        try:
+            append_log(arvo_id, f"Removing CRS cache for project: {cfg.project_name}")
+            remove_project_cache(cfg.project_name)
+            append_log(arvo_id, f"Removed CRS cache for project: {cfg.project_name}")
+        except Exception as exc:  # noqa: BLE001
+            append_log(arvo_id, f"WARNING: failed to remove CRS cache: {exc}")
 
 
 def determine_effective_workers(configs: list[ArvoRunConfig], requested_workers: int) -> tuple[int, str]:
@@ -403,11 +442,29 @@ def main() -> int:
         for arvo_id in ready_ids:
             try:
                 cfg = config_by_id[arvo_id]
-                ensure_image_in_dind(cfg.arvo_image_name)
-                run_setup_script(arvo_id)
-                cfg = ensure_setup(arvo_id)
-                run_integration(arvo_id, log_path(arvo_id))
-                results.append(RunResult(arvo_id=arvo_id, status="completed", detail=cfg.project_name))
+                try:
+                    append_log(arvo_id, f"Ensuring image in DinD: {cfg.arvo_image_name}")
+                    update_status(arvo_id, stage="image", status="running", detail=f"ensuring {cfg.arvo_image_name} is present in DinD")
+                    ensure_image_in_dind(cfg.arvo_image_name)
+                    append_log(arvo_id, f"Image ready in DinD: {cfg.arvo_image_name}")
+                    update_status(arvo_id, stage="image", status="completed", detail=f"{cfg.arvo_image_name} present in DinD")
+                    run_setup_script(arvo_id)
+                    cfg = ensure_setup(arvo_id)
+                    run_integration(arvo_id, log_path(arvo_id))
+                    results.append(RunResult(arvo_id=arvo_id, status="completed", detail=cfg.project_name))
+                finally:
+                    try:
+                        append_log(arvo_id, f"Removing image from DinD: {cfg.arvo_image_name}")
+                        remove_image_from_dind(cfg.arvo_image_name)
+                        append_log(arvo_id, f"Removed image from DinD: {cfg.arvo_image_name}")
+                    except Exception as exc:  # noqa: BLE001
+                        append_log(arvo_id, f"WARNING: failed to remove image from DinD: {exc}")
+                    try:
+                        append_log(arvo_id, f"Removing CRS cache for project: {cfg.project_name}")
+                        remove_project_cache(cfg.project_name)
+                        append_log(arvo_id, f"Removed CRS cache for project: {cfg.project_name}")
+                    except Exception as exc:  # noqa: BLE001
+                        append_log(arvo_id, f"WARNING: failed to remove CRS cache: {exc}")
             except Exception as exc:  # noqa: BLE001
                 update_status(arvo_id, stage="failed", status="failed", detail=str(exc))
                 append_log(arvo_id, f"Workflow failed: {exc}")
