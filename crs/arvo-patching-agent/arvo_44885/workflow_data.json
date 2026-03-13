@@ -1,0 +1,264 @@
+{
+  "vuln_id": 126,
+  "crash_result": {
+    "output": "==70644==ERROR: AddressSanitizer: heap-use-after-free on address 0x612000019b40 at pc 0x000000ff0048 bp 0x7ffff1deef80 sp 0x7ffff1deef78\nREAD of size 4 at 0x612000019b40 thread T0\nSCARINESS: 45 (4-byte-read-heap-use-after-free)\n    #0 0xff0047 in zend_gc_refcount /src/php-src/Zend/zend_types.h:1330:12\n    #1 0xff0047 in zval_refcount_p /src/php-src/Zend/zend_types.h:1379:9\n    #2 0xff0047 in zval_call_destructor /src/php-src/Zend/zend_execute_API.c:217:35\n    #3 0x1260b1b in zend_hash_reverse_ap",
+    "stack": "#0 0xff0047 in zend_gc_refcount php-src/Zend/zend_types.h:1330:12\n#1 0xff0047 in zval_refcount_p php-src/Zend/zend_types.h:1379:9\n#2 0xff0047 in zval_call_destructor php-src/Zend/zend_execute_API.c:217:35\n#3 0x1260b1b in zend_hash_reverse_apply php-src/Zend/zend_hash.c:2233:13\n#4 0xfefa22 in shutdown_destructors php-src/Zend/zend_execute_API.c:262:4\n#5 0x13c23e4 in zend_call_destructors php-src/Zend/zend.c:1332:3\n#6 0xcdb60e in php_request_shutdown php-src/main/main.c:1914:3\n#7 0x13cbf90 in fuzz",
+    "dedup": "zend_gc_refcount--zval_refcount_p--zval_call_destructor"
+  },
+  "pov_run_data": {
+    "task_uuid": "d07bf914-ec91-554d-8a1c-a6701187cfbd",
+    "project_name": "php",
+    "harness": "php-fuzz-execute",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "zend_gc_refcount--zval_refcount_p--zval_call_destructor"
+  },
+  "decoded_pov": {
+    "project_name": "php",
+    "harness": "php-fuzz-execute",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'<?function gen(){$g=yield;$g->send($\\xff);}$gen=gen();try{$gen->send($gen);}catch(\\xff){}'\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "zend_gc_refcount--zval_refcount_p--zval_call_destructor"
+  },
+  "analyzed_vuln": {
+    "function": "fuzzer_request_shutdown",
+    "file": "php-src/sapi/fuzzer/fuzzer-sapi.c",
+    "description": "The fuzzer SAPI manually releases EG(exception) via zend_object_release() before normal request shutdown. In this PoV, EG(exception) points to an exception object that is still reachable from userland structures (through generator/object property cycles). The manual release frees the exception object early, but later php_request_shutdown()->shutdown_destructors() iterates the symbol table and calls zval_call_destructor(), which reads the refcount of the same zval/object, causing a heap-use-after-free in zend_gc_refcount().",
+    "conditions": "Trigger requires a thrown exception object to remain referenced in user variables/cyclic structures while also being stored in EG(exception). The PoV does this using generator send()/catch behavior and cyclic references, so fuzzer_request_shutdown() first decrements/frees EG(exception), then standard shutdown still processes remaining references during symbol-table/object destruction, leading to UAF read of freed zend_object memory."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 2,
+      "total_cost": 0.024491950000000002,
+      "total_input_tokens": 16901,
+      "total_output_tokens": 328,
+      "total_cached_tokens": 6144,
+      "llm_calls": [
+        {
+          "timestamp": 1773415266.3748975,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0085561,
+          "input_tokens": 5078,
+          "output_tokens": 106,
+          "total_tokens": 5184,
+          "cached_tokens": 1152,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_X5JYMmQMzEfvDjL4bNNBXdhV"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_CnueD7Nb1jCMTpA11iZ8PXll"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_3bAxGw4Ye8xycmC5hKKxzpFq"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773415281.7862124,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01593585,
+          "input_tokens": 11823,
+          "output_tokens": 222,
+          "total_tokens": 12045,
+          "cached_tokens": 4992,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_YPuq4uBBJrZykmO6Yg7vfqvq"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 4,
+      "total_cost": 0.03505075,
+      "total_input_tokens": 25133,
+      "total_output_tokens": 298,
+      "total_cached_tokens": 8320,
+      "llm_calls": [
+        {
+          "timestamp": 1773415283.8232114,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00653695,
+          "input_tokens": 4529,
+          "output_tokens": 88,
+          "total_tokens": 4617,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_hYSFokx3muDXEy2R5QIGo7r6"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_OmFusKrCTHxq0vOuuWCuR35y"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773416402.3223002,
+          "model": "gpt-5.3-codex",
+          "cost": 0.014075250000000001,
+          "input_tokens": 6659,
+          "output_tokens": 173,
+          "total_tokens": 6832,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_tTx40lsDqvQLcNec1RslB5LE"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773416403.456391,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0018227999999999999,
+          "input_tokens": 6920,
+          "output_tokens": 14,
+          "total_tokens": 6934,
+          "cached_tokens": 6656,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_GMzPKnshi3YFB5NhMq4fcbib"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773417517.1798189,
+          "model": "gpt-5.3-codex",
+          "cost": 0.012615749999999998,
+          "input_tokens": 7025,
+          "output_tokens": 23,
+          "total_tokens": 7048,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_F4mJmYxD0LP2EgdFk5dFrbi8"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.059542700000000004,
+      "total_input_tokens": 42034,
+      "total_output_tokens": 626,
+      "total_llm_calls": 6
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/sapi/fuzzer/fuzzer-sapi.c\n+++ b/sapi/fuzzer/fuzzer-sapi.c\n@@ -189,12 +189,6 @@\n void fuzzer_request_shutdown(void)\n {\n \tzend_try {\n-\t\t/* Destroy thrown exceptions. This does not happen as part of request shutdown. */\n-\t\tif (EG(exception)) {\n-\t\t\tzend_object_release(EG(exception));\n-\t\t\tEG(exception) = NULL;\n-\t\t}\n-\n \t\t/* Some fuzzers (like unserialize) may create circular structures. Make sure we free them.\n \t\t * Two calls are performed to handle objects with destructors. */\n \t\tzend_gc_collect_cycles();\n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [],
+    "read_definition": [],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "php-src/sapi/fuzzer/fuzzer-sapi.c",
+          190
+        ],
+        "kwargs": {},
+        "timestamp": 447572.748946541,
+        "success": true,
+        "result_summary": "Ok({'contents': ' 91 \\tphp_import_environment_variables(track_vars_array);\\n 92 }\\n 93 \\n 94 static void log_message(const char *message, int level)\\n 95 {\\n 96 }\\n 97 \\n 98 \\n 99 static sapi_module_s..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "fuzzer_request_shutdown",
+          "php-src/sapi/fuzzer/fuzzer-sapi.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 448687.826457724,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='php-src/sapi/fuzzer/fuzzer-sapi.c', refs=[FileReference(line=288, content='\\tfuzzer_request_shutdown();', enclosing_definition='fuzzer_do_request_from_buffer')])])"
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "php-src/sapi/fuzzer/fuzzer-sapi.c",
+          "@@ -189,12 +189,6 @@\n void fuzzer_request_shutdown(void)\n {\n \tzend_try {\n-\t\t/* Destroy thrown exceptions. This does not happen as part of request shutdown. */\n-\t\tif (EG(exception)) {\n-\t\t\tzend_object_release(EG(exception));\n-\t\t\tEG(exception) = NULL;\n-\t\t}\n-\n \t\t/* Some fuzzers (like unserialize) may create circular structures. Make sure we free them.\n \t\t * Two calls are performed to handle objects with destructors. */\n \t\tzend_gc_collect_cycles();\n"
+        ],
+        "kwargs": {},
+        "timestamp": 448690.919416703,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 449804.313477274,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

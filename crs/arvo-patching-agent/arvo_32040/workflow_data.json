@@ -1,0 +1,268 @@
+{
+  "vuln_id": 95,
+  "crash_result": {
+    "output": "==2711==ERROR: AddressSanitizer: heap-buffer-overflow on address 0xebccb883 at pc 0x085e86c4 bp 0xffdd5c78 sp 0xffdd5c70\nWRITE of size 2 at 0xebccb883 thread T0\nSCARINESS: 43 (2-byte-write-heap-buffer-overflow-far-from-bounds)\n    #0 0x85e86c3 in bshuf_shuffle_bit_eightelem_sse2 /src/c-blosc2/blosc/bitshuffle-sse2.c:445:29\n    #1 0x85f6515 in bshuf_shuffle_bit_eightelem_avx2 /src/c-blosc2/blosc/bitshuffle-avx2.c:216:12\n    #2 0x85f6515 in bshuf_untrans_bit_elem_avx2 /src/c-blosc2/blosc/bitshuffl",
+    "stack": "#0 0x85e86c3 in bshuf_shuffle_bit_eightelem_sse2 c-blosc2/blosc/bitshuffle-sse2.c:445:29\n#1 0x85f6515 in bshuf_shuffle_bit_eightelem_avx2 c-blosc2/blosc/bitshuffle-avx2.c:216:12\n#2 0x85f6515 in bshuf_untrans_bit_elem_avx2 c-blosc2/blosc/bitshuffle-avx2.c:245:11\n#3 0x821dad3 in bitunshuffle c-blosc2/blosc/shuffle.c:454:23\n#4 0x81af55a in pipeline_d c-blosc2/blosc/blosc2.c:1154:13\n#5 0x81c3893 in blosc_d c-blosc2/blosc/blosc2.c:1621:19\n#6 0x81c11e6 in _blosc_getitem c-blosc2/blosc/blosc2.c:2665:14",
+    "dedup": "bshuf_shuffle_bit_eightelem_sse2--bshuf_shuffle_bit_eightelem_avx2--bshuf_untrans_bit_elem_avx2"
+  },
+  "pov_run_data": {
+    "task_uuid": "814152e2-0f17-535d-b09c-fae7faa8b72f",
+    "project_name": "c-blosc2",
+    "harness": "decompress_frame_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "bshuf_shuffle_bit_eightelem_sse2--bshuf_shuffle_bit_eightelem_avx2--bshuf_untrans_bit_elem_avx2"
+  },
+  "decoded_pov": {
+    "project_name": "c-blosc2",
+    "harness": "decompress_frame_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'\\x11\\xff\\xbc\\x00\\x00\\x00\\xff\\xff\\xbb.\\x00\\x00\\x00\\x00\\x87\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xbc\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00#\\x00\\xbc\\xbc\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00#\\xc3\\x00\\xbc\\x04\\xff;\\x00\\x00\\x00\\x00\\x00\\x00\\xd5\\xf6\\x94\\xa8D$\\t\\x00\\xfa\\x02\\x00\\x10\\x00\\x9b\\xceh\\x00\\xa0\\x00\\x00\\x1b\\x00\\x00\\xff\\xff\\xff\\xcf\\xf8I\\xff\\x00\\xde\\x00\\x00\\xad\\x00A\\x00\\xce\\x00\\x08\\x17\\n\\x00\\x00\\x87\\x00\\x00\\x08\\x00\\xd3\\x87\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\"\\xff\\x03\\x00\\x87\\xaa\\xfe\\xf8(\\xe2\\x01z\\x00\\x80\\x02\\x004\\x06\\r\\x00\\x00`\\x01\\x00\\x00W2\\x00\\x00\\x00+\\x00\\x00\\x00-\\x00\\x00\\x00\\x00\\x00\\x00\\xf9Z\\x00\\xce\\x00\\x00\\x00\\n\\x00\\x00\\x87\\n\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xde\\x00\\x00\\x00'\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "bshuf_shuffle_bit_eightelem_sse2--bshuf_shuffle_bit_eightelem_avx2--bshuf_untrans_bit_elem_avx2"
+  },
+  "analyzed_vuln": {
+    "function": "bitunshuffle",
+    "file": "c-blosc2/blosc/shuffle.c",
+    "description": "`bitunshuffle()` calls the SIMD bitunshuffle backend with `size = blocksize / bytesoftype` (element count) for format_version==2, but for old-format bitshuffle data the backend expects a byte-multiple-of-8 style sizing convention. This mismatch lets crafted metadata drive the AVX2/SSE2 path (`bshuf_untrans_bit_elem_avx2` -> `bshuf_shuffle_bit_eightelem_sse2`) to compute output indices beyond the allocated temp/output buffer and perform out-of-bounds writes (crash at bitshuffle-sse2.c:445).",
+    "conditions": "In `decompress_frame_fuzzer`, attacker-controlled frame/chunk header fields (typesize/blocksize/filter metadata/version path) reach `pipeline_d()` and then `bitunshuffle()`. With BITSHUFFLE enabled and format_version==2 on malformed legacy-style bitshuffle payload/size combinations, `bitunshuffle()` passes inconsistent size semantics to the backend, causing the SSE2 store loop to write past `out` (`out_ui16[ind/2]`). The PoV triggers this during `blosc2_getitem` while decoding a lazy chunk from the frame."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 2,
+      "total_cost": 0.02851695,
+      "total_input_tokens": 18473,
+      "total_output_tokens": 419,
+      "total_cached_tokens": 6144,
+      "llm_calls": [
+        {
+          "timestamp": 1773393843.685471,
+          "model": "gpt-5.3-codex",
+          "cost": 0.008783599999999999,
+          "input_tokens": 4936,
+          "output_tokens": 140,
+          "total_tokens": 5076,
+          "cached_tokens": 1152,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_cebmBtovHNwArPKPjinBHTs3"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_qaeTYkd2nm2OQaZ5NKW0wfjx"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_0t0w6n4UmZLQCH5iPqpJfle3"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Ey0HBvJL2AIzjM9OmgeMb9TD"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773393850.7921069,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01973335,
+          "input_tokens": 13537,
+          "output_tokens": 279,
+          "total_tokens": 13816,
+          "cached_tokens": 4992,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_zE2W2gi21XMas6t6MeXJoM5H"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 4,
+      "total_cost": 0.02072315,
+      "total_input_tokens": 26317,
+      "total_output_tokens": 509,
+      "total_cached_tokens": 20608,
+      "llm_calls": [
+        {
+          "timestamp": 1773393854.370916,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0066962,
+          "input_tokens": 4660,
+          "output_tokens": 83,
+          "total_tokens": 4743,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_e6gOTxRZLNOAqeSHMxZ6J6pk"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_duM5XlaJhF3sYPcm5ZuJm0x5"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773393943.0814474,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0102039,
+          "input_tokens": 6866,
+          "output_tokens": 389,
+          "total_tokens": 7255,
+          "cached_tokens": 4608,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_yXp1qAtK4EcrAFwRqCpFFJ1a"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773393944.3526134,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0017566499999999998,
+          "input_tokens": 7343,
+          "output_tokens": 14,
+          "total_tokens": 7357,
+          "cached_tokens": 7168,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_xThxg3KU4mu6kGNdKIy7c7uh"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773393983.682863,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0020664,
+          "input_tokens": 7448,
+          "output_tokens": 23,
+          "total_tokens": 7471,
+          "cached_tokens": 7168,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_uE6YqYNFpTqtpRwRddigdVY7"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.049240099999999995,
+      "total_input_tokens": 44790,
+      "total_output_tokens": 928,
+      "total_llm_calls": 6
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/blosc/shuffle.c\n+++ b/blosc/shuffle.c\n@@ -447,7 +447,7 @@\n   size_t size = blocksize / bytesoftype;\n \n   if (format_version == 2) {\n-    /* Starting from version 3, bitshuffle() works differently */\n+    /* Starting from version 2, bitshuffle() works with element counts */\n     if ((size % 8) == 0) {\n       /* The number of elems is a multiple of 8 which is supported by\n          bitshuffle. */\n@@ -468,7 +468,7 @@\n     }\n   }\n   else {\n-    /* bitshuffle only supports a number of bytes that is a multiple of 8. */\n+    /* Legacy format: backend expects a number of elements multiple of 8. */\n     size -= size % 8;\n     int ret = (int) (host_implementation.bitunshuffle)((void *) _src, (void *) _dest,\n                                                  size, bytesoftype, (void *) _tmp);\n@@ -477,6 +477,8 @@\n       return ret;\n     }\n \n+    size *= bytesoftype;\n+\n     /* Copy the leftovers */\n     size_t offset = size * bytesoftype;\n     memcpy((void *) (_dest + offset), (void *) (_src + offset), blocksize - offset);\n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [],
+    "read_definition": [],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "c-blosc2/blosc/shuffle.c",
+          430
+        ],
+        "kwargs": {},
+        "timestamp": 426142.960147083,
+        "success": true,
+        "result_summary": "Ok({'contents': '331     impl_altivec.bitunshuffle = (bitunshuffle_func)bshuf_untrans_bit_elem_altivec;\\n332     return impl_altivec;\\n333   }\\n334 #endif  /* defined(SHUFFLE_ALTIVEC_ENABLED) */\\n335 ..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "bitunshuffle",
+          "c-blosc2/blosc/shuffle.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 426226.585652636,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/shuffle.c', refs=[FileReference(line=67, content='  bitunshuffle_func bitunshuffle;', enclosing_definition='HAVE_CPU_FEAT_INTRIN'), FileReference(line=287,..."
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "c-blosc2/blosc/shuffle.c",
+          "@@ -447,7 +447,7 @@ int32_t bitunshuffle(const int32_t bytesoftype, const int32_t blocksize,\n   size_t size = blocksize / bytesoftype;\n \n   if (format_version == 2) {\n-    /* Starting from version 3, bitshuffle() works differently */\n+    /* Starting from version 2, bitshuffle() works with element counts */\n     if ((size % 8) == 0) {\n       /* The number of elems is a multiple of 8 which is supported by\n          bitshuffle. */\n@@ -468,14 +468,16 @@ int32_t bitunshuffle(const int32_t bytesoftype, const int32_t blocksize,\n     }\n   }\n   else {\n-    /* bitshuffle only supports a number of bytes that is a multiple of 8. */\n+    /* Legacy format: backend expects a number of elements multiple of 8. */\n     size -= size % 8;\n     int ret = (int) (host_implementation.bitunshuffle)((void *) _src, (void *) _dest,\n                                                   size, bytesoftype, (void *) _tmp);\n     if (ret < 0) {\n       fprintf(stderr, \"the impossible happened: the bitunshuffle filter failed!\");\n       return ret;\n     }\n+\n+    size *= bytesoftype;\n \n     /* Copy the leftovers */\n     size_t offset = size * bytesoftype;\n     memcpy((void *) (_dest + offset), (void *) (_src + offset), blocksize - offset);\n"
+        ],
+        "kwargs": {},
+        "timestamp": 426231.690387143,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 426270.892581398,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

@@ -1,0 +1,815 @@
+{
+  "vuln_id": 101,
+  "crash_result": {
+    "output": "==1874==ERROR: AddressSanitizer: use-after-poison on address 0x7b03f016eafe at pc 0x0000006a1ba2 bp 0x7ffeb238ac50 sp 0x7ffeb238ac48\nREAD of size 2 at 0x7b03f016eafe thread T0\nSCARINESS: 24 (2-byte-read-use-after-poison)\n    #0 0x6a1ba1 in void rawspeed::SamsungV2Decompressor::decompressRow<(rawspeed::SamsungV2Decompressor::OptFlags)4>(unsigned int) /src/librawspeed/src/librawspeed/io/BitStream.h\n    #1 0x689a91 in rawspeed::SamsungV2Decompressor::decompress() /src/librawspeed/src/librawspeed/de",
+    "stack": "#0 0x6a1ba1 in void rawspeed::SamsungV2Decompressor::decompressRow<(rawspeed::SamsungV2Decompressor::OptFlags)4>(unsigned int) librawspeed/src/librawspeed/io/BitStream.h\n#1 0x689a91 in rawspeed::SamsungV2Decompressor::decompress() librawspeed/src/librawspeed/decompressors/SamsungV2Decompressor.cpp:136:7\n#2 0x5f9dc2 in rawspeed::SrwDecoder::decodeRawInternal() librawspeed/src/librawspeed/decoders/SrwDecoder.cpp:114:8\n#3 0x5ed453 in rawspeed::RawDecoder::decodeRaw() librawspeed/src/librawspeed/dec",
+    "dedup": "void rawspeed::SamsungV2Decompressor::decompressRow<(rawspeed::SamsungV2Decompressor::OptFlags)4>(unsigned int)--rawspeed::SamsungV2Decompressor::decompress()--rawspeed::SrwDecoder::decodeRawInternal()"
+  },
+  "pov_run_data": {
+    "task_uuid": "d2d7c21f-ad5e-5be2-9b5d-a7f3f08acd0a",
+    "project_name": "librawspeed",
+    "harness": "TiffDecoderFuzzer-SrwDecoder",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "void rawspeed::SamsungV2Decompressor::decompressRow<(rawspeed::SamsungV2Decompressor::OptFlags)4>(unsigned int)--rawspeed::SamsungV2Decompressor::decompress()--rawspeed::SrwDecoder::decodeRawInternal()"
+  },
+  "decoded_pov": {
+    "project_name": "librawspeed",
+    "harness": "TiffDecoderFuzzer-SrwDecoder",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'II*\\x00\\x08\\x00\\x00\\x00#\\x00  \\x02\\x00          \\x00\\x00          \\x01\\x00          \\x01\\x00        \\x02\\x01\\x03\\x00\\x12\\x00\\x00\\x00\\xbe\\x01\\x00\\x00  \\x03\\x00       \\xff\\xff \\x03\\x00          \\x02\\x00        \\x10\\x01\\x02\\x00 \\x00\\x00\\x00 \\x01\\x00\\x00  \\x03\\x00          \\x03\\x00          \\x03\\x00          \\x03\\x00          \\x03\\x00          \\x00\\x00          \\x03\\x00          \\x03\\x00        \\x03\\x01\\x03\\x00\\x01\\x00\\x00\\x00\\x05\\x80    \\x03\\x00        \\x01\\x01\\x03\\x00\\x02\\x00\\x00\\x00\\x01\\x03    \\x00\\x00      \\xff\\xff\\x0f\\x01\\x02\\x00 \\x00\\x00\\x00 \\x01\\x00\\x00\\x11\\x01\\x03\\x00\\x01\\x00\\x00\\x003\\x01  \\x00\\x01\\x03\\x00\\x02\\x00\\x00\\x00\\x00\\x01    \\x03\\x00    \\xff\\xff\\xff  \\x01\\x03\\x00\\x01 4   \\xff   \\x03\\x00\\x96       \\x17\\x01\\x04\\x00\\x01\\x00\\x00\\x00\\xc4\\x00\\x00\\x00  \\n\\x00 \\xff \\x00    * \\x02\\x00          \\n\\x00d  \\x00      \\x00\\x00  R\\x16      \\x02\\x00 E  \\xff   \\x0c \\x04\\x00\\xff\\xfd      L \\x01\\x00 \\x00\\xff\\xff    \\x00\\x00\\x00\\x00 \\x00\\xff         \\x0e\\x00F                \\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff                              '\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "void rawspeed::SamsungV2Decompressor::decompressRow<(rawspeed::SamsungV2Decompressor::OptFlags)4>(unsigned int)--rawspeed::SamsungV2Decompressor::decompress()--rawspeed::SrwDecoder::decodeRawInternal()"
+  },
+  "analyzed_vuln": {
+    "function": "decompressRow",
+    "file": "librawspeed/src/librawspeed/decompressors/SamsungV2Decompressor.cpp",
+    "description": "`SamsungV2Decompressor::decompressRow` performs unchecked neighbor reads from previously decoded rows when motion mode != 7. In the motion-prediction path it computes `refpixel = img_up2 + i + slideOffset` or `img_up + i + slideOffset + (...)` with `slideOffset` in {-4,-2,0,2,4} and then dereferences `*refpixel` (and sometimes `*(refpixel+2)`) without validating that the referenced column stays within row bounds. For left-edge blocks (`col==0`) and negative offsets, this can read before the start of the row buffer, producing ASan use-after-poison. Crash is observed in BitStream.h due to inlining, but root cause is this OOB reference-pixel access logic in `decompressRow`.",
+    "conditions": "PoV routes through `SrwDecoder::decodeRawInternal` with compression 32773 (Samsung V2), allocates image data, then calls `SamsungV2Decompressor::decompress()`. Crafted compressed bitstream/header values drive `decompressRow<OptFlags::QP>` into a non-7 motion mode on rows >=2, so the predictor uses previous-row pointers with negative/shifted offsets near the first 16-pixel block. Because column boundary checks are missing, dereference of `refpixel`/`refpixel+2` hits poisoned redzone bytes adjacent to the image allocation and crashes."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 3,
+      "total_cost": 0.04895555,
+      "total_input_tokens": 28757,
+      "total_output_tokens": 507,
+      "total_cached_tokens": 5376,
+      "llm_calls": [
+        {
+          "timestamp": 1773395866.372819,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00724185,
+          "input_tokens": 4207,
+          "output_tokens": 121,
+          "total_tokens": 4328,
+          "cached_tokens": 1152,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_kaeHDI26F9ilS6TV7QVd5PS5"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_nq80VUZpqg4ZRuRBIWPkZIwo"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_vWCCYc9FUGlzog0K6jJYIevh"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773395869.605494,
+          "model": "gpt-5.3-codex",
+          "cost": 0.013372450000000001,
+          "input_tokens": 11115,
+          "output_tokens": 41,
+          "total_tokens": 11156,
+          "cached_tokens": 4224,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_EAqy6aHF05fwHZ7G6csrJFsu"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773395876.3916144,
+          "model": "gpt-5.3-codex",
+          "cost": 0.028341250000000002,
+          "input_tokens": 13435,
+          "output_tokens": 345,
+          "total_tokens": 13780,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_ehWKS6Y5JcOcV26jj5uhtiYw"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 22,
+      "total_cost": 0.12619005,
+      "total_input_tokens": 338683,
+      "total_output_tokens": 2635,
+      "total_cached_tokens": 319616,
+      "llm_calls": [
+        {
+          "timestamp": 1773395878.9616585,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0065387,
+          "input_tokens": 4426,
+          "output_tokens": 101,
+          "total_tokens": 4527,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_HcTplnlS4NvmSnIV0pfsZgnu"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_2ZQiv6wmqwUEmr7gvp9EDedD"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773395954.006732,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0067711,
+          "input_tokens": 7458,
+          "output_tokens": 41,
+          "total_tokens": 7499,
+          "cached_tokens": 4352,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_7UgjwcIy1xMG4eFqKLDPwDmI"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773395962.1318874,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01168545,
+          "input_tokens": 9695,
+          "output_tokens": 458,
+          "total_tokens": 10153,
+          "cached_tokens": 7424,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_YED8X04kVdEQyry99uF8kqWd"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773395965.6753073,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00239295,
+          "input_tokens": 10241,
+          "output_tokens": 14,
+          "total_tokens": 10255,
+          "cached_tokens": 9984,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_3vMzSz1oKztx6jIBy2RoPAKJ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396018.6605284,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00278285,
+          "input_tokens": 10363,
+          "output_tokens": 41,
+          "total_tokens": 10404,
+          "cached_tokens": 10112,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_nG8SE05wuWrlIgJ0iwLFZzXj"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396025.8572724,
+          "model": "gpt-5.3-codex",
+          "cost": 0.011802,
+          "input_tokens": 12952,
+          "output_tokens": 376,
+          "total_tokens": 13328,
+          "cached_tokens": 10240,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_nff25WP3ICQSSvJYwTQLpdGl"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396026.9292612,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0029092,
+          "input_tokens": 13416,
+          "output_tokens": 14,
+          "total_tokens": 13430,
+          "cached_tokens": 13184,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_yTFj2EP6vVfgo7sAX3qX1QJP"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396089.0192544,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0119511,
+          "input_tokens": 13538,
+          "output_tokens": 659,
+          "total_tokens": 14197,
+          "cached_tokens": 13312,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_MUxr18NyeGgcvz21CpbtnlM2"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396094.015359,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00301875,
+          "input_tokens": 14285,
+          "output_tokens": 14,
+          "total_tokens": 14299,
+          "cached_tokens": 14080,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_UcQzxY6g1vOC8u3681ftrsxx"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396154.3915226,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00945665,
+          "input_tokens": 14407,
+          "output_tokens": 473,
+          "total_tokens": 14880,
+          "cached_tokens": 14208,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_j8MM13Rmp2W9w9yhNZ9BK7yP"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396158.681376,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0032059999999999996,
+          "input_tokens": 14968,
+          "output_tokens": 14,
+          "total_tokens": 14982,
+          "cached_tokens": 14720,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_1uO91LjwP4hkuj9YHUeW4tVz"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396213.4956453,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0041244,
+          "input_tokens": 15136,
+          "output_tokens": 73,
+          "total_tokens": 15209,
+          "cached_tokens": 14848,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_ALBOtcYFDq0zuA0DFz4S1AlV"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396215.2203472,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00392945,
+          "input_tokens": 15279,
+          "output_tokens": 70,
+          "total_tokens": 15349,
+          "cached_tokens": 15104,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "list_current_edits",
+              "tool_call_id": "call_znPmupI3ktbmTarDZbXo4am8"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_6w9d0s2Ld7Ye2pbPUuERTFsh"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396222.38331,
+          "model": "gpt-5.3-codex",
+          "cost": 0.013181349999999998,
+          "input_tokens": 19721,
+          "output_tokens": 190,
+          "total_tokens": 19911,
+          "cached_tokens": 15232,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_PlN2HsdtZwZqKHV97U3Mtfc2"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396225.056443,
+          "model": "gpt-5.3-codex",
+          "cost": 0.004040749999999999,
+          "input_tokens": 20053,
+          "output_tokens": 14,
+          "total_tokens": 20067,
+          "cached_tokens": 19840,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_IK7yDlmSBqCweNxofjiaOPVt"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396280.008606,
+          "model": "gpt-5.3-codex",
+          "cost": 0.004007149999999999,
+          "input_tokens": 20229,
+          "output_tokens": 4,
+          "total_tokens": 20233,
+          "cached_tokens": 19968,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": false,
+          "tool_call_count": 0,
+          "tool_calls": null,
+          "finish_reason": "stop"
+        },
+        {
+          "timestamp": 1773396281.9994638,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0038440500000000003,
+          "input_tokens": 20251,
+          "output_tokens": 4,
+          "total_tokens": 20255,
+          "cached_tokens": 20096,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": false,
+          "tool_call_count": 0,
+          "tool_calls": null,
+          "finish_reason": "stop"
+        },
+        {
+          "timestamp": 1773396285.4251714,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00403655,
+          "input_tokens": 20273,
+          "output_tokens": 15,
+          "total_tokens": 20288,
+          "cached_tokens": 20096,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "undo_last_patch",
+              "tool_call_id": "call_6vxC0zAAHNgvo7BYkzYbSSzR"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396290.2130728,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00419405,
+          "input_tokens": 20363,
+          "output_tokens": 15,
+          "total_tokens": 20378,
+          "cached_tokens": 20096,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "undo_last_patch",
+              "tool_call_id": "call_VEJGAlCjItCjnr01weBdb2yk"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396292.1729498,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0041499499999999995,
+          "input_tokens": 20453,
+          "output_tokens": 15,
+          "total_tokens": 20468,
+          "cached_tokens": 20224,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "undo_last_patch",
+              "tool_call_id": "call_n2wFa1ABmWfI9CDcCzXgfjqA"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396294.084146,
+          "model": "gpt-5.3-codex",
+          "cost": 0.004105849999999999,
+          "input_tokens": 20543,
+          "output_tokens": 15,
+          "total_tokens": 20558,
+          "cached_tokens": 20352,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "undo_last_patch",
+              "tool_call_id": "call_GEAxsK1VGYoQ53ERMRN6Ei2J"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773396296.0800087,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00406175,
+          "input_tokens": 20633,
+          "output_tokens": 15,
+          "total_tokens": 20648,
+          "cached_tokens": 20480,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "undo_last_patch",
+              "tool_call_id": "call_BVd98NNzt3l2yDQcq6H8F6Li"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.1751456,
+      "total_input_tokens": 367440,
+      "total_output_tokens": 3142,
+      "total_llm_calls": 25
+    }
+  },
+  "patch_result": {
+    "success": false,
+    "failure_reason": "the agent did not produce a result",
+    "last_validation": {
+      "status": "pov_still_crashes",
+      "message": "Patch validation failed because a known PoV still reproduces",
+      "details": {
+        "validation_status": "pov_still_crashes",
+        "harness": "TiffDecoderFuzzer-SrwDecoder",
+        "dedup": "void rawspeed::SamsungV2Decompressor::decompressRow<(rawspeed::SamsungV2Decompressor::OptFlags)4>(unsigned int)--rawspeed::SamsungV2Decompressor::decompress()--rawspeed::SrwDecoder::decodeRawInternal()"
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [],
+    "read_definition": [],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "librawspeed/src/librawspeed/decompressors/SamsungV2Decompressor.cpp",
+          136
+        ],
+        "kwargs": {},
+        "timestamp": 428167.618200559,
+        "success": true,
+        "result_summary": "Ok({'contents': ' 37 \\n 38 // Thanks to Michael Reichmann (Luminous Landscape) for putting Pedro C\u00f4rte-Real\\n 39 // in contact and Loring von Palleske (Samsung) for pointing to the open-source\\n 40 //..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "librawspeed/src/librawspeed/decompressors/SamsungV2Decompressor.cpp",
+          237
+        ],
+        "kwargs": {},
+        "timestamp": 428242.581888496,
+        "success": true,
+        "result_summary": "Ok({'contents': '138 \\n139 #pragma GCC diagnostic push\\n140 #pragma GCC diagnostic ignored \"-Wswitch\"\\n141   case OptFlags::SKIP | OptFlags::MV:\\n142     for (uint32 row = 0; row < height; row++)\\n143..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "librawspeed/src/librawspeed/decompressors/SamsungV2Decompressor.cpp",
+          220
+        ],
+        "kwargs": {},
+        "timestamp": 428308.864636939,
+        "success": true,
+        "result_summary": "Ok({'contents': '121   case OptFlags::ALL:\\n122     for (uint32 row = 0; row < height; row++)\\n123       decompressRow<OptFlags::ALL>(row);\\n124     break;\\n125 \\n126   case OptFlags::SKIP:\\n127     f..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "librawspeed/src/librawspeed/decompressors/SamsungV2Decompressor.cpp",
+          220
+        ],
+        "kwargs": {},
+        "timestamp": 428505.397549542,
+        "success": true,
+        "result_summary": "Ok({'contents': '121   case OptFlags::ALL:\\n122     for (uint32 row = 0; row < height; row++)\\n123       decompressRow<OptFlags::ALL>(row);\\n124     break;\\n125 \\n126   case OptFlags::SKIP:\\n127     f..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "decompressRow",
+          "librawspeed/src/librawspeed/decompressors/SamsungV2Decompressor.cpp",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 428241.253142378,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='librawspeed/src/librawspeed/decompressors/SamsungV2Decompressor.cpp', refs=[FileReference(line=119, content='      decompressRow<OptFlags::NONE>(row);', enclosing_definit..."
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "librawspeed/src/librawspeed/decompressors/SamsungV2Decompressor.cpp",
+          "@@ -227,15 +227,24 @@ void SamsungV2Decompressor::decompressRow(uint32 row) {\n       for (uint32 i = 0; i < 16; i++) {\n         ushort16* refpixel;\n+        int32 refCol;\n \n         if ((row + i) & 0x1) // Red or blue pixels use same color two lines up\n-          refpixel = img_up2 + i + slideOffset;\n+          refCol = static_cast<int32>(col) + static_cast<int32>(i) + slideOffset;\n         else // Green pixel N uses Green pixel N from row above (top left or\n              // top right)\n-          refpixel = img_up + i + slideOffset + (((i % 2) != 0) ? -1 : 1);\n+          refCol = static_cast<int32>(col) + static_cast<int32>(i) + slideOffset +\n+                   (((i % 2) != 0) ? -1 : 1);\n+\n+        if (refCol < 0 || refCol >= static_cast<int32>(width) ||\n+            (doAverage && refCol + 2 >= static_cast<int32>(width)))\n+          ThrowRDE(\"Invalid motion reference column. File corrupted?\");\n+\n+        if ((row + i) & 0x1)\n+          refpixel = reinterpret_cast<ushort16*>(mRaw->getData(refCol, row - 2));\n+        else\n+          refpixel = reinterpret_cast<ushort16*>(mRaw->getData(refCol, row - 1));\n \n         // In some cases we use as reference interpolation of this pixel and\n         // the next\n         if (doAverage)\n           img[i] = (*refpixel + *(refpixel + 2) + 1) >> 1;\n"
+        ],
+        "kwargs": {},
+        "timestamp": 428250.732552348,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "librawspeed/src/librawspeed/decompressors/SamsungV2Decompressor.cpp",
+          "@@ -238,8 +238,8 @@ void SamsungV2Decompressor::decompressRow(uint32 row) {\n         if (refCol < 0 || refCol >= static_cast<int32>(width) ||\n             (doAverage && refCol + 2 >= static_cast<int32>(width)))\n           ThrowRDE(\"Invalid motion reference column. File corrupted?\");\n-\n-        if ((row + i) & 0x1)\n+\n+        if ((row + i) & 0x1) // Red or blue pixels use same color two lines up\n           refpixel = reinterpret_cast<ushort16*>(mRaw->getData(refCol, row - 2));\n         else\n           refpixel = reinterpret_cast<ushort16*>(mRaw->getData(refCol, row - 1));\n@@ -247,7 +247,7 @@ void SamsungV2Decompressor::decompressRow(uint32 row) {\n         // In some cases we use as reference interpolation of this pixel and\n         // the next\n         if (doAverage)\n-          img[i] = (*refpixel + *(refpixel + 2) + 1) >> 1;\n+          img[i] = (*refpixel + *reinterpret_cast<ushort16*>(mRaw->getData(refCol + 2, ((row + i) & 0x1) ? row - 2 : row - 1)) + 1) >> 1;\n         else\n           img[i] = *refpixel;\n       }\n"
+        ],
+        "kwargs": {},
+        "timestamp": 428314.466507886,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "librawspeed/src/librawspeed/decompressors/SamsungV2Decompressor.cpp",
+          "@@ -227,31 +227,21 @@ void SamsungV2Decompressor::decompressRow(uint32 row) {\n       for (uint32 i = 0; i < 16; i++) {\n-        ushort16* refpixel;\n-        int32 refCol;\n-\n-        if ((row + i) & 0x1) // Red or blue pixels use same color two lines up\n-          refCol = static_cast<int32>(col) + static_cast<int32>(i) + slideOffset;\n-        else // Green pixel N uses Green pixel N from row above (top left or\n-             // top right)\n-          refCol = static_cast<int32>(col) + static_cast<int32>(i) + slideOffset +\n-                   (((i % 2) != 0) ? -1 : 1);\n-\n-        if (refCol < 0 || refCol >= static_cast<int32>(width) ||\n-            (doAverage && refCol + 2 >= static_cast<int32>(width)))\n-          ThrowRDE(\"Invalid motion reference column. File corrupted?\");\n-\n-        if ((row + i) & 0x1) // Red or blue pixels use same color two lines up\n-          refpixel = reinterpret_cast<ushort16*>(mRaw->getData(refCol, row - 2));\n+        ushort16* refpixel = nullptr;\n+\n+        if ((row + i) & 0x1) // Red or blue pixels use same color two lines up\n+          refpixel = img_up2 + i + slideOffset;\n         else\n-          refpixel = reinterpret_cast<ushort16*>(mRaw->getData(refCol, row - 1));\n+          refpixel = img_up + i + slideOffset + (((i % 2) != 0) ? -1 : 1);\n+\n+        if (refpixel < img_up2 || refpixel >= img_up2 + static_cast<int>(width) ||\n+            (doAverage && (refpixel + 2) >= img_up2 + static_cast<int>(width)))\n+          ThrowRDE(\"Invalid motion reference column. File corrupted?\");\n \n         // In some cases we use as reference interpolation of this pixel and\n         // the next\n         if (doAverage)\n-          img[i] = (*refpixel + *reinterpret_cast<ushort16*>(mRaw->getData(refCol + 2, ((row + i) & 0x1) ? row - 2 : row - 1)) + 1) >> 1;\n+          img[i] = (*refpixel + *(refpixel + 2) + 1) >> 1;\n         else\n           img[i] = *refpixel;\n       }\n"
+        ],
+        "kwargs": {},
+        "timestamp": 428379.29010801,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "librawspeed/src/librawspeed/decompressors/SamsungV2Decompressor.cpp",
+          "@@ -227,21 +227,26 @@ void SamsungV2Decompressor::decompressRow(uint32 row) {\n       for (uint32 i = 0; i < 16; i++) {\n-        ushort16* refpixel = nullptr;\n+        ushort16* refpixel = nullptr;\n+        ushort16* rowBase = nullptr;\n+        int32 refOffset = 0;\n \n         if ((row + i) & 0x1) // Red or blue pixels use same color two lines up\n-          refpixel = img_up2 + i + slideOffset;\n+          rowBase = img_up2;\n         else\n-          refpixel = img_up + i + slideOffset + (((i % 2) != 0) ? -1 : 1);\n+          rowBase = img_up;\n+\n+        refOffset = static_cast<int32>(i) + slideOffset;\n+        if (!((row + i) & 0x1))\n+          refOffset += (((i % 2) != 0) ? -1 : 1);\n \n-        if (refpixel < img_up2 || refpixel >= img_up2 + static_cast<int>(width) ||\n-            (doAverage && (refpixel + 2) >= img_up2 + static_cast<int>(width)))\n+        if (refOffset < 0 || refOffset >= 16 || (doAverage && refOffset + 2 >= 16))\n           ThrowRDE(\"Invalid motion reference column. File corrupted?\");\n+\n+        refpixel = rowBase + refOffset;\n \n         // In some cases we use as reference interpolation of this pixel and\n         // the next\n         if (doAverage)\n           img[i] = (*refpixel + *(refpixel + 2) + 1) >> 1;\n-        else\n+        else\n           img[i] = *refpixel;\n       }\n"
+        ],
+        "kwargs": {},
+        "timestamp": 428444.599602473,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 4 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "librawspeed/src/librawspeed/decompressors/SamsungV2Decompressor.cpp",
+          "@@ -241,8 +241,8 @@ void SamsungV2Decompressor::decompressRow(uint32 row) {\n-        if (refOffset < 0 || refOffset >= 16 || (doAverage && refOffset + 2 >= 16))\n-          ThrowRDE(\"Invalid motion reference column. File corrupted?\");\n+        if (refOffset < 0)\n+          refOffset = 0;\n+        else if (refOffset >= 16)\n+          refOffset = 15;\n+        if (doAverage && refOffset > 13)\n+          refOffset = 13;\n \n         refpixel = rowBase + refOffset;\n"
+        ],
+        "kwargs": {},
+        "timestamp": 428510.983446534,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 5 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 428305.86158871,
+        "success": true,
+        "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'TiffDecoderFuzzer-SrwDecoder', 'dedup': 'void rawspeed::SamsungV2Decompressor::decompressRo..."
+      },
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 428367.423082723,
+        "success": true,
+        "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'TiffDecoderFuzzer-SrwDecoder', 'dedup': 'void rawspeed::SamsungV2Decompressor::decompressRo..."
+      },
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 428435.406910332,
+        "success": true,
+        "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'TiffDecoderFuzzer-SrwDecoder', 'dedup': 'void rawspeed::SamsungV2Decompressor::decompressRo..."
+      },
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 428499.824949072,
+        "success": true,
+        "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'TiffDecoderFuzzer-SrwDecoder', 'dedup': 'void rawspeed::SamsungV2Decompressor::decompressRo..."
+      },
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 428566.468853328,
+        "success": true,
+        "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'TiffDecoderFuzzer-SrwDecoder', 'dedup': 'void rawspeed::SamsungV2Decompressor::decompressRo..."
+      }
+    ],
+    "undo_last_patch": [
+      {
+        "tool_name": "undo_last_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 428573.999836182,
+        "success": true,
+        "result_summary": "Ok({'total_edits': 4})"
+      },
+      {
+        "tool_name": "undo_last_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 428578.787832063,
+        "success": true,
+        "result_summary": "Ok({'total_edits': 3})"
+      },
+      {
+        "tool_name": "undo_last_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 428580.74745365,
+        "success": true,
+        "result_summary": "Ok({'total_edits': 2})"
+      },
+      {
+        "tool_name": "undo_last_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 428582.659109554,
+        "success": true,
+        "result_summary": "Ok({'total_edits': 1})"
+      },
+      {
+        "tool_name": "undo_last_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 428584.654392642,
+        "success": true,
+        "result_summary": "Ok({'total_edits': 0})"
+      }
+    ],
+    "list_current_edits": [
+      {
+        "tool_name": "list_current_edits",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 428503.794980189,
+        "success": true,
+        "result_summary": "Ok({'edits': ['@@ -227,15 +227,24 @@ void SamsungV2Decompressor::decompressRow(uint32 row) {\\n       for (uint32 i = 0; i < 16; i++) {\\n         ushort16* refpixel;\\n+        int32 refCol;\\n \\n       ..."
+      }
+    ]
+  }
+}

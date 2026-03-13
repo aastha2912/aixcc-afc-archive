@@ -1,0 +1,225 @@
+{
+  "vuln_id": 123,
+  "crash_result": {
+    "output": "AddressSanitizer:DEADLYSIGNAL\n=================================================================\n==2258==ERROR: AddressSanitizer: SEGV on unknown address 0x71d52486f0c0 (pc 0x00000055fbc4 bp 0x7ffec18ba2d0 sp 0x7ffec18ba280 T0)\n==2258==The signal is caused by a WRITE memory access.\nSCARINESS: 30 (wild-addr-write)\n    #0 0x55fbc3 in void rawspeed::LJpegDecompressor::decodeN<4>()::{lambda(int)#1}::operator()(int) const /src/librawspeed/src/librawspeed/decompressors/LJpegDecompressor.cpp:135:17\n    ",
+    "stack": "#0 0x55fbc3 in void rawspeed::LJpegDecompressor::decodeN<4>()::{lambda(int)#1}::operator()(int) const librawspeed/src/librawspeed/decompressors/LJpegDecompressor.cpp:135:17\n#1 0x55fbc3 in rawspeed::unroll_loop_t<void rawspeed::LJpegDecompressor::decodeN<4>()::{lambda(int)#1}, 1ul>::repeat({lambda(int)#1} const&) librawspeed/src/librawspeed/common/Common.h:194\n#2 0x55fbc3 in rawspeed::unroll_loop_t<void rawspeed::LJpegDecompressor::decodeN<4>()::{lambda(int)#1}, 2ul>::repeat({lambda(int)#1} const",
+    "dedup": "void rawspeed::LJpegDecompressor::decodeN<4>()::{lambda(int)#1}::operator()(int) const--rawspeed::unroll_loop_t<void rawspeed::LJpegDecompressor::decodeN<4>()::{lambda(int)#1}, 1ul>::repeat({lambda(int)#1} const&)--rawspeed::unroll_loop_t<void rawspeed::LJpegDecompressor::decodeN<4>()::{lambda(int)#1}, 2ul>::repeat({lambda(int)#1} const&)"
+  },
+  "pov_run_data": {
+    "task_uuid": "d2d7c21f-ad5e-5be2-9b5d-a7f3f08acd0a",
+    "project_name": "librawspeed",
+    "harness": "LJpegDecompressorFuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "void rawspeed::LJpegDecompressor::decodeN<4>()::{lambda(int)#1}::operator()(int) const--rawspeed::unroll_loop_t<void rawspeed::LJpegDecompressor::decodeN<4>()::{lambda(int)#1}, 1ul>::repeat({lambda(int)#1} const&)--rawspeed::unroll_loop_t<void rawspeed::LJpegDecompressor::decodeN<4>()::{lambda(int)#1}, 2ul>::repeat({lambda(int)#1} const&)"
+  },
+  "decoded_pov": {
+    "project_name": "librawspeed",
+    "harness": "LJpegDecompressorFuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b\" \\x04\\x00\\x00 \\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\x00\\x00\\x00       \\xff \\x00\\x00\\x00    \\xff\\xd8\\xff\\xc3\\x00\\x14\\x04    \\x04\\xfc\\x11\\x00\\x00\\x11\\x00\\x0c\\x11\\x00\\x1b\\x11\\x00\\xff\\xc4\\x00'\\x03\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x01\\x00\\x01\\xff\\xda\\x00\\x0e\\x04\\x1b\\r\\x00\\x00\\xfc\\x00\\x0c\\x00\\x01\\x00\\x00\"\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "void rawspeed::LJpegDecompressor::decodeN<4>()::{lambda(int)#1}::operator()(int) const--rawspeed::unroll_loop_t<void rawspeed::LJpegDecompressor::decodeN<4>()::{lambda(int)#1}, 1ul>::repeat({lambda(int)#1} const&)--rawspeed::unroll_loop_t<void rawspeed::LJpegDecompressor::decodeN<4>()::{lambda(int)#1}, 2ul>::repeat({lambda(int)#1} const&)"
+  },
+  "analyzed_vuln": {
+    "function": "LJpegDecompressor::decode",
+    "file": "librawspeed/src/librawspeed/decompressors/LJpegDecompressor.cpp",
+    "description": "Root cause is insufficient validation of tile offsets in LJpegDecompressor::decode(): it only checks offsetX/offsetY against image dimensions, but does not validate that offsetX + decoded frame width (and component expansion) stays within the allocated row stride. decodeN<4>() then computes dest from getDataUncropped(offX,destY) and writes N_COMP samples per pixel in a loop (*dest++ at line ~135), causing out-of-bounds write when crafted JPEG frame metadata and offsets make width calculation inconsistent with real writable buffer extent.",
+    "conditions": "Fuzzer supplies a RawImage plus 3 u32 values (offsetX, offsetY, fixDng16Bug) followed by JPEG data. With offsetX/offsetY individually in-range but near boundary, and SOF/SOS parameters selecting 4-component decode path, decodeScan()->decodeN<4>() performs writes based on frame.w and computed width from (cpp*(dim.x-offX))/N_COMP. Missing holistic bounds check in LJpegDecompressor::decode allows a crafted stream to reach decodeN and trigger wild write at line 135."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 2,
+      "total_cost": 0.0192157,
+      "total_input_tokens": 12094,
+      "total_output_tokens": 408,
+      "total_cached_tokens": 4864,
+      "llm_calls": [
+        {
+          "timestamp": 1773414536.8635275,
+          "model": "gpt-5.3-codex",
+          "cost": 0.006526099999999999,
+          "input_tokens": 3718,
+          "output_tokens": 131,
+          "total_tokens": 3849,
+          "cached_tokens": 1152,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_6cCzwqMFQvjAjUDvPvJFXTeC"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_H0lhUJM3u9vMFZPvMLDmrTqv"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_53xym1IRFfDe7eJomFw0mPOt"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773414544.4230573,
+          "model": "gpt-5.3-codex",
+          "cost": 0.012689599999999999,
+          "input_tokens": 8376,
+          "output_tokens": 277,
+          "total_tokens": 8653,
+          "cached_tokens": 3712,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_Y1svPgEe7aHNhEyDQ0bUfYPx"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 3,
+      "total_cost": 0.0313383,
+      "total_input_tokens": 24250,
+      "total_output_tokens": 532,
+      "total_cached_tokens": 11776,
+      "llm_calls": [
+        {
+          "timestamp": 1773414547.8772762,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0061362,
+          "input_tokens": 3964,
+          "output_tokens": 130,
+          "total_tokens": 4094,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_6UDps2jOTjFTh9vx4xjOyPiv"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_bmIvak0KPncsTl5qaqGF90X0"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_OLgjq2x4kV9ypdCsthGaCo7A"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773414553.4832277,
+          "model": "gpt-5.3-codex",
+          "cost": 0.02176125,
+          "input_tokens": 9963,
+          "output_tokens": 309,
+          "total_tokens": 10272,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_pUTGYHCDIZsRxsSM9tsLOaEZ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773414556.6396341,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0034408499999999996,
+          "input_tokens": 10323,
+          "output_tokens": 93,
+          "total_tokens": 10416,
+          "cached_tokens": 10112,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_LlWtJkAOEKzPamA14kyiZARS"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.050554,
+      "total_input_tokens": 36344,
+      "total_output_tokens": 940,
+      "total_llm_calls": 5
+    }
+  },
+  "patch_result": {
+    "success": false,
+    "failure_reason": "the agent did not produce a result"
+  },
+  "context_retrieval": {
+    "source_questions": [],
+    "read_definition": [],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "librawspeed/src/librawspeed/decompressors/AbstractLJpegDecompressor.cpp",
+          70
+        ],
+        "kwargs": {},
+        "timestamp": 446836.534580942,
+        "success": true,
+        "result_summary": "Ok({'contents': '  1 /*\\n  2     RawSpeed - RAW file decoder.\\n  3 \\n  4     Copyright (C) 2009-2014 Klaus Post\\n  5     Copyright (C) 2017 Axel Waggershauser\\n  6     Copyright (C) 2017 Roman Lebedev..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "librawspeed/src/librawspeed/decompressors/LJpegDecompressor.cpp",
+          120
+        ],
+        "kwargs": {},
+        "timestamp": 446836.535990255,
+        "success": true,
+        "result_summary": "Ok({'contents': ' 21 #include \"decompressors/LJpegDecompressor.h\"\\n 22 #include \"common/Common.h\"                // for uint32, unroll_loop, ushort16\\n 23 #include \"common/Point.h\"                 // ..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "librawspeed/src/librawspeed/decompressors/LJpegDecompressor.cpp",
+          1
+        ],
+        "kwargs": {},
+        "timestamp": 446836.537330981,
+        "success": true,
+        "result_summary": "Ok({'contents': '  1 /*\\n  2     RawSpeed - RAW file decoder.\\n  3 \\n  4     Copyright (C) 2017 Axel Waggershauser\\n  5 \\n  6     This library is free software; you can redistribute it and/or\\n  7    ..."
+      }
+    ],
+    "find_references": [],
+    "apply_patch": [],
+    "test_patch": [],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}
