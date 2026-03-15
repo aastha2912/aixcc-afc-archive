@@ -1,0 +1,259 @@
+{
+  "source_questions": [],
+  "read_definition": [],
+  "read_source": [
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/core/SkGlyphRun.cpp",
+        170
+      ],
+      "kwargs": {},
+      "timestamp": 562104.695710567,
+      "success": true,
+      "result_summary": "Ok({'contents': ' 71 \\n 72 // -- SkGlyphIDSet ---------------------------------------------------------------------------------\\n 73 // A faster set implementation that does not need any initializatio..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/core/SkFindAndPlaceGlyph.h",
+        180
+      ],
+      "kwargs": {},
+      "timestamp": 562104.696611554,
+      "success": true,
+      "result_summary": "Ok({'contents': ' 81             case kNone_SkAxisAlignment:\\n 82                 return {kSubpixelRounding, kSubpixelRounding};\\n 83         }\\n 84         SK_ABORT(\"Should not get here.\");\\n 85     ..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/core/SkFindAndPlaceGlyph.h",
+        460
+      ],
+      "kwargs": {},
+      "timestamp": 562326.5941973,
+      "success": true,
+      "result_summary": "Ok({'contents': '361     };\\n362 \\n363     // GlyphFindAndPlaceFullPixel handles finding and placing glyphs when no sub-pixel\\n364     // positioning is requested.\\n365     template<typename ProcessOn..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/core/SkGlyphRun.cpp",
+        1
+      ],
+      "kwargs": {},
+      "timestamp": 562721.648181466,
+      "success": true,
+      "result_summary": "Ok({'contents': '  1 /*\\n  2  * Copyright 2018 The Android Open Source Project\\n  3  *\\n  4  * Use of this source code is governed by a BSD-style license that can be\\n  5  * found in the LICENSE file...."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/core/SkGlyphRun.cpp",
+        200
+      ],
+      "kwargs": {},
+      "timestamp": 562723.002391913,
+      "success": true,
+      "result_summary": "Ok({'contents': \"101     size_t uniqueSize = 0;\\n102     size_t denseIndicesCursor = 0;\\n103     for (auto glyphID : glyphIDs) {\\n104 \\n105         // If the glyphID is not in range then it is the und..."
+    }
+  ],
+  "find_references": [
+    {
+      "tool_name": "find_references",
+      "args": [
+        "ProcessPosText",
+        "skia/src",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 562775.348429046,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='skia/src/xps/SkXPSDevice.cpp', refs=[FileReference(line=2084, content='    SkFindAndPlaceGlyph::ProcessPosText(', enclosing_definition='drawPosText')]), FileReferences(fi..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "drawPosText(",
+        "skia/src/core/SkGlyphRun.cpp",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 562795.955408212,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/skia/src/core/SkGlyphRun.cpp', refs=[FileReference(line=60, content='        device->drawPosText(', enclosing_definition='N/A'), FileReference(line=156, content='voi..."
+    }
+  ],
+  "apply_patch": [
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/core/SkGlyphRun.cpp",
+        "@@ -197,7 +197,12 @@\n             return SkSpan<const SkGlyphID>();\n         }\n     } else {\n-        return SkSpan<const SkGlyphID>((const SkGlyphID*)bytes, byteLength / 2);\n+        // GlyphID text is a stream of 16-bit values. Ignore any trailing partial glyph so\n+        // downstream consumers that parse the original byte stream don't read past the end.\n+        size_t alignedByteLength = byteLength & ~static_cast<size_t>(1);\n+        return SkSpan<const SkGlyphID>(\n+                reinterpret_cast<const SkGlyphID*>(bytes),\n+                alignedByteLength / sizeof(SkGlyphID));\n     }\n }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 562107.808461047,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/core/SkFindAndPlaceGlyph.h",
+        "@@ -478,6 +478,12 @@\n     SkASSERT(text != nullptr);\n     SkASSERT(cache != nullptr);\n \n+    // GlyphID text is encoded as 16-bit values. If the byte length is odd, ignore the\n+    // trailing partial glyph to keep glyph parsing in bounds.\n+    if (encoding == SkPaint::kGlyphID_TextEncoding) {\n+        byteLength &= ~static_cast<size_t>(1);\n+    }\n+\n     // Handle all of the easy nope cases.\n     if (text == nullptr || byteLength == 0 || pos == nullptr) {\n         return;\n"
+      ],
+      "kwargs": {},
+      "timestamp": 562320.753635419,
+      "success": true,
+      "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 478): sw_align failed: Context lines did not match OR matched multiple locations. Please double-check the correctness of the ..."
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/core/SkFindAndPlaceGlyph.h",
+        "@@ -495,6 +495,11 @@\n     SkPoint offset, const SkMatrix& matrix, SkPaint::Align textAlignment,\n     SkGlyphCache* cache, ProcessOneGlyph&& processOneGlyph) {\n+    if (textEncoding == SkPaint::kGlyphID_TextEncoding) {\n+        // Glyph IDs are 16-bit values; ignore any trailing partial value.\n+        byteLength &= ~static_cast<size_t>(1);\n+    }\n+\n     SkSTArenaAlloc<64> arena;\n \n     // transform the starting point\n"
+      ],
+      "kwargs": {},
+      "timestamp": 562330.648771403,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/core/SkFindAndPlaceGlyph.h",
+        "@@ -429,6 +429,11 @@\n     SkGlyphCache* cache, ProcessOneGlyph&& processOneGlyph) {\n \n+    if (textEncoding == SkPaint::kGlyphID_TextEncoding) {\n+        // Glyph IDs are 16-bit values; ignore any trailing partial value.\n+        byteLength &= ~static_cast<size_t>(1);\n+    }\n+\n     SkAxisAlignment axisAlignment = cache->getScalerContext()->computeAxisAlignmentForHText();\n     uint32_t mtype = matrix.getType();\n"
+      ],
+      "kwargs": {},
+      "timestamp": 562330.650459077,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/core/SkFindAndPlaceGlyph.h",
+        "@@ -194,10 +194,16 @@\n         uint16_t nextGlyphId(const char** text) {\n             SkASSERT(text != nullptr);\n \n-            const uint16_t* ptr = *(const uint16_t**)text;\n-            uint16_t glyphID = *ptr;\n-            ptr += 1;\n-            *text = (const char*)ptr;\n+            const char* cptr = *text;\n+            uint16_t glyphID;\n+            // Avoid unaligned/overread behavior by copying exactly two bytes.\n+            memcpy(&glyphID, cptr, sizeof(glyphID));\n+            cptr += sizeof(glyphID);\n+            *text = cptr;\n             return glyphID;\n         }\n         SkGlyphCache* fCache;\n     };\n"
+      ],
+      "kwargs": {},
+      "timestamp": 562528.448641598,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 4 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/core/SkFindAndPlaceGlyph.h",
+        "@@ -179,6 +179,7 @@\n     class GlyphIdGlyphFinder final : public GlyphFinderInterface {\n     public:\n         explicit GlyphIdGlyphFinder(SkGlyphCache* cache)\n+            : fTextEnd(nullptr)\n             : fCache(cache) {\n             SkASSERT(cache != nullptr);\n         }\n@@ -193,17 +194,34 @@\n \n     private:\n         uint16_t nextGlyphId(const char** text) {\n-            SkASSERT(text != nullptr);\n+            SkASSERT(text != nullptr && fTextEnd != nullptr);\n+\n+            const char* cptr = *text;\n+            if (cptr >= fTextEnd) {\n+                return 0;\n+            }\n+\n+            if (fTextEnd - cptr < static_cast<ptrdiff_t>(sizeof(uint16_t))) {\n+                *text = fTextEnd;\n+                return 0;\n+            }\n+\n+            uint16_t glyphID;\n+            memcpy(&glyphID, cptr, sizeof(glyphID));\n+            cptr += sizeof(glyphID);\n+            *text = cptr;\n+            return glyphID;\n+        }\n \n-            const char* cptr = *text;\n-            uint16_t glyphID;\n-            // Avoid unaligned/overread behavior by copying exactly two bytes.\n-            memcpy(&glyphID, cptr, sizeof(glyphID));\n-            cptr += sizeof(glyphID);\n-            *text = cptr;\n-            return glyphID;\n+        void setTextEnd(const char* textEnd) {\n+            fTextEnd = textEnd;\n         }\n+\n+        const char* fTextEnd;\n         SkGlyphCache* fCache;\n+\n+        template<typename ProcessOneGlyph>\n+        friend void SkFindAndPlaceGlyph::ProcessPosText(\n+            SkPaint::TextEncoding, const char[], size_t, SkPoint, const SkMatrix&, const SkScalar[],\n+            int, SkGlyphCache*, ProcessOneGlyph&&);\n     };\n"
+      ],
+      "kwargs": {},
+      "timestamp": 562802.003450721,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 5 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/core/SkFindAndPlaceGlyph.h",
+        "@@ -453,6 +453,7 @@\n         TranslationMapper mapper{matrix, offset};\n         Positioner positioner(&glyphFinder);\n         const char* cursor = text;\n         const char* stop = text + byteLength;\n+        glyphFinder.setTextEnd(stop);\n         while (cursor < stop) {\n             SkPoint mappedPoint = mapper.TranslationMapper::map(positions->nextPoint());\n             positioner.Positioner::findAndPositionGlyph(\n"
+      ],
+      "kwargs": {},
+      "timestamp": 562829.987686987,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 6 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    }
+  ],
+  "test_patch": [
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 562291.986929696,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'api_mock_gpu_canvas', 'dedup': 'SkFindAndPlaceGlyph::GlyphIdGlyphFinder::nextGlyphId(char c..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 562500.490810765,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'api_mock_gpu_canvas', 'dedup': 'SkFindAndPlaceGlyph::GlyphIdGlyphFinder::nextGlyphId(char c..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 562691.060343351,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'api_mock_gpu_canvas', 'dedup': 'SkFindAndPlaceGlyph::GlyphIdGlyphFinder::nextGlyphId(char c..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 562744.294707217,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'api_mock_gpu_canvas', 'dedup': 'SkFindAndPlaceGlyph::GlyphIdGlyphFinder::nextGlyphId(char c..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 562985.437138468,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'api_mock_gpu_canvas', 'dedup': 'SkFindAndPlaceGlyph::GlyphIdGlyphFinder::nextGlyphId(char c..."
+    }
+  ],
+  "undo_last_patch": [
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 562989.473533747,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 5})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 562990.643192369,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 4})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 562991.877533551,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 3})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 562994.117133454,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 2})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 562995.25993407,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 1})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 562996.501042745,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 0})"
+    }
+  ],
+  "list_current_edits": []
+}

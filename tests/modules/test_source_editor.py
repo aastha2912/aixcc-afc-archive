@@ -44,3 +44,22 @@ async def test_fuzzy_patching(base_dir: aio.Path):
             edited = await e.vfs.read('input')
             original = await (base_dir / 'input').read_bytes()
             assert edited == original
+
+
+@pytest.mark.asyncio
+async def test_get_repo_diff_accepts_repo_relative_modified_paths():
+    with tempfile.NamedTemporaryFile() as tf:
+        _ = tarfile.open(tf.name, "w").close()
+        e = Editor(vfs := EditableOverlayFS(await TarFS.fsopen(aio.Path(tf.name))))
+        await vfs.write("cms_universal_transform_fuzzer.c", b"int main(void) { return 0; }\n")
+        await e.apply_patch(
+            "cms_universal_transform_fuzzer.c",
+            "@@ -1 +1 @@\n-int main(void) { return 0; }\n+int main(void) { return 1; }\n",
+        )
+
+        diff = await e.get_repo_diff("lcms")
+
+        assert diff
+        assert "--- a/cms_universal_transform_fuzzer.c" in diff
+        assert "+++ b/cms_universal_transform_fuzzer.c" in diff
+        assert "+int main(void) { return 1; }" in diff

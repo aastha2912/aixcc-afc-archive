@@ -1,0 +1,19 @@
+--- a/arrow/cpp/src/arrow/array.cc
++++ b/arrow/cpp/src/arrow/array.cc
+@@ -109,6 +109,16 @@
+   int64_t precomputed = this->null_count.load();
+   if (ARROW_PREDICT_FALSE(precomputed == kUnknownNullCount)) {
+     if (this->buffers[0]) {
++      const int64_t null_bitmap_bits = bit_util::BytesToBits(this->buffers[0]->size());
++      if (ARROW_PREDICT_FALSE(this->offset < 0 || this->length < 0 ||
++                              this->offset > null_bitmap_bits ||
++                              this->length > null_bitmap_bits - this->offset)) {
++        // Invalid / inconsistent metadata (e.g. malformed IPC input).  Avoid
++        // out-of-bounds reads when computing null_count from the bitmap.
++        precomputed = 0;
++        this->null_count.store(precomputed);
++        return precomputed;
++      }
+       precomputed = this->length -
+                     CountSetBits(this->buffers[0]->data(), this->offset, this->length);
+     } else {

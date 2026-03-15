@@ -40,18 +40,24 @@ class Editor:
         logger.info(f"get_repo_diff called with repo='{repo}'")
         logger.info(f"vfs.files has {len(vfs.files)} modified files: {list(vfs.files.keys())}")
         
-        for path in vfs.files.keys():
-            # (aastham) When repo is ".", all files belong to this repo (WORKDIR=/src case)
-            # Otherwise, only include files that start with "{repo}/"
-            if repo != "." and not path.startswith(f"{repo}/"):
-                logger.info(f"Skipping path '{path}' - doesn't start with '{repo}/'")
-                continue
-            logger.info(f"Generating diff for '{path}'")
+        for raw_path in vfs.files.keys():
+            path = os.path.normpath(raw_path)
+            rel_path = path
+
+            if repo != ".":
+                repo_prefix = f"{repo}/"
+                if path.startswith(repo_prefix):
+                    rel_path = os.path.relpath(path, repo)
+                else:
+                    # Some ARVO flows record edits relative to the repo root already,
+                    # even when `repo` itself is not ".".
+                    logger.info(
+                        f"Treating path '{path}' as already relative to repo '{repo}'"
+                    )
+
+            logger.info(f"Generating diff for '{path}' as '{rel_path}'")
             a = await parent_vfs.read(path)
             b = await vfs.read(path)
-            # (aastham) For repo=".", path is already relative to repo root
-            # For other repos, make path relative to repo
-            rel_path = path if repo == "." else os.path.relpath(path, repo)
             diff_chunk = (await virtual_diff(rel_path, a, b)).expect("diff failed")
             chunks.append(diff_chunk)
         
