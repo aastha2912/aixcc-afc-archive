@@ -1,5 +1,5 @@
 {
-  "vuln_id": 208,
+  "vuln_id": 266,
   "crash_result": {
     "output": "==8430==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x604000000218 at pc 0x0000005818e7 bp 0x7ffe57afb520 sp 0x7ffe57afb518\nREAD of size 2 at 0x604000000218 thread T0\nSCARINESS: 24 (2-byte-read-heap-buffer-overflow-far-from-bounds)\n    #0 0x5818e6 in get16 /src/ndpi/src/lib/protocols/dns.c:40:17\n    #1 0x580abd in search_valid_dns /src/ndpi/src/lib/protocols/dns.c:171:15\n    #2 0x57f139 in ndpi_search_dns /src/ndpi/src/lib/protocols/dns.c:257:19\n    #3 0x564df5 in check_ndpi_tcp_flo",
     "stack": "#0 0x5818e6 in get16 ndpi/src/lib/protocols/dns.c:40:17\n#1 0x580abd in search_valid_dns ndpi/src/lib/protocols/dns.c:171:15\n#2 0x57f139 in ndpi_search_dns ndpi/src/lib/protocols/dns.c:257:19\n#3 0x564df5 in check_ndpi_tcp_flow_func ndpi/src/lib/ndpi_main.c:4165:2\n#4 0x56aa84 in ndpi_detection_process_packet ndpi/src/lib/ndpi_main.c:4931:3\n#5 0x55453a in LLVMFuzzerTestOneInput ndpi/fuzz/fuzz_process_packet.c:24:3\n#6 0x45a011 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) l",
@@ -24,58 +24,54 @@
   "analyzed_vuln": {
     "function": "search_valid_dns",
     "file": "ndpi/src/lib/protocols/dns.c",
-    "description": "Heap OOB read is caused by insufficient bounds validation before reading DNS answer fields. In the DNS reply path, search_valid_dns checks `if((x+6) >= payload_len) break;` before parsing an RR, then advances `x` by `getNameLength(...)` and immediately calls `rsp_type = get16(&x, payload)` without re-checking that at least 2 bytes remain at the new `x`. With crafted/truncated name encoding, `x` can become equal/near end-of-buffer and `get16` performs an unchecked 2-byte read (`*(u_int16_t*)&payload[*i]`), triggering the ASan heap-buffer-overflow at dns.c:40.",
-    "conditions": "From fuzz_process_packet, attacker-controlled packet bytes are passed directly to ndpi_detection_process_packet -> ndpi_search_dns -> search_valid_dns. Input must be recognized as DNS over TCP/UDP (ports/heuristics satisfied) and pass initial header-length check. In reply parsing (`flags` indicates response and counts look plausible), a malformed/truncated answer section causes `x` to move near the payload end after name-length handling; because no post-update bounds check exists before `get16`, the function reads 2 bytes past the heap buffer."
+    "description": "Heap out-of-bounds read is caused by missing bounds validation before 16-bit field extraction in DNS answer parsing. In search_valid_dns(), after getNameLength() advances x, the code calls rsp_type = get16(&x, flow->packet.payload) at line ~171 without ensuring x+1 is within payload_packet_len. get16() blindly dereferences *(u_int16_t*)&payload[*i], so a crafted/truncated DNS response can make x point at/near end of payload and trigger a 2-byte OOB read. Crash manifests in get16(), but root cause is caller-side insufficient length checks in search_valid_dns().",
+    "conditions": "Via fuzz_process_packet, attacker-controlled packet bytes are parsed as TCP/UDP DNS (ports 53/5355 and minimum header-length gate passed). Packet must drive execution into DNS reply path with num_answers>0 and satisfy earlier loose checks ((x+6) check before name parsing, then getNameLength returning nonzero) while leaving fewer than 2 bytes available at x before rsp_type read. This truncated/malformed answer record causes get16() to read past heap buffer."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.02744455,
-      "total_input_tokens": 13889,
-      "total_output_tokens": 397,
-      "total_cached_tokens": 1536,
+      "total_cost": 0.021756,
+      "total_input_tokens": 13480,
+      "total_output_tokens": 373,
+      "total_cached_tokens": 4480,
       "llm_calls": [
         {
-          "timestamp": 1773524801.9714403,
+          "timestamp": 1773715294.067692,
           "model": "gpt-5.3-codex",
-          "cost": 0.006699,
-          "input_tokens": 2988,
-          "output_tokens": 105,
-          "total_tokens": 3093,
-          "cached_tokens": 0,
+          "cost": 0.0042553,
+          "input_tokens": 2958,
+          "output_tokens": 107,
+          "total_tokens": 3065,
+          "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Ybdk1T2lI86fkhrebIw5tqFl"
+              "tool_call_id": "call_7xIUk36bkzOrwdXk85baVAzJ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_uYEItXPaE2I1ArMh2gWZPwDu"
+              "tool_call_id": "call_tSNdLo6epmLA8ddY4Aqhf4ev"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_SxHSbgzGUFGshSNGVx582s8H"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_oB3GvB7cj2Kz4QeasBjwABJt"
+              "tool_call_id": "call_hhoEI97Pak5yt2KCHO8r0mMb"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773524812.6185794,
+          "timestamp": 1773715300.0742018,
           "model": "gpt-5.3-codex",
-          "cost": 0.02074555,
-          "input_tokens": 10901,
-          "output_tokens": 292,
-          "total_tokens": 11193,
-          "cached_tokens": 1536,
+          "cost": 0.0175007,
+          "input_tokens": 10522,
+          "output_tokens": 266,
+          "total_tokens": 10788,
+          "cached_tokens": 2944,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -84,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_rcODFmuMPuxwgDl4z6KTxEgl"
+              "tool_call_id": "call_ILwf6OZGgFNT6RZgEY2wFpgw"
             }
           ],
           "finish_reason": "tool_calls"
@@ -92,19 +88,19 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.021522899999999998,
-      "total_input_tokens": 29750,
-      "total_output_tokens": 425,
-      "total_cached_tokens": 23168,
+      "total_llm_calls": 5,
+      "total_cost": 0.03278065,
+      "total_input_tokens": 38407,
+      "total_output_tokens": 363,
+      "total_cached_tokens": 25088,
       "llm_calls": [
         {
-          "timestamp": 1773524814.1427696,
+          "timestamp": 1773715301.969566,
           "model": "gpt-5.3-codex",
-          "cost": 0.0035112,
-          "input_tokens": 3456,
+          "cost": 0.00346395,
+          "input_tokens": 3429,
           "output_tokens": 78,
-          "total_tokens": 3534,
+          "total_tokens": 3507,
           "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -114,23 +110,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_iF8ovUYlP8luMtu4hiGblOI8"
+              "tool_call_id": "call_khTHXt0RBZ3xX5tv14pTVFxN"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_VmILsSJ7YU63QGp8UJlFubtk"
+              "tool_call_id": "call_7hmIssR2IjLZpxdiu2atIIil"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773524816.8391142,
+          "timestamp": 1773715304.9127448,
           "model": "gpt-5.3-codex",
-          "cost": 0.011796049999999999,
-          "input_tokens": 8547,
-          "output_tokens": 163,
-          "total_tokens": 8710,
-          "cached_tokens": 3456,
+          "cost": 0.0113589,
+          "input_tokens": 8486,
+          "output_tokens": 125,
+          "total_tokens": 8611,
+          "cached_tokens": 3328,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +135,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_SDWyuNLG4hCz0UwIlIezpIOg"
+              "tool_call_id": "call_hJBiXrGz9LDJnTn5C9Z6C7qz"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773524819.2569983,
+          "timestamp": 1773715307.010282,
           "model": "gpt-5.3-codex",
-          "cost": 0.0040663,
-          "input_tokens": 8754,
-          "output_tokens": 161,
-          "total_tokens": 8915,
-          "cached_tokens": 8576,
+          "cost": 0.0035626499999999997,
+          "input_tokens": 8655,
+          "output_tokens": 123,
+          "total_tokens": 8778,
+          "cached_tokens": 8448,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +156,40 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_aYAiiK3y63Lq4AI84koWQbmu"
+              "tool_call_id": "call_LGvSBRImGlUgkpmXdHqVejfX"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773524822.8822663,
+          "timestamp": 1773715309.2652662,
           "model": "gpt-5.3-codex",
-          "cost": 0.0021493499999999995,
-          "input_tokens": 8993,
+          "cost": 0.0020027,
+          "input_tokens": 8866,
+          "output_tokens": 14,
+          "total_tokens": 8880,
+          "cached_tokens": 8704,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_tsGCr6I6XQwasNvYYgfTuTxs"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773715397.7254174,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01239245,
+          "input_tokens": 8971,
           "output_tokens": 23,
-          "total_tokens": 9016,
-          "cached_tokens": 8832,
+          "total_tokens": 8994,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,7 +198,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_8wRnLr39vBlVIDuPWk1Qpcgc"
+              "tool_call_id": "call_LjKFwzMIAQUwWUqwwDwlTBt5"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,15 +206,25 @@
       ]
     },
     "total": {
-      "total_cost": 0.048967449999999996,
-      "total_input_tokens": 43639,
-      "total_output_tokens": 822,
-      "total_llm_calls": 6
+      "total_cost": 0.054536650000000006,
+      "total_input_tokens": 51887,
+      "total_output_tokens": 736,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
-    "success": false,
-    "failure_reason": "the agent did not produce a result"
+    "success": true,
+    "patch": "--- a/ndpi/src/lib/protocols/dns.c\n+++ b/ndpi/src/lib/protocols/dns.c\n@@ -168,6 +168,10 @@\n \t  } else\n \t    x += data_len;\n \n+\t  if((x+1) >= flow->packet.payload_packet_len) {\n+\t    break;\n+\t  }\n+\n \t  rsp_type = get16(&x, flow->packet.payload);\n \t  flow->protos.dns.rsp_type = rsp_type;\n \n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
   },
   "context_retrieval": {
     "source_questions": [],
@@ -207,10 +234,10 @@
         "tool_name": "read_source",
         "args": [
           "ndpi/src/lib/protocols/dns.c",
-          40
+          1
         ],
         "kwargs": {},
-        "timestamp": 557102.855508054,
+        "timestamp": 747590.545262138,
         "success": true,
         "result_summary": "Ok({'contents': '  1 /*\\n  2  * dns.c\\n  3  *\\n  4  * Copyright (C) 2012-20 - ntop.org\\n  5  *\\n  6  * This file is part of nDPI, an open source deep packet inspection\\n  7  * library based on the Ope..."
       },
@@ -218,12 +245,12 @@
         "tool_name": "read_source",
         "args": [
           "ndpi/src/lib/protocols/dns.c",
-          160
+          171
         ],
         "kwargs": {},
-        "timestamp": 557102.856764144,
+        "timestamp": 747590.545830806,
         "success": true,
-        "result_summary": "Ok({'contents': ' 61       return(0);\\n 62     else\\n 63       return(off + getNameLength(i+off, payload, payloadLen));\\n 64   }\\n 65 }\\n 66 /*\\n 67   allowed chars for dns names A-Z 0-9 _ -\\n 68   Pe..."
+        "result_summary": "Ok({'contents': ' 72   }\\n 73   print join(\\',\\', map { sprintf \"0x%08x\",$_ } @M),\"\\\\n\";\\n 74 */\\n 75 \\n 76 static uint32_t dns_validchar[8] =\\n 77   {\\n 78    0x00000000,0x03ff2000,0x87fffffe,0x07fff..."
       }
     ],
     "find_references": [],
@@ -232,15 +259,24 @@
         "tool_name": "apply_patch",
         "args": [
           "src/lib/protocols/dns.c",
-          "@@ -166,9 +166,12 @@\n \t  if((data_len = getNameLength(x, flow->packet.payload, flow->packet.payload_packet_len)) == 0) {\n \t    break;\n \t  } else\n \t    x += data_len;\n+\n+\t  if((x + 2) > flow->packet.payload_packet_len) {\n+\t    break;\n+\t  }\n \n \t  rsp_type = get16(&x, flow->packet.payload);\n \t  flow->protos.dns.rsp_type = rsp_type;\n"
+          "@@ -168,6 +168,10 @@\n \t  } else\n \t    x += data_len;\n \n+\t  if((x+1) >= flow->packet.payload_packet_len) {\n+\t    break;\n+\t  }\n+\n \t  rsp_type = get16(&x, flow->packet.payload);\n \t  flow->protos.dns.rsp_type = rsp_type;\n"
         ],
         "kwargs": {},
-        "timestamp": 557107.841282622,
+        "timestamp": 747595.60551353,
         "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'src/lib/protocols/dns.c' does not exist in directory tree. Similar paths: ndpi/src/lib/protocols/dns.c, extra={'note': 'this patch was not applied ..."
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
     ],
-    "test_patch": [],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 747683.042030858,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
     "undo_last_patch": [],
     "list_current_edits": []
   }

@@ -89,11 +89,40 @@ class Editor:
 
     # TODO: populate a patch here
     async def write_tracked(self, relpath: str, new_content: bytes):
+        relpath = await self.resolve_path(relpath)
         edit = await apply_as_edit(self.vfs, relpath, new_content)
         self.patches.append({"edits": [edit], "path": relpath, "patch": ""})
 
+    async def resolve_path(self, path: str) -> str:
+        normalized = os.path.normpath(path)
+        if await self.vfs.is_file(normalized):
+            return normalized
+
+        match await self.vfs.tree():
+            case Ok(tree):
+                pass
+            case Err():
+                return normalized
+
+        candidates = [normalized]
+        parts = normalized.split(os.sep)
+        for i in range(1, len(parts)):
+            suffix = os.path.join(*parts[i:])
+            if suffix not in candidates:
+                candidates.append(suffix)
+
+        for candidate in candidates:
+            match tree.get_full_paths(candidate):
+                case Ok(paths) if len(paths) == 1:
+                    return paths[0]
+                case _:
+                    pass
+
+        return normalized
+
     @requireable
     async def apply(self, relpath: str, patch: str) -> Result[None]:
+        relpath = await self.resolve_path(relpath)
         require(await check_file(self.vfs, relpath))
         _, edits = require(await fuzzy_patch(self.vfs, relpath, patch))
         self.patches.append({"edits": edits, "path": relpath, "patch": patch})
@@ -210,6 +239,7 @@ class Editor:
         dict
             contains a success message if successful, otherwise contains an error message
         """
+        path = await self.resolve_path(path)
         require(await check_file(self.vfs, path))
         if end < start:
             return Err(CRSError("end < start"))

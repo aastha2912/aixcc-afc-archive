@@ -38,8 +38,71 @@ def bool_label(value: bool) -> str:
     return "yes" if value else "no"
 
 
-def extract_row(arvo_id: str, workflow_file: Path) -> dict[str, object]:
+def classify_failure(
+    workflow_data: dict[str, object],
+    log_text: str,
+    has_workflow: bool,
+) -> tuple[str, str]:
+    if not has_workflow:
+        if "usable harness target" in log_text:
+            return (
+                "needs_fix_metadata_harness",
+                "metadata missing harness target; config fallback or metadata fix needed",
+            )
+        if "context_length_exceeded" in log_text:
+            return (
+                "needs_fix_context_window",
+                "triage request exceeded model context window",
+            )
+        if "Fuzzer harness" in log_text and "not found" in log_text:
+            return (
+                "needs_fix_missing_harness",
+                "configured harness was not found during setup",
+            )
+        if "workflow_data.json not found" in log_text:
+            return ("missing_workflow", "workflow data was not generated")
+        return ("needs_review_preworkflow_failure", "workflow failed before workflow_data.json was written")
+
+    patch_result = workflow_data.get("patch_result", {})
+    context = workflow_data.get("context_retrieval", {})
+    apply_calls = context.get("apply_patch", []) if isinstance(context, dict) else []
+    test_calls = context.get("test_patch", []) if isinstance(context, dict) else []
+
+    if patch_result.get("success") is True:
+        return ("success", "patch generated and validated")
+
+    validation = patch_result.get("last_validation", {})
+    validation_status = validation.get("status", "")
+    if validation_status == "pov_still_crashes":
+        return ("genuine_patch_failed_validation", "patch was produced but PoV still crashes")
+    if validation_status == "build_failed":
+        return ("genuine_patch_failed_build", "patch was produced but validation build failed")
+
+    apply_summary = ""
+    if apply_calls:
+        apply_summary = apply_calls[-1].get("result_summary", "")
+
+    if "Cannot call require() unless annotated with @requireable" in log_text:
+        return ("rerun_runner_regression", "runner regression in source editor path resolution")
+
+    if apply_calls and "does not exist in directory tree" in apply_summary:
+        return ("rerun_path_resolution_issue", "patch targeted the wrong file path")
+
+    if apply_calls and "typographic error" in apply_summary:
+        return ("genuine_invalid_patch_hunk", "agent produced malformed patch hunks")
+
+    if apply_calls and not test_calls:
+        return ("review_apply_patch_attempt_no_result", "patch was attempted but never reached validation")
+
+    if not apply_calls:
+        return ("genuine_no_patch_agent_stopped", "patching completed without any patch attempt")
+
+    return ("review_other_failed_patching", "failed during patching for an unclassified reason")
+
+
+def extract_row(arvo_id: str, workflow_file: Path, log_file: Path) -> dict[str, object]:
     data = json.loads(workflow_file.read_text())
+    log_text = log_file.read_text(errors="replace") if log_file.exists() else ""
 
     failed = data.get("status") == "failed"
     completed = not failed and "patch_result" in data
@@ -52,6 +115,7 @@ def extract_row(arvo_id: str, workflow_file: Path) -> dict[str, object]:
     patching = cost_analysis.get("patching", {})
     total = cost_analysis.get("total", {})
     patch_result = data.get("patch_result", {})
+    failure_category, failure_reason_summary = classify_failure(data, log_text, True)
 
     total_cost = total.get("total_cost")
     if total_cost is None:
@@ -68,15 +132,14 @@ def extract_row(arvo_id: str, workflow_file: Path) -> dict[str, object]:
         "vuln_function": analyzed_vuln.get("function", ""),
         "vuln_file": analyzed_vuln.get("file", ""),
         "total_cost_usd": total_cost,
-        "triage_cost_usd": triage.get("total_cost", 0),
-        "patching_cost_usd": patching.get("total_cost", 0),
         "total_llm_calls": total.get("total_llm_calls", triage.get("total_llm_calls", 0) + patching.get("total_llm_calls", 0)),
+        "failure_category": failure_category,
+        "failure_reason_summary": failure_reason_summary,
         "failure_phase": data.get("phase", ""),
         "failure_error": data.get("error", ""),
         "patch_failure_reason": patch_result.get("failure_reason", patch_result.get("error", "")),
         "last_validation_status": patch_result.get("last_validation", {}).get("status", ""),
         "last_validation_message": patch_result.get("last_validation", {}).get("message", ""),
-        "workflow_file": workflow_file.relative_to(script_dir.parent.parent).as_posix(),
     }
 
 
@@ -87,7 +150,10 @@ if __name__ == "__main__":
     rows: list[dict[str, object]] = []
     for arvo_id in arvo_ids:
         workflow_file = script_dir / f"arvo_{arvo_id}" / "workflow_data.json"
+        log_file = script_dir / f"arvo_{arvo_id}" / "batch_runner.log"
         if not workflow_file.exists():
+            log_text = log_file.read_text(errors="replace") if log_file.exists() else ""
+            failure_category, failure_reason_summary = classify_failure({}, log_text, False)
             rows.append(
                 {
                     "arvo_id": arvo_id,
@@ -100,20 +166,19 @@ if __name__ == "__main__":
                     "vuln_function": "",
                     "vuln_file": "",
                     "total_cost_usd": 0,
-                    "triage_cost_usd": 0,
-                    "patching_cost_usd": 0,
                     "total_llm_calls": 0,
+                    "failure_category": failure_category,
+                    "failure_reason_summary": failure_reason_summary,
                     "failure_phase": "",
                     "failure_error": "workflow_data.json not found",
                     "patch_failure_reason": "",
                     "last_validation_status": "",
                     "last_validation_message": "",
-                    "workflow_file": "",
                 }
             )
             continue
 
-        rows.append(extract_row(arvo_id, workflow_file))
+        rows.append(extract_row(arvo_id, workflow_file, log_file))
 
     output_file = script_dir / "run_summary.csv"
     fieldnames = [
@@ -127,15 +192,14 @@ if __name__ == "__main__":
         "vuln_function",
         "vuln_file",
         "total_cost_usd",
-        "triage_cost_usd",
-        "patching_cost_usd",
         "total_llm_calls",
+        "failure_category",
+        "failure_reason_summary",
         "failure_phase",
         "failure_error",
         "patch_failure_reason",
         "last_validation_status",
         "last_validation_message",
-        "workflow_file",
     ]
 
     with output_file.open("w", newline="") as handle:

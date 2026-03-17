@@ -1,5 +1,5 @@
 {
-  "vuln_id": 127,
+  "vuln_id": 263,
   "crash_result": {
     "output": "==3478==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x6030000001d0 at pc 0x0000005c2e82 bp 0x7ffcee501090 sp 0x7ffcee501088\nREAD of size 4 at 0x6030000001d0 thread T0\nSCARINESS: 27 (4-byte-read-heap-buffer-overflow-far-from-bounds)\n    #0 0x5c2e81 in rawspeed::DngOpcodes::OffsetPerRowOrCol<rawspeed::DngOpcodes::DeltaRowOrColBase::SelectX>::apply(rawspeed::RawImage const&) /src/librawspeed/src/librawspeed/common/DngOpcodes.cpp\n    #1 0x5b0940 in rawspeed::DngOpcodes::applyOpCodes(raw",
     "stack": "#0 0x5c2e81 in rawspeed::DngOpcodes::OffsetPerRowOrCol<rawspeed::DngOpcodes::DeltaRowOrColBase::SelectX>::apply(rawspeed::RawImage const&) librawspeed/src/librawspeed/common/DngOpcodes.cpp\n#1 0x5b0940 in rawspeed::DngOpcodes::applyOpCodes(rawspeed::RawImage const&) librawspeed/src/librawspeed/common/DngOpcodes.cpp:530:11\n#2 0x54b163 in rawspeed::DngDecoder::handleMetadata(rawspeed::TiffIFD const*) librawspeed/src/librawspeed/decoders/DngDecoder.cpp:496:15\n#3 0x549cf0 in rawspeed::DngDecoder::dec",
@@ -22,119 +22,85 @@
     "dedup": "rawspeed::DngOpcodes::OffsetPerRowOrCol<rawspeed::DngOpcodes::DeltaRowOrColBase::SelectX>::apply(rawspeed::RawImage const&)--rawspeed::DngOpcodes::applyOpCodes(rawspeed::RawImage const&)--rawspeed::DngDecoder::handleMetadata(rawspeed::TiffIFD const*)"
   },
   "analyzed_vuln": {
-    "function": "OffsetPerRowOrCol::apply",
+    "function": "DngOpcodes::OffsetPerRowOrCol::apply",
     "file": "librawspeed/src/librawspeed/common/DngOpcodes.cpp",
-    "description": "Heap-buffer-overflow is caused by out-of-bounds indexing into delta arrays in DNG DeltaPerColumn/DeltaPerRow opcode application. In OffsetPerRowOrCol<S>::apply, the code uses this->deltaI[S::select(x,y)] (or deltaF) for every pixel coordinate in ROI, but never validates that the opcode-provided deltaF_count matches the accessed coordinate range (width for SelectX / height for SelectY). As a result, crafted opcode data with too-short delta array leads to OOB read during applyOpCodes().",
-    "conditions": "From the TIFF/DNG input, the harness reaches DngDecoder::handleMetadata(), which constructs DngOpcodes from OPCODELIST1 and calls applyOpCodes() after decodeData. A PoV must include a DeltaPerColumn opcode (code 11; crash shows SelectX) with deltaF_count smaller than the ROI/image width (or similarly DeltaPerRow smaller than height). During OffsetPerRowOrCol::apply -> PixelOpcode::applyOP loop over ROI pixels, S::select(x,y) exceeds deltaI/deltaF size, triggering heap OOB read."
+    "description": "Heap OOB read is caused by indexing delta arrays with absolute pixel coordinates (`S::select(x,y)` returning x for DeltaPerColumn) without validating that the opcode-provided delta table length matches the traversed ROI coordinate range. In `OffsetPerRowOrCol::apply`, `this->deltaI[S::select(x,y)]` / `this->deltaF[...]` can read past the vector when x (or y for row variant) exceeds `deltaF_count` parsed in `DeltaRowOrCol` constructor. Crash manifests in `OffsetPerRowOrCol<...SelectX>::apply` but root cause is missing bounds/consistency check between ROI dimensions and delta table size for DeltaPerColumn opcode data.",
+    "conditions": "PoV supplies a DNG opcode list (stage1 via OPCODELIST1 in `DngDecoder::handleMetadata`) containing DeltaPerColumn (opcode 11) with too-short `deltaF_count`. During `DngOpcodes::applyOpCodes`, the opcode is set up and applied over ROI pixels; loop uses image x coordinates, so when ROI width/image width is larger than delta table length, out-of-bounds vector access occurs, producing ASan heap-buffer-overflow read."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 5,
-      "total_cost": 0.03162005,
-      "total_input_tokens": 38179,
-      "total_output_tokens": 539,
-      "total_cached_tokens": 27136,
+      "total_llm_calls": 3,
+      "total_cost": 0.03904285,
+      "total_input_tokens": 22307,
+      "total_output_tokens": 562,
+      "total_cached_tokens": 4992,
       "llm_calls": [
         {
-          "timestamp": 1773417602.716509,
+          "timestamp": 1773714568.1036055,
           "model": "gpt-5.3-codex",
-          "cost": 0.00713475,
+          "cost": 0.00533155,
           "input_tokens": 3397,
-          "output_tokens": 85,
-          "total_tokens": 3482,
+          "output_tokens": 129,
+          "total_tokens": 3526,
+          "cached_tokens": 1536,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_sWF8yaqAE2zbFWbrY7yxVSCK"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_JPmbqcPjr59hR8NFIbL9xIhW"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_NFVRZTSRowoavWxTYgWxDMay"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773714614.3600595,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01617875,
+          "input_tokens": 8157,
+          "output_tokens": 136,
+          "total_tokens": 8293,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_H9ThjHuJbedEl5oxw2uiclUq"
+              "tool_call_id": "call_8ZScaKfmAwRwaIufwur5Y8Cx"
             },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_VthDoQwgV0eKkqCatwkKNvpg"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773417606.33601,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00884765,
-          "input_tokens": 7699,
-          "output_tokens": 44,
-          "total_tokens": 7743,
-          "cached_tokens": 3328,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_djxCY8mS5rnQJhhQcPXC4NIl"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773417657.9186997,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0034163500000000003,
-          "input_tokens": 7957,
-          "output_tokens": 99,
-          "total_tokens": 8056,
-          "cached_tokens": 7552,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_w3WGD7UQAoZyzMQc6GUkGkv6"
+              "tool_call_id": "call_3SUKicIE8x2pq8Djs7vyLzFI"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_G7s4mm4lMxtBcHlhRAx9z5Nm"
+              "tool_call_id": "call_kCgVXeoMuopQUYqVSB3Dum09"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773417744.8316164,
+          "timestamp": 1773714665.7405896,
           "model": "gpt-5.3-codex",
-          "cost": 0.00266805,
-          "input_tokens": 8379,
-          "output_tokens": 36,
-          "total_tokens": 8415,
-          "cached_tokens": 7936,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_FqAdRyOH8kzw1oVIiyg42Fw6"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773417751.115509,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00955325,
-          "input_tokens": 10747,
-          "output_tokens": 275,
-          "total_tokens": 11022,
-          "cached_tokens": 8320,
+          "cost": 0.01753255,
+          "input_tokens": 10753,
+          "output_tokens": 297,
+          "total_tokens": 11050,
+          "cached_tokens": 3456,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -143,7 +109,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Kl6QzchTWWhPAkOAO7U2NIex"
+              "tool_call_id": "call_3X3K1123eMTetCY4hRSUw2dz"
             }
           ],
           "finish_reason": "tool_calls"
@@ -151,20 +117,20 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 5,
-      "total_cost": 0.0419867,
-      "total_input_tokens": 37026,
-      "total_output_tokens": 718,
-      "total_cached_tokens": 20864,
+      "total_llm_calls": 4,
+      "total_cost": 0.0228214,
+      "total_input_tokens": 27964,
+      "total_output_tokens": 525,
+      "total_cached_tokens": 21248,
       "llm_calls": [
         {
-          "timestamp": 1773417753.1266074,
+          "timestamp": 1773714668.0916598,
           "model": "gpt-5.3-codex",
-          "cost": 0.0055272,
-          "input_tokens": 3912,
+          "cost": 0.0045577,
+          "input_tokens": 3934,
           "output_tokens": 93,
-          "total_tokens": 4005,
-          "cached_tokens": 1664,
+          "total_tokens": 4027,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -173,22 +139,22 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_vLIX6weMD0QnvdNZnd4wMFpc"
+              "tool_call_id": "call_OtqXPdeMwvUDtiuG4qbfNBiv"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_AIHnLN2qqpWCE3y0TlJUSgrB"
+              "tool_call_id": "call_x9jAR9MRG6fzJtgtGb8P2PGk"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773417756.0959923,
+          "timestamp": 1773714690.9710414,
           "model": "gpt-5.3-codex",
-          "cost": 0.00628075,
-          "input_tokens": 6261,
-          "output_tokens": 98,
-          "total_tokens": 6359,
+          "cost": 0.0062352499999999995,
+          "input_tokens": 6283,
+          "output_tokens": 92,
+          "total_tokens": 6375,
           "cached_tokens": 3840,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -198,43 +164,22 @@
           "tool_calls": [
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_NWiwo0nRdzBE9DVt1IZ37urP"
+              "tool_call_id": "call_qwWloNayEG7u3CIo9JUhg53i"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_vse7moqPsv2UR6fwPuIpBvUD"
+              "tool_call_id": "call_q07kpM5O8OFwcdrRAAUWo2lx"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773417771.0403597,
+          "timestamp": 1773714696.1013963,
           "model": "gpt-5.3-codex",
-          "cost": 0.01838025,
-          "input_tokens": 8663,
-          "output_tokens": 230,
-          "total_tokens": 8893,
-          "cached_tokens": 0,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_gefmty7y0cVWiRnaJerccglg"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773417774.3153992,
-          "model": "gpt-5.3-codex",
-          "cost": 0.008944599999999999,
-          "input_tokens": 8940,
-          "output_tokens": 227,
-          "total_tokens": 9167,
+          "cost": 0.0090741,
+          "input_tokens": 8718,
+          "output_tokens": 264,
+          "total_tokens": 8982,
           "cached_tokens": 6272,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -244,19 +189,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_M3KGifW6lB619vNmbYzFyyVY"
+              "tool_call_id": "call_jvfJaHuiibjeKGCqaPxrlbTf"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773417776.3783176,
+          "timestamp": 1773714702.8955529,
           "model": "gpt-5.3-codex",
-          "cost": 0.0028539,
-          "input_tokens": 9250,
-          "output_tokens": 70,
-          "total_tokens": 9320,
-          "cached_tokens": 9088,
+          "cost": 0.0029543499999999997,
+          "input_tokens": 9029,
+          "output_tokens": 76,
+          "total_tokens": 9105,
+          "cached_tokens": 8832,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -265,7 +210,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_gmyiqRbP6WuXgql3VR8KrGgR"
+              "tool_call_id": "call_qOInejkWHVjDqlJXr7U7WYA7"
             }
           ],
           "finish_reason": "tool_calls"
@@ -273,10 +218,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.07360675,
-      "total_input_tokens": 75205,
-      "total_output_tokens": 1257,
-      "total_llm_calls": 10
+      "total_cost": 0.061864249999999996,
+      "total_input_tokens": 50271,
+      "total_output_tokens": 1087,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
@@ -294,7 +239,7 @@
           500
         ],
         "kwargs": {},
-        "timestamp": 450041.750381731,
+        "timestamp": 746956.667556078,
         "success": true,
         "result_summary": "Ok({'contents': '401 public:\\n402   explicit OffsetPerRowOrCol(const RawImage& ri, ByteStream* bs)\\n403       : DeltaRowOrCol<S>(ri, bs, 65535.0F),\\n404         absLimit(double(std::numeric_limits<uin..."
       },
@@ -305,7 +250,7 @@
           300
         ],
         "kwargs": {},
-        "timestamp": 450044.6718773,
+        "timestamp": 746979.546349432,
         "success": true,
         "result_summary": "Ok({'contents': '201     ri->mBadPixelPositions.insert(ri->mBadPixelPositions.begin(),\\n202                                   badPixels.begin(), badPixels.end());\\n203   }\\n204 };\\n205 \\n206 // ******..."
       }
@@ -319,36 +264,24 @@
           false
         ],
         "kwargs": {},
-        "timestamp": 450041.840292733,
+        "timestamp": 746977.604603501,
         "success": true,
         "result_summary": "Ok([FileReferences(file_name='librawspeed/src/librawspeed/common/DngOpcodes.cpp', refs=[FileReference(line=402, content='  explicit OffsetPerRowOrCol(const RawImage& ri, ByteStream* bs)', enclosing_de..."
       },
       {
         "tool_name": "find_references",
         "args": [
-          "class DngOpcodes::DeltaRowOrCol",
+          "DeltaRowOrCol",
           "librawspeed/src/librawspeed/common/DngOpcodes.cpp",
           false
         ],
         "kwargs": {},
-        "timestamp": 450055.642788287,
+        "timestamp": 746979.547301338,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='/src/librawspeed/src/librawspeed/common/DngOpcodes.cpp', refs=[FileReference(line=334, content='class DngOpcodes::DeltaRowOrColBase : public PixelOpcode {', enclosing_def..."
+        "result_summary": "Ok([FileReferences(file_name='librawspeed/src/librawspeed/common/DngOpcodes.cpp', refs=[FileReference(line=374, content='  DeltaRowOrCol(const RawImage& ri, ByteStream* bs, float f2iScale_)', enclosin..."
       }
     ],
-    "apply_patch": [
-      {
-        "tool_name": "apply_patch",
-        "args": [
-          "src/librawspeed/common/DngOpcodes.cpp",
-          "@@ -349,6 +349,17 @@\n class DngOpcodes::DeltaRowOrCol : public DeltaRowOrColBase {\n public:\n   void setup(const RawImage& ri) override {\n+    const iRectangle2D& ROI = getRoi();\n+    const uint32_t requiredCount =\n+        std::is_same_v<S, SelectX>\n+            ? static_cast<uint32_t>(ROI.getRight())\n+            : static_cast<uint32_t>(ROI.getBottom());\n+\n+    if (deltaF.size() < requiredCount) {\n+      ThrowRDE(\"Not enough delta entries (%zu), expected at least %u\",\n+               deltaF.size(), requiredCount);\n+    }\n+\n     PixelOpcode::setup(ri);\n \n     // If we are working on a float image, no need to convert to int\n"
-        ],
-        "kwargs": {},
-        "timestamp": 450062.899142379,
-        "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'src/librawspeed/common/DngOpcodes.cpp' does not exist in directory tree. Similar paths: librawspeed/src/librawspeed/common/DngOpcodes.cpp, extra={'..."
-      }
-    ],
+    "apply_patch": [],
     "test_patch": [],
     "undo_last_patch": [],
     "list_current_edits": []

@@ -78,20 +78,22 @@ def load_metadata_entry(arvo_id: str) -> dict:
         raise RuntimeError(f"No metadata entry found for ARVO ID {arvo_id} in {metadata_path}")
     return entry
 
-def resolve_fuzzer_name_from_metadata(entry: dict) -> str:
-    """Resolve the harness/fuzzer target name from metadata.json."""
-    for key in ("fuzzer_name", "harness_name", "target_name"):
-        value = entry.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+def resolve_fuzzer_name(entry: dict, config: dict | None = None) -> str:
+    """Resolve the harness/fuzzer target name, preferring metadata.json and falling back to config.json."""
+    for source_name, source in (("metadata.json", entry), ("config.json", config or {})):
+        for key in ("fuzzer_name", "harness_name", "target_name"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
 
-    command = entry.get("command")
-    if isinstance(command, str) and command.strip():
-        first = command.strip().split()[0]
-        return Path(first).name
+        command = source.get("command")
+        if isinstance(command, str) and command.strip():
+            first = command.strip().split()[0]
+            if first:
+                return Path(first).name
 
     raise RuntimeError(
-        "metadata.json entry does not contain a usable harness target. "
+        "Neither metadata.json nor config.json contains a usable harness target. "
         "Expected one of: fuzzer_name, harness_name, target_name, or command."
     )
 
@@ -114,7 +116,7 @@ def get_config_from_args():
     arvo_id = sys.argv[1]
     config = load_arvo_config(arvo_id)
     metadata = load_metadata_entry(arvo_id)
-    resolved_fuzzer_name = resolve_fuzzer_name_from_metadata(metadata)
+    resolved_fuzzer_name = resolve_fuzzer_name(metadata, config)
     
     print(f"\nLoaded configuration for ARVO ID: {arvo_id}")
     print(f"Project: {config['project_name']}")

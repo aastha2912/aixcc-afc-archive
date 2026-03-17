@@ -1,5 +1,5 @@
 {
-  "vuln_id": 120,
+  "vuln_id": 248,
   "crash_result": {
     "output": "==71676==ERROR: AddressSanitizer: heap-use-after-free on address 0xe9c0a2f4 at pc 0x090b4d77 bp 0xffd66a48 sp 0xffd66a40\nREAD of size 4 at 0xe9c0a2f4 thread T0\nSCARINESS: 45 (4-byte-read-heap-use-after-free)\n    #0 0x90b4d76 in _zend_hash_del_el /src/php-src/Zend/zend_hash.c:1518:9\n    #1 0x90b4d76 in zend_hash_reverse_apply /src/php-src/Zend/zend_hash.c:2238:5\n    #2 0x8dbc661 in shutdown_destructors /src/php-src/Zend/zend_execute_API.c:262:4\n    #3 0x924c9e9 in zend_call_destructors /src/php-s",
     "stack": "#0 0x90b4d76 in _zend_hash_del_el php-src/Zend/zend_hash.c:1518:9\n#1 0x90b4d76 in zend_hash_reverse_apply php-src/Zend/zend_hash.c:2238:5\n#2 0x8dbc661 in shutdown_destructors php-src/Zend/zend_execute_API.c:262:4\n#3 0x924c9e9 in zend_call_destructors php-src/Zend/zend.c:1332:3\n#4 0x8a43ed7 in php_request_shutdown php-src/main/main.c:1914:3\n#5 0x9258341 in fuzzer_request_shutdown php-src/sapi/fuzzer/fuzzer-sapi.c:204:2\n#6 0x9258b84 in fuzzer_do_request_from_buffer php-src/sapi/fuzzer/fuzzer-sapi.",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "zend_hash_reverse_apply",
     "file": "php-src/Zend/zend_hash.c",
-    "description": "Use-after-free in reverse hash iteration during destructor shutdown: zend_hash_reverse_apply() stores a Bucket* (p = ht->arData + idx), calls user-influenced apply_func (zval_call_destructor), and then may call _zend_hash_del_el(ht, ..., p). The destructor callback can mutate $GLOBALS and trigger zend_hash_do_resize(), which reallocates/frees ht->arData. After that, the saved p is stale, but _zend_hash_del_el dereferences it (p->h / p->key), causing UAF. Crash manifests in _zend_hash_del_el at zend_hash.c:1518, but the root cause is iterator invalidation in zend_hash_reverse_apply not handling rehash/resize during callback reentrancy.",
-    "conditions": "During request shutdown, shutdown_destructors() calls zend_hash_reverse_apply(&EG(symbol_table), zval_call_destructor). A destructor with side effects (PoC: __destruct writes many new entries into $GLOBALS in a loop) grows EG(symbol_table), causing zend_hash_add_new -> _zend_hash_add_or_update_i -> zend_hash_do_resize to free/reallocate arData while reverse_apply is mid-iteration. reverse_apply then continues using previously captured Bucket* and deletes that element, triggering UAF read."
+    "description": "Heap-use-after-free in reverse hash iteration during destructor shutdown: zend_hash_reverse_apply() stores a Bucket* (p = ht->arData + idx), calls apply_func(&p->val), and then may call _zend_hash_del_el(ht, ..., p). The callback path (object destructor) can mutate $GLOBALS and trigger zend_hash_do_resize(), which reallocates ht->arData and frees the old bucket array. After returning, zend_hash_reverse_apply() still uses stale p, and _zend_hash_del_el() dereferences it (p->h / p->key), causing UAF. Crash is observed in _zend_hash_del_el(), but root cause is iterator invalidation/reentrancy-unsafety in zend_hash_reverse_apply().",
+    "conditions": "During request shutdown, shutdown_destructors() invokes zend_hash_reverse_apply() on a hashtable (here $GLOBALS symbol table). A destructor callback must reenter and insert enough elements into the same table to trigger zend_hash_do_resize() (reallocation/free of old arData). In this PoV, __destruct() loops writing many new $GLOBALS entries; after callback returns, reverse_apply uses the pre-resize Bucket* and then deletes it, triggering UAF."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.0275639,
-      "total_input_tokens": 25522,
-      "total_output_tokens": 521,
-      "total_cached_tokens": 15488,
+      "total_cost": 0.0226044,
+      "total_input_tokens": 21240,
+      "total_output_tokens": 558,
+      "total_cached_tokens": 14208,
       "llm_calls": [
         {
-          "timestamp": 1773413846.200947,
+          "timestamp": 1773626396.9367266,
           "model": "gpt-5.3-codex",
-          "cost": 0.0129185,
+          "cost": 0.0112581,
           "input_tokens": 6366,
-          "output_tokens": 127,
-          "total_tokens": 6493,
-          "cached_tokens": 0,
+          "output_tokens": 138,
+          "total_tokens": 6504,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,52 +51,56 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_CEhnuVBMGhTwjdBH0IfjYSOG"
+              "tool_call_id": "call_FSqxZ9MPeeQf2QRKRnVwzr6C"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_dQfEgxwCFwIAIfjj7tzYWK12"
+              "tool_call_id": "call_epBJXWsge3pxiVLtg0EAooEU"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_hKbva7GY6Drb2JH0gwybPipi"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_0fgrthnRsxEUpHcKJ3DlS4x4"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414031.2413132,
+          "timestamp": 1773626564.2348194,
           "model": "gpt-5.3-codex",
-          "cost": 0.0072152499999999994,
-          "input_tokens": 9091,
-          "output_tokens": 99,
-          "total_tokens": 9190,
+          "cost": 0.00353675,
+          "input_tokens": 6677,
+          "output_tokens": 138,
+          "total_tokens": 6815,
           "cached_tokens": 6400,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_tnMh8maScPGdRh5W2VPVpYjm"
+              "tool_call_id": "call_2t6lnSLwscSuADlpUYRR7GAr"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_TGq3H6D5vl0diRb9uAUtQYal"
+              "tool_call_id": "call_3bB4YrKCdW9xzhnHPoTprE0c"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_J0YMJt80Zwretco3gRWfFsvp"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414061.5394876,
+          "timestamp": 1773626594.828654,
           "model": "gpt-5.3-codex",
-          "cost": 0.00743015,
-          "input_tokens": 10065,
-          "output_tokens": 295,
-          "total_tokens": 10360,
-          "cached_tokens": 9088,
+          "cost": 0.00780955,
+          "input_tokens": 8197,
+          "output_tokens": 282,
+          "total_tokens": 8479,
+          "cached_tokens": 6656,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -105,7 +109,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_8EFbTQ1w0GZiyfOZINzdeRPQ"
+              "tool_call_id": "call_p4WzkKrhVQOpiBuzjiIxGVkN"
             }
           ],
           "finish_reason": "tool_calls"
@@ -113,48 +117,44 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.037440549999999996,
-      "total_input_tokens": 38097,
-      "total_output_tokens": 965,
-      "total_cached_tokens": 27136,
+      "total_llm_calls": 3,
+      "total_cost": 0.0245168,
+      "total_input_tokens": 26624,
+      "total_output_tokens": 396,
+      "total_cached_tokens": 17536,
       "llm_calls": [
         {
-          "timestamp": 1773414064.1350014,
+          "timestamp": 1773626596.8503985,
           "model": "gpt-5.3-codex",
-          "cost": 0.01079225,
-          "input_tokens": 5279,
-          "output_tokens": 111,
-          "total_tokens": 5390,
-          "cached_tokens": 0,
+          "cost": 0.00765695,
+          "input_tokens": 5265,
+          "output_tokens": 76,
+          "total_tokens": 5341,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 2,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_nuFKHYGeQqvsnptMRsp9tgsJ"
+              "tool_call_id": "call_01m30vAlDbfcldxpjRVgCZ7d"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_hFeItcqe4nruxe4a3oWoIFUS"
-            },
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_TbvZFIKckt1Q4qkX5i7FtkhX"
+              "tool_call_id": "call_MQiYT2Y4aL2HVwhuriHKmAZx"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414071.574192,
+          "timestamp": 1773626601.8486772,
           "model": "gpt-5.3-codex",
-          "cost": 0.01540665,
-          "input_tokens": 10511,
-          "output_tokens": 377,
-          "total_tokens": 10888,
+          "cost": 0.013812399999999999,
+          "input_tokens": 10528,
+          "output_tokens": 261,
+          "total_tokens": 10789,
           "cached_tokens": 5248,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -164,40 +164,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_x1tmEDekNTZD3GkYGgWX1YBo"
+              "tool_call_id": "call_AeIzdMIxJNcRRP7t6A5fifgG"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414077.4386792,
+          "timestamp": 1773626604.789838,
           "model": "gpt-5.3-codex",
-          "cost": 0.0074291,
-          "input_tokens": 10930,
-          "output_tokens": 374,
-          "total_tokens": 11304,
-          "cached_tokens": 10752,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_W53jdTD1mO5RwzMsYzuQVHHY"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773414080.0948431,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0038125499999999996,
-          "input_tokens": 11377,
-          "output_tokens": 103,
-          "total_tokens": 11480,
-          "cached_tokens": 11136,
+          "cost": 0.0030474499999999997,
+          "input_tokens": 10831,
+          "output_tokens": 59,
+          "total_tokens": 10890,
+          "cached_tokens": 10624,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -206,7 +185,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_FJb9J6LLu4qTrT1VTLgGGRKv"
+              "tool_call_id": "call_cLmTombkARCQlTnytG963jva"
             }
           ],
           "finish_reason": "tool_calls"
@@ -214,10 +193,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.06500444999999999,
-      "total_input_tokens": 63619,
-      "total_output_tokens": 1486,
-      "total_llm_calls": 7
+      "total_cost": 0.0471212,
+      "total_input_tokens": 47864,
+      "total_output_tokens": 954,
+      "total_llm_calls": 6
     }
   },
   "patch_result": {
@@ -232,52 +211,27 @@
         "tool_name": "read_source",
         "args": [
           "php-src/Zend/zend_hash.c",
-          2238
+          1494
         ],
         "kwargs": {},
-        "timestamp": 446353.063470684,
+        "timestamp": 658885.426723827,
         "success": true,
-        "result_summary": "Ok({'contents': '2139 \\t\\t\\t}\\n2140 \\t\\t}\\n2141 \\t}\\n2142 }\\n2143 \\n2144 \\n2145 ZEND_API void zend_hash_apply_with_arguments(HashTable *ht, apply_func_args_t apply_func, int num_args, ...)\\n2146 {\\n21..."
+        "result_summary": "Ok({'contents': '1395 \\t\\t\\t\\t\\t}\\n1396 \\t\\t\\t\\t} else {\\n1397 \\t\\t\\t\\t\\tuint32_t iter_pos = zend_hash_iterators_lower_pos(ht, i + 1);\\n1398 \\n1399 \\t\\t\\t\\t\\twhile (++i < ht->nNumUsed) {\\n1400 \\t\\t\\t\\..."
       },
       {
         "tool_name": "read_source",
         "args": [
           "php-src/Zend/zend_hash.c",
-          1518
+          2238
         ],
         "kwargs": {},
-        "timestamp": 446353.065849265,
+        "timestamp": 658885.428113887,
         "success": true,
-        "result_summary": "Ok({'contents': '1419 \\t\\t\\t\\t\\t\\t}\\n1420 \\t\\t\\t\\t\\t}\\n1421 \\t\\t\\t\\t}\\n1422 \\t\\t\\t\\tht->nNumUsed = j;\\n1423 \\t\\t\\t\\tbreak;\\n1424 \\t\\t\\t}\\n1425 \\t\\t\\tnIndex = p->h | ht->nTableMask;\\n1426 \\t\\t\\tZ_NEXT(..."
+        "result_summary": "Ok({'contents': '2139 \\t\\t\\t}\\n2140 \\t\\t}\\n2141 \\t}\\n2142 }\\n2143 \\n2144 \\n2145 ZEND_API void zend_hash_apply_with_arguments(HashTable *ht, apply_func_args_t apply_func, int num_args, ...)\\n2146 {\\n21..."
       }
     ],
-    "find_references": [
-      {
-        "tool_name": "find_references",
-        "args": [
-          "zend_hash_reverse_apply",
-          "php-src/Zend/zend_hash.c",
-          false
-        ],
-        "kwargs": {},
-        "timestamp": 446354.783844426,
-        "success": true,
-        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: php-src/Zend/zend_hash.h, php-src/Zend/zend_lazy_objects.c, php-src/Zend/zend_execute_API.c, extra=None))"
-      }
-    ],
-    "apply_patch": [
-      {
-        "tool_name": "apply_patch",
-        "args": [
-          "Zend/zend_hash.c",
-          "@@ -2227,15 +2227,23 @@\n \t\tBucket *p;\n \n \t\twhile (idx > 0) {\n+\t\t\tuint32_t nNumUsed = ht->nNumUsed;\n+\n+\t\t\tif (idx > nNumUsed) {\n+\t\t\t\tidx = nNumUsed;\n+\t\t\t}\n+\t\t\tif (idx == 0) {\n+\t\t\t\tbreak;\n+\t\t\t}\n \t\t\tidx--;\n \t\t\tp = ht->arData + idx;\n \t\t\tif (UNEXPECTED(Z_TYPE(p->val) == IS_UNDEF)) continue;\n \n \t\t\tresult = apply_func(&p->val);\n \n-\t\t\tif (result & ZEND_HASH_APPLY_REMOVE) {\n+\t\t\tif ((result & ZEND_HASH_APPLY_REMOVE) && idx < ht->nNumUsed) {\n \t\t\t\tHT_ASSERT_RC1(ht);\n-\t\t\t\t_zend_hash_del_el(ht, HT_IDX_TO_HASH(idx), p);\n+\t\t\t\tp = ht->arData + idx;\n+\t\t\t\tif (EXPECTED(Z_TYPE(p->val) != IS_UNDEF)) {\n+\t\t\t\t\t_zend_hash_del_el(ht, HT_IDX_TO_HASH(idx), p);\n+\t\t\t\t}\n \t\t\t}\n \t\t\tif (result & ZEND_HASH_APPLY_STOP) {\n \t\t\t\tbreak;\n"
-        ],
-        "kwargs": {},
-        "timestamp": 446366.020945926,
-        "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'Zend/zend_hash.c' does not exist in directory tree. Similar paths: php-src/Zend/zend_hash.c, extra={'note': 'this patch was not applied and does no..."
-      }
-    ],
+    "find_references": [],
+    "apply_patch": [],
     "test_patch": [],
     "undo_last_patch": [],
     "list_current_edits": []

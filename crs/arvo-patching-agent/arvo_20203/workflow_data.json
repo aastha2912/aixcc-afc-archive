@@ -1,5 +1,5 @@
 {
-  "vuln_id": 223,
+  "vuln_id": 265,
   "crash_result": {
     "output": "==659==ERROR: AddressSanitizer: global-buffer-overflow on address 0x000002bc8d38 at pc 0x00000132a125 bp 0x7ffdae6193d0 sp 0x7ffdae6193c8\nREAD of size 1 at 0x000002bc8d38 thread T0\nSCARINESS: 12 (1-byte-read-global-buffer-overflow)\n    #0 0x132a124 in Visit /src/arrow/cpp/src/arrow/array/validate.cc:356:28\n    #1 0x132a124 in arrow::Status arrow::VisitArrayInline<arrow::internal::(anonymous namespace)::ValidateArrayDataVisitor>(arrow::Array const&, arrow::internal::(anonymous namespace)::Validat",
     "stack": "#0 0x132a124 in Visit arrow/cpp/src/arrow/array/validate.cc:356:28\n#1 0x132a124 in arrow::Status arrow::VisitArrayInline<arrow::internal::(anonymous namespace)::ValidateArrayDataVisitor>(arrow::Array const&, arrow::internal::(anonymous namespace)::ValidateArrayDataVisitor*) arrow/cpp/src/arrow/visitor_inline.h:110:5\n#2 0x1337a30 in ValidateArrayData arrow/cpp/src/arrow/array/validate.cc:465:10\n#3 0x1337a30 in arrow::Status arrow::internal::(anonymous namespace)::ValidateArrayDataVisitor::Validat",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "Visit",
     "file": "arrow/cpp/src/arrow/array/validate.cc",
-    "description": "In ValidateArrayDataVisitor::Visit(const UnionArray&), union type codes are validated with `if (code < 0 || child_ids[code] == kInvalidChildId)`, but there is no upper-bound check that `code < child_ids.size()` (or <=255 constraints before indexing child_ids). A crafted UnionArray can supply a positive out-of-range type code, causing out-of-bounds read of `child_ids[code]` and ASan global-buffer-overflow at validate.cc:356.",
-    "conditions": "Fuzzed IPC stream is decoded into a RecordBatch containing a (nested) UnionArray (seen during ValidateListArray recursion). During RecordBatch::ValidateFull -> internal::ValidateArrayData, Visit(UnionArray) iterates non-null slots and reads `type_codes[i]`. If an element has a positive type code not present in the union type\u2019s child_ids vector, the validator indexes child_ids with that unchecked code and crashes before returning an Invalid status."
+    "description": "In ValidateArrayDataVisitor::Visit(const UnionArray&), union type codes are validated with `if (code < 0 || child_ids[code] == kInvalidChildId)`, but there is no upper-bound check that `code < child_ids.size()` (or <=255). A malformed IPC stream can produce an out-of-range positive type code, causing `child_ids[code]` to read past bounds (ASan reports global-buffer-overflow). Crash is observed at validate.cc:356 during full record batch validation.",
+    "conditions": "Fuzzer input is parsed by ipc::internal::FuzzIpcStream into a RecordBatch, then RecordBatch::ValidateFull() calls internal::ValidateArrayData recursively. The PoV must construct a UnionArray (here reachable through nested list validation) with non-null entries and a raw type_codes buffer containing a positive code not present in the union type\u2019s child_ids mapping. During Visit(UnionArray), dereferencing child_ids[code] without bounds checking triggers OOB read."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.028644000000000003,
+      "total_cost": 0.0200732,
       "total_input_tokens": 13616,
-      "total_output_tokens": 344,
-      "total_cached_tokens": 0,
+      "total_output_tokens": 351,
+      "total_cached_tokens": 5504,
       "llm_calls": [
         {
-          "timestamp": 1773533129.5920885,
+          "timestamp": 1773715006.2818294,
           "model": "gpt-5.3-codex",
-          "cost": 0.00917,
+          "cost": 0.0073555999999999995,
           "input_tokens": 4360,
           "output_tokens": 110,
           "total_tokens": 4470,
-          "cached_tokens": 0,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_PD4J2g3dSSo0sUmS1G2arrU3"
+              "tool_call_id": "call_ShNZpRWV116hOIdfajF2t6Tg"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_N2TPfNMUJTDpUYcOZleNzTDS"
+              "tool_call_id": "call_nG6Fw9jpLBYaebXzlL0l1nEB"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_GJbKU5e0UmZtkt6b3nnabGUr"
+              "tool_call_id": "call_mFbCP50zqMA4tte87aD8W3Hw"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773533140.221279,
+          "timestamp": 1773715013.1624923,
           "model": "gpt-5.3-codex",
-          "cost": 0.019474,
+          "cost": 0.012717599999999999,
           "input_tokens": 9256,
-          "output_tokens": 234,
-          "total_tokens": 9490,
-          "cached_tokens": 0,
+          "output_tokens": 241,
+          "total_tokens": 9497,
+          "cached_tokens": 4352,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_NhKZaGfsRKF1s7XeVe0azg8m"
+              "tool_call_id": "call_CHepnTFYbhd8UvJbxlVQn5va"
             }
           ],
           "finish_reason": "tool_calls"
@@ -89,18 +89,43 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.0236768,
-      "total_input_tokens": 27072,
-      "total_output_tokens": 496,
-      "total_cached_tokens": 19456,
+      "total_cost": 0.0319249,
+      "total_input_tokens": 24702,
+      "total_output_tokens": 431,
+      "total_cached_tokens": 11008,
       "llm_calls": [
         {
-          "timestamp": 1773533142.1657786,
+          "timestamp": 1773715014.9999807,
           "model": "gpt-5.3-codex",
-          "cost": 0.00926975,
-          "input_tokens": 4593,
+          "cost": 0.0066052,
+          "input_tokens": 4600,
+          "output_tokens": 84,
+          "total_tokens": 4684,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Xd78KskA9ObbSVHLarMKajvY"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_PfW61fKVr7GUx2TGtNAFGPyj"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773715197.3006747,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0096285,
+          "input_tokens": 4798,
           "output_tokens": 88,
-          "total_tokens": 4681,
+          "total_tokens": 4886,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -110,22 +135,43 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_q7EQbAlW3dMOJmp2QGGebKQJ"
+              "tool_call_id": "call_t0t60zboaA8ixl2HWbWlnR9h"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_r63heB2y0fcXotkiXH1BmXKY"
+              "tool_call_id": "call_DyjJVgOCnvRDm6wOADsFkgTY"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773533299.0611427,
+          "timestamp": 1773715203.3893611,
           "model": "gpt-5.3-codex",
-          "cost": 0.0077783999999999996,
-          "input_tokens": 7272,
+          "cost": 0.00805805,
+          "input_tokens": 7547,
           "output_tokens": 165,
-          "total_tokens": 7437,
+          "total_tokens": 7712,
+          "cached_tokens": 4736,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_rRtHhra32cwg1uOCKgAGLKoJ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773715205.7406123,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00763315,
+          "input_tokens": 7757,
+          "output_tokens": 94,
+          "total_tokens": 7851,
           "cached_tokens": 4608,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -134,50 +180,8 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_VmE3OHR4qTqNrbx1lYDB6FU4"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773533301.4363742,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0038843000000000003,
-          "input_tokens": 7482,
-          "output_tokens": 163,
-          "total_tokens": 7645,
-          "cached_tokens": 7296,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_Xh9zgBk3Tq6kjsT161weFO5G"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773533303.4408433,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00274435,
-          "input_tokens": 7725,
-          "output_tokens": 80,
-          "total_tokens": 7805,
-          "cached_tokens": 7552,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
               "tool_name": "terminate",
-              "tool_call_id": "call_EFDyG4iqzsbecs5Thi2ha4yi"
+              "tool_call_id": "call_X6RG9R12N72jIqEdiywREKoG"
             }
           ],
           "finish_reason": "tool_calls"
@@ -185,9 +189,9 @@
       ]
     },
     "total": {
-      "total_cost": 0.0523208,
-      "total_input_tokens": 40688,
-      "total_output_tokens": 840,
+      "total_cost": 0.0519981,
+      "total_input_tokens": 38318,
+      "total_output_tokens": 782,
       "total_llm_calls": 6
     }
   },
@@ -203,16 +207,27 @@
         "args": [
           "Visit",
           "arrow/cpp/src/arrow/array/validate.cc",
-          340,
+          348,
           true
         ],
         "kwargs": {},
-        "timestamp": 565585.313374807,
+        "timestamp": 747489.544059896,
         "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n 33   Status Visit(const NullArray& array) {\n 39   Status Visit(const PrimitiveArray& array) {\n 52   Status ..."
+        "result_summary": "Ok({'contents': '348   Status Visit(const UnionArray& array) {\\n349     const auto& child_ids = array.union_type()->child_ids();\\n350 \\n351     const int8_t* type_codes = array.raw_type_codes();\\n352 ..."
       }
     ],
     "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "cpp/src/arrow/array/validate.cc",
+          356
+        ],
+        "kwargs": {},
+        "timestamp": 747483.564594491,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'cpp/src/arrow/array/validate.cc' does not exist in directory tree. Similar paths: arrow/cpp/src/arrow/array/validate.cc, extra=None))"
+      },
       {
         "tool_name": "read_source",
         "args": [
@@ -220,25 +235,26 @@
           356
         ],
         "kwargs": {},
-        "timestamp": 565430.892819506,
+        "timestamp": 747485.876676496,
         "success": true,
         "result_summary": "Ok({'contents': '257 Status ValidateArray(const Array& array) {\\n258   // First check the array layout conforms to the spec\\n259   const DataType& type = *array.type();\\n260   const auto layout = type..."
       }
     ],
-    "find_references": [],
-    "apply_patch": [
+    "find_references": [
       {
-        "tool_name": "apply_patch",
+        "tool_name": "find_references",
         "args": [
+          "kInvalidChildId",
           "cpp/src/arrow/array/validate.cc",
-          "@@ -354,7 +354,8 @@ struct ValidateArrayDataVisitor {\n         continue;\n       }\n       const int32_t code = type_codes[i];\n-      if (code < 0 || child_ids[code] == UnionType::kInvalidChildId) {\n+      if (code < 0 || code >= static_cast<int32_t>(child_ids.size()) ||\n+          child_ids[code] == UnionType::kInvalidChildId) {\n         return Status::Invalid(\"Union value at position \", i, \" has invalid type id \",\n                                code);\n       }\n"
+          false
         ],
         "kwargs": {},
-        "timestamp": 565590.017392046,
+        "timestamp": 747483.569255998,
         "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'cpp/src/arrow/array/validate.cc' does not exist in directory tree. Similar paths: arrow/cpp/src/arrow/array/validate.cc, extra={'note': 'this patch..."
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: arrow/cpp/src/arrow/array/validate.cc, arrow/cpp/src/arrow/type.cc, arrow/cpp/src/arrow/type.h, extra=None))"
       }
     ],
+    "apply_patch": [],
     "test_patch": [],
     "undo_last_patch": [],
     "list_current_edits": []

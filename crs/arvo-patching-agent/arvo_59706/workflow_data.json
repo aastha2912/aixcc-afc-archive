@@ -1,5 +1,5 @@
 {
-  "vuln_id": 180,
+  "vuln_id": 261,
   "crash_result": {
     "output": "==9301==ERROR: AddressSanitizer: global-buffer-overflow on address 0x000000779560 at pc 0x00000049efc1 bp 0x7ffd78bc2740 sp 0x7ffd78bc1f10\nREAD of size 3467 at 0x000000779560 thread T0\nSCARINESS: 26 (multi-byte-read-global-buffer-overflow)\n    #0 0x49efc0 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n    #1 0x58ba42 in xmlDictAddString /src/libxml2/dict.c:266:5\n    #2 0x58ba42 in xmlDictLookup /src/libxml2/dict.c:935:11\n    #3 0x5fd4df in xmlPar",
     "stack": "#0 0x49efc0 in __asan_memcpy llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n#1 0x58ba42 in xmlDictAddString libxml2/dict.c:266:5\n#2 0x58ba42 in xmlDictLookup libxml2/dict.c:935:11\n#3 0x5fd4df in xmlParseNCNameComplex libxml2/parser.c:3211:12\n#4 0x5fd4df in xmlParseNCName libxml2/parser.c:3275:12\n#5 0x5fc29b in xmlParseQName libxml2/parser.c:8512:6\n#6 0x5e51cc in xmlParseStartTag2 libxml2/parser.c:8989:17\n#7 0x5e51cc in xmlParseElementStart libxml2/parser.c:9735:16\n#8 ",
@@ -24,54 +24,91 @@
   "analyzed_vuln": {
     "function": "xmlParseNCNameComplex",
     "file": "libxml2/parser.c",
-    "description": "Global-buffer-overflow is caused by xmlParseNCNameComplex computing a name length (`len`) by repeatedly calling CUR_CHAR/NEXTL without ensuring enough buffered input/termination, then passing `(BASE_PTR + startPosition, len)` to xmlDictLookup. xmlDictLookup/xmlDictAddString trust `len` and memcpy that many bytes, so an over-read occurs from parser input/global tables (seen as read past `xmlIsPubidChar_tab`). Crash manifests in xmlDictAddString memcpy, but the root cause is unsafe length derivation in xmlParseNCNameComplex.",
-    "conditions": "In the xslt harness, attacker-controlled stylesheet data triggers xsl:import loading and XML parsing of imported content. A malformed/non-UTF sequence in a start-tag/QName path forces xmlParseQName -> xmlParseNCName -> xmlParseNCNameComplex. The parser derives an excessive `len` for the NCName and interns it via xmlDictLookup, which copies `len` bytes from an invalid source span, producing ASan global-buffer-overflow during memcpy."
+    "description": "xmlParseNCNameComplex computes a name length by scanning with CUR_CHAR/NEXTL but then passes (BASE_PTR + startPosition, len) directly to xmlDictLookup without ensuring that len bytes are actually available in the current input buffer. With malformed imported stylesheet data (including invalid multibyte bytes), this can produce an overlarge len relative to the real remaining buffer, so xmlDictAddString memcpy reads past the source buffer, causing the ASan global-buffer-overflow (read past xmlIsPubidChar_tab). Crash manifests in xmlDictAddString, but root cause is missing bounds validation in xmlParseNCNameComplex before dictionary lookup/copy.",
+    "conditions": "In the xslt harness, the top stylesheet contains xsl:import href=\"article.xsl\", so libxslt loads attacker-controlled secondary content via xsltParseStylesheetImport -> xsltDocDefaultLoaderFunc -> xmlParseDocument. The imported document must drive parser.c down the complex NCName path (non-ASCII/invalid bytes) and create a start-tag/name parse where computed len exceeds actually available bytes in the parser input window; then xmlDictLookup/xmlDictAddString copies len bytes from that pointer and over-reads into adjacent global data, triggering the reported global-buffer-overflow."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 2,
-      "total_cost": 0.022932699999999997,
-      "total_input_tokens": 15314,
-      "total_output_tokens": 343,
-      "total_cached_tokens": 5504,
+      "total_llm_calls": 3,
+      "total_cost": 0.030835,
+      "total_input_tokens": 22460,
+      "total_output_tokens": 547,
+      "total_cached_tokens": 10240,
       "llm_calls": [
         {
-          "timestamp": 1773516280.5476809,
+          "timestamp": 1773714129.6548648,
           "model": "gpt-5.3-codex",
-          "cost": 0.007332849999999999,
+          "cost": 0.00783685,
           "input_tokens": 4443,
-          "output_tokens": 98,
-          "total_tokens": 4541,
+          "output_tokens": 134,
+          "total_tokens": 4577,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_0guTRuRxFsBqmy1aMjS1cJUo"
+              "tool_call_id": "call_xqfzpjmKr4sGIHvbZe6exDEc"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_LlQV0r8OZAWMmaWm0rJbw1kL"
+              "tool_call_id": "call_oe7B9AJjyr0yGNlcoJAvtoeJ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_S1YwaG2CZKzRW9S99In1PQa9"
+              "tool_call_id": "call_ewX50d2ASqiLXn7VCmaBb5Ip"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_7FZO3YtLvHJlctxR38z4M6li"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516287.4240026,
+          "timestamp": 1773714134.3916073,
           "model": "gpt-5.3-codex",
-          "cost": 0.015599849999999998,
-          "input_tokens": 10871,
-          "output_tokens": 245,
-          "total_tokens": 11116,
+          "cost": 0.00324135,
+          "input_tokens": 4761,
+          "output_tokens": 126,
+          "total_tokens": 4887,
           "cached_tokens": 4352,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_OfNSjVUQh6rX7CwnHfudxOhI"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_rqfWAv064aMahX9xiUgIxB1X"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_pBBHbPhYPTnCsU0hdoo6NLFF"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_NUWreLmLJLWBoUyp1WyJ5Rae"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773714141.6625953,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0197568,
+          "input_tokens": 13256,
+          "output_tokens": 287,
+          "total_tokens": 13543,
+          "cached_tokens": 4736,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +117,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_KEJ2wwD0kVqIHQHom7ot7wCP"
+              "tool_call_id": "call_xJn8fmD0Eqr7oMaTlVpas5pd"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,48 +125,44 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.027929649999999997,
-      "total_input_tokens": 40011,
-      "total_output_tokens": 320,
-      "total_cached_tokens": 29568,
+      "total_llm_calls": 5,
+      "total_cost": 0.0214368,
+      "total_input_tokens": 33736,
+      "total_output_tokens": 439,
+      "total_cached_tokens": 27776,
       "llm_calls": [
         {
-          "timestamp": 1773516289.4795597,
+          "timestamp": 1773714143.4601514,
           "model": "gpt-5.3-codex",
-          "cost": 0.0065422,
-          "input_tokens": 4476,
-          "output_tokens": 95,
-          "total_tokens": 4571,
+          "cost": 0.0064197,
+          "input_tokens": 4518,
+          "output_tokens": 81,
+          "total_tokens": 4599,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 2,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_wvSHdMBCTcnjBG0vbgmGLKI8"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_tq51pVT4iVXJNFcEpVu5ArxF"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_i2FkKf4QbvXUwOIWswwv11Tv"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_CXDLjgU8Lh0U8SI7OZSFVKFc"
+              "tool_call_id": "call_F8fCedqkRa9iOySV7pXRcpFb"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516292.4390924,
+          "timestamp": 1773714148.908251,
           "model": "gpt-5.3-codex",
-          "cost": 0.015921499999999998,
-          "input_tokens": 11626,
-          "output_tokens": 188,
-          "total_tokens": 11814,
+          "cost": 0.0055825,
+          "input_tokens": 7014,
+          "output_tokens": 26,
+          "total_tokens": 7040,
           "cached_tokens": 4480,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -139,19 +172,40 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_iy6HGCWSzFJOuTisfJyiK9Om"
+              "tool_call_id": "call_xJstv6SGFCBfiNBul2LpmDcb"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516293.8483295,
+          "timestamp": 1773714152.655915,
           "model": "gpt-5.3-codex",
-          "cost": 0.0026789,
-          "input_tokens": 11902,
+          "cost": 0.0056878499999999995,
+          "input_tokens": 7111,
+          "output_tokens": 295,
+          "total_tokens": 7406,
+          "cached_tokens": 6912,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_Ki5RYsW5divLS2tk2cnm48JU"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773714155.4806921,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0018193,
+          "input_tokens": 7494,
           "output_tokens": 14,
-          "total_tokens": 11916,
-          "cached_tokens": 11648,
+          "total_tokens": 7508,
+          "cached_tokens": 7296,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +214,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_ebNCXmiDhQYObGioHqh0pRiK"
+              "tool_call_id": "call_vhC4jjH9rgqaANgLDrdTkQw6"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516330.0096056,
+          "timestamp": 1773714192.4003725,
           "model": "gpt-5.3-codex",
-          "cost": 0.00278705,
-          "input_tokens": 12007,
+          "cost": 0.00192745,
+          "input_tokens": 7599,
           "output_tokens": 23,
-          "total_tokens": 12030,
-          "cached_tokens": 11776,
+          "total_tokens": 7622,
+          "cached_tokens": 7424,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,7 +235,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_XnSLPQghJY32TmcyrQRGjy41"
+              "tool_call_id": "call_AmenLgMOSjncur3j5h4mbJMH"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,15 +243,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.050862349999999994,
-      "total_input_tokens": 55325,
-      "total_output_tokens": 663,
-      "total_llm_calls": 6
+      "total_cost": 0.0522718,
+      "total_input_tokens": 56196,
+      "total_output_tokens": 986,
+      "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "",
+    "patch": "--- a/libxml2/parser.c\n+++ b/libxml2/parser.c\n@@ -3208,6 +3208,15 @@\n         xmlFatalErr(ctxt, XML_ERR_NAME_TOO_LONG, \"NCName\");\n         return(NULL);\n     }\n+\n+    /*\n+     * Ensure the computed byte length doesn't exceed bytes available in the\n+     * current input buffer before interning/copying to the dictionary.\n+     */\n+    if ((size_t) len > (size_t) (ctxt->input->end - (BASE_PTR + startPosition))) {\n+        xmlFatalErr(ctxt, XML_ERR_NAME_TOO_LONG, \"NCName\");\n+        return(NULL);\n+    }\n     return(xmlDictLookup(ctxt->dict, (BASE_PTR + startPosition), len));\n }\n \n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -211,30 +265,22 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
-    "read_source": [
+    "read_definition": [
       {
-        "tool_name": "read_source",
+        "tool_name": "read_definition",
         "args": [
-          "libxml2/dict.c",
-          935
-        ],
-        "kwargs": {},
-        "timestamp": 548578.109877159,
-        "success": true,
-        "result_summary": "Ok({'contents': ' 836  */\\n 837 const xmlChar *\\n 838 xmlDictLookup(xmlDictPtr dict, const xmlChar *name, int len) {\\n 839     unsigned long key, okey, nbi = 0;\\n 840     xmlDictEntryPtr entry;\\n 841 ..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
+          "xmlParseNCNameComplex",
           "libxml2/parser.c",
-          3275
+          0,
+          true
         ],
         "kwargs": {},
-        "timestamp": 548578.11196711,
+        "timestamp": 746435.692076651,
         "success": true,
-        "result_summary": "Ok({'contents': '3176 xmlParseNCNameComplex(xmlParserCtxtPtr ctxt) {\\n3177     int len = 0, l;\\n3178     int c;\\n3179     int maxLength = (ctxt->options & XML_PARSE_HUGE) ?\\n3180                     X..."
-      },
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n3176 xmlParseNCNameComplex(xmlParserCtxtPtr ctxt) {, extra=None))"
+      }
+    ],
+    "read_source": [
       {
         "tool_name": "read_source",
         "args": [
@@ -242,7 +288,7 @@
           3211
         ],
         "kwargs": {},
-        "timestamp": 548578.113888605,
+        "timestamp": 746432.037273495,
         "success": true,
         "result_summary": "Ok({'contents': '3112  * DEPRECATED: Internal function, don\\'t use.\\n3113  *\\n3114  * parse an XML name.\\n3115  *\\n3116  * [4] NameChar ::= Letter | Digit | \\'.\\' | \\'-\\' | \\'_\\' | \\':\\' |\\n3117  *   ..."
       }
@@ -253,10 +299,21 @@
         "tool_name": "apply_patch",
         "args": [
           "libxml2/parser.c",
-          "@@ -3198,8 +3198,12 @@\n     while ((c != ' ') && (c != '>') && (c != '/') && /* test bigname.xml */\n \t   (xmlIsNameChar(ctxt, c) && (c != ':'))) {\n-        if (len <= INT_MAX - l)\n-\t    len += l;\n+\tif ((l <= 0) || (len > INT_MAX - l)) {\n+\t    xmlFatalErr(ctxt, XML_ERR_NAME_TOO_LONG, \"NCName\");\n+\t    return(NULL);\n+\t}\n+\n+\tlen += l;\n \tNEXTL(l);\n \tc = CUR_CHAR(l);\n     }\n"
+          ""
         ],
         "kwargs": {},
-        "timestamp": 548581.085661445,
+        "timestamp": 746437.482872587,
+        "success": true,
+        "result_summary": "Err(CRSError(Invalid patch format. Make sure it includes the hunk headers with approximate line numbers, i.e. `@@ -l,s +l,s @@`, extra={'note': 'this patch was not applied and does not need to be undo..."
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "libxml2/parser.c",
+          "@@ -3176,7 +3176,7 @@\n static const xmlChar *\n xmlParseNCNameComplex(xmlParserCtxtPtr ctxt) {\n-    int len = 0, l;\n+    int len = 0, l;\n     int c;\n     int maxLength = (ctxt->options & XML_PARSE_HUGE) ?\n                     XML_MAX_TEXT_LENGTH :\n@@ -3207,5 +3207,13 @@ xmlParseNCNameComplex(xmlParserCtxtPtr ctxt) {\n         xmlFatalErr(ctxt, XML_ERR_NAME_TOO_LONG, \"NCName\");\n         return(NULL);\n     }\n+\n+    /*\n+     * Ensure the computed byte length doesn't exceed bytes available in the\n+     * current input buffer before interning/copying to the dictionary.\n+     */\n+    if ((size_t) len > (size_t) (ctxt->input->end - (BASE_PTR + startPosition))) {\n+        xmlFatalErr(ctxt, XML_ERR_NAME_TOO_LONG, \"NCName\");\n+        return(NULL);\n+    }\n     return(xmlDictLookup(ctxt->dict, (BASE_PTR + startPosition), len));\n }"
+        ],
+        "kwargs": {},
+        "timestamp": 746441.332304296,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -266,7 +323,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 548617.489998566,
+        "timestamp": 746479.866746928,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

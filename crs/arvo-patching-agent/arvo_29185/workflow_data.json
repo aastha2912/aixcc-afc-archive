@@ -1,5 +1,5 @@
 {
-  "vuln_id": 75,
+  "vuln_id": 252,
   "crash_result": {
     "output": "==44482==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x6020000006f1 at pc 0x00000083544c bp 0x7ffe24cc0a90 sp 0x7ffe24cc0a88\nWRITE of size 1 at 0x6020000006f1 thread T0\nSCARINESS: 31 (1-byte-write-heap-buffer-overflow)\n    #0 0x83544b in sp_tohex /src/wolfssl-sp-math-all/wolfcrypt/src/sp_int.c:12515:26\n    #1 0x835b30 in sp_toradix /src/wolfssl-sp-math-all/wolfcrypt/src/sp_int.c:12615:15\n    #2 0x712307 in cryptofuzz::module::wolfCrypt_bignum::Bignum::baseConversion() const /src/cry",
     "stack": "#0 0x83544b in sp_tohex wolfssl-sp-math-all/wolfcrypt/src/sp_int.c:12515:26\n#1 0x835b30 in sp_toradix wolfssl-sp-math-all/wolfcrypt/src/sp_int.c:12615:15\n#2 0x712307 in cryptofuzz::module::wolfCrypt_bignum::Bignum::baseConversion() const cryptofuzz-sp-math-all/modules/wolfcrypt/bn_helper.cpp:29:9\n#3 0x71338b in cryptofuzz::module::wolfCrypt_bignum::Bignum::GetPtr() const cryptofuzz-sp-math-all/modules/wolfcrypt/bn_helper.cpp:156:13\n#4 0x70e868 in cryptofuzz::module::wolfCrypt_bignum::Mod::Run(fu",
@@ -24,24 +24,83 @@
   "analyzed_vuln": {
     "function": "Bignum::baseConversion",
     "file": "cryptofuzz-sp-math-all/modules/wolfcrypt/bn_helper.cpp",
-    "description": "Heap buffer overflow is caused by allocating the conversion buffer with mp_radix_size() but calling mp_toradix() with an invalid radix value (fuzzer-controlled uint8_t). In the SP math build, unsupported radix values are effectively treated as hex conversion in sp_toradix/sp_tohex, which can write more bytes than the size computed for that invalid radix (observed 1-byte allocation, then 1-byte OOB write at sp_tohex). Crash occurs in sp_tohex at wolfssl-sp-math-all/wolfcrypt/src/sp_int.c:12515.",
-    "conditions": "Data flow: fuzz input -> Bignum::GetPtr() optionally calls baseConversion() -> baseConversion() picks arbitrary base from datasource -> calls mp_radix_size(mp, base, &size), allocates exactly size bytes, then calls mp_toradix(mp, str, base). Trigger requires convert=true and a base value that leads to under-sized output buffer (e.g., invalid radix producing tiny size) while mp_toradix still emits hex digits, causing write past allocation."
+    "description": "Heap buffer overflow is caused by allocating the radix-conversion output buffer with a size computed for an arbitrary fuzzed base, then calling mp_toradix with that same base even when wolfSSL SP math only supports radix 10/16. In this PoV, mp_radix_size returns a tiny size (1 byte allocated), but mp_toradix routes to sp_tohex and writes at least one hex digit plus terminator, overflowing the heap buffer (crash observed in sp_tohex at wolfcrypt/src/sp_int.c:12515).",
+    "conditions": "Data flow: LLVMFuzzerTestOneInput -> OpBignumCalc -> Mod::Run -> Bignum::GetPtr -> Bignum::baseConversion. The input must set the optional convert flag true and choose an unsupported/invalid base value such that mp_radix_size and mp_toradix behavior diverge under SP math-all build. baseConversion trusts mp_radix_size(size) and allocates exactly that many bytes, then calls mp_toradix without validating the base/result consistency, leading to out-of-bounds write in sp_tohex/sp_toradix."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 5,
-      "total_cost": 0.03355275,
-      "total_input_tokens": 44125,
-      "total_output_tokens": 481,
-      "total_cached_tokens": 32000,
+      "total_llm_calls": 2,
+      "total_cost": 0.0247975,
+      "total_input_tokens": 16162,
+      "total_output_tokens": 399,
+      "total_cached_tokens": 5760,
       "llm_calls": [
         {
-          "timestamp": 1773382786.042989,
+          "timestamp": 1773629021.1377923,
           "model": "gpt-5.3-codex",
-          "cost": 0.0093835,
+          "cost": 0.0080311,
           "input_tokens": 4666,
-          "output_tokens": 87,
-          "total_tokens": 4753,
+          "output_tokens": 120,
+          "total_tokens": 4786,
+          "cached_tokens": 1152,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_3ILK9PSbAXJmb3wn9yKXDS8Y"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_PXRqepli6t3EYm5LGHo8bv9j"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_rqehTHEpOHhDeedFYapFwD9A"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773629305.1379569,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0167664,
+          "input_tokens": 11496,
+          "output_tokens": 279,
+          "total_tokens": 11775,
+          "cached_tokens": 4608,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_KbDgvvTcGijLB54CMPvcBoXC"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 5,
+      "total_cost": 0.0322252,
+      "total_input_tokens": 36528,
+      "total_output_tokens": 803,
+      "total_cached_tokens": 27264,
+      "llm_calls": [
+        {
+          "timestamp": 1773629307.1673896,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00882,
+          "input_tokens": 4416,
+          "output_tokens": 78,
+          "total_tokens": 4494,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,140 +110,22 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_CpmJIiz8Pxsik93JPlVBZ3AI"
+              "tool_call_id": "call_xTtU3LbujcCYS0zHZnNlh8s4"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_hpvtyWaJLfaA7rTlx77FHmvc"
+              "tool_call_id": "call_t2Nrdr3BhSYTKZgislqBTnN3"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773383239.865059,
+          "timestamp": 1773629316.2826166,
           "model": "gpt-5.3-codex",
-          "cost": 0.009337650000000001,
-          "input_tokens": 9099,
-          "output_tokens": 48,
-          "total_tokens": 9147,
-          "cached_tokens": 4608,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_u0cMTYwaDA068Y8R6pxdf2tM"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773383273.370572,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0025847500000000002,
-          "input_tokens": 9189,
-          "output_tokens": 44,
-          "total_tokens": 9233,
-          "cached_tokens": 8960,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_jc6mSnXUbG6btChzbZJIyFmf"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773383296.3506627,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0026509000000000003,
-          "input_tokens": 9398,
-          "output_tokens": 37,
-          "total_tokens": 9435,
-          "cached_tokens": 9088,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_n3DCq4zzTP1fcZxBDf1vvNVZ"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773383301.3099852,
-          "model": "gpt-5.3-codex",
-          "cost": 0.009595949999999999,
-          "input_tokens": 11773,
-          "output_tokens": 265,
-          "total_tokens": 12038,
-          "cached_tokens": 9344,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "terminate",
-              "tool_call_id": "call_izvSnGgDXjR9k0nQgRpIrWsT"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        }
-      ]
-    },
-    "patching": {
-      "total_llm_calls": 6,
-      "total_cost": 0.040215,
-      "total_input_tokens": 47500,
-      "total_output_tokens": 1399,
-      "total_cached_tokens": 39680,
-      "llm_calls": [
-        {
-          "timestamp": 1773383303.7393885,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00626045,
-          "input_tokens": 4403,
-          "output_tokens": 84,
-          "total_tokens": 4487,
-          "cached_tokens": 1664,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_Q4FsD5uSQYmWM93juZ5Yf6Ps"
-            },
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_23wD9d4sqDFEQIfoomd1cWKa"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773383312.5823784,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00254135,
-          "input_tokens": 4665,
+          "cost": 0.0025886,
+          "input_tokens": 4692,
           "output_tokens": 88,
-          "total_tokens": 4753,
+          "total_tokens": 4780,
           "cached_tokens": 4352,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -194,22 +135,22 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Ui6AqdoQ6wuVPEnQMXfnPNzR"
+              "tool_call_id": "call_UGC3hgVOb4sswTxp7SubEmmu"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_6tkqOXc5gN7SKc9fXJzXveIP"
+              "tool_call_id": "call_6wRFxWW0TlWpyxBsYy1UiSGd"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773383319.7143974,
+          "timestamp": 1773629322.112615,
           "model": "gpt-5.3-codex",
-          "cost": 0.01637615,
-          "input_tokens": 8729,
-          "output_tokens": 597,
-          "total_tokens": 9326,
+          "cost": 0.0123634,
+          "input_tokens": 8756,
+          "output_tokens": 307,
+          "total_tokens": 9063,
           "cached_tokens": 4608,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -219,19 +160,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_fBIU2tH9Hw0fttpxH5j6NmFj"
+              "tool_call_id": "call_2Ia7nprDtKOidmtIc2Zp8vUD"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773383334.1575027,
+          "timestamp": 1773629326.708101,
           "model": "gpt-5.3-codex",
-          "cost": 0.010257800000000001,
-          "input_tokens": 9412,
-          "output_tokens": 593,
-          "total_tokens": 10005,
-          "cached_tokens": 9216,
+          "cost": 0.006181,
+          "input_tokens": 9140,
+          "output_tokens": 307,
+          "total_tokens": 9447,
+          "cached_tokens": 8960,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -240,40 +181,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_PkMmB0ZZEx3EGS6PQgbzRVHz"
+              "tool_call_id": "call_OhVbdAdQgmt9AQOnRJD8xARH"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773383339.365858,
+          "timestamp": 1773629327.7818525,
           "model": "gpt-5.3-codex",
-          "cost": 0.0023355499999999996,
-          "input_tokens": 10093,
-          "output_tokens": 14,
-          "total_tokens": 10107,
-          "cached_tokens": 9856,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "test_patch",
-              "tool_call_id": "call_o5Aynqti1gLEVM9C3IB32l4T"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773383693.7329412,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0024437,
-          "input_tokens": 10198,
+          "cost": 0.0022722,
+          "input_tokens": 9524,
           "output_tokens": 23,
-          "total_tokens": 10221,
-          "cached_tokens": 9984,
+          "total_tokens": 9547,
+          "cached_tokens": 9344,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -282,7 +202,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_LOp5aDpQCJU6qSgC1ysqK2wR"
+              "tool_call_id": "call_eb1NTx4LKvTCnz0BpLDA2JQD"
             }
           ],
           "finish_reason": "tool_calls"
@@ -290,25 +210,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.07376774999999999,
-      "total_input_tokens": 91625,
-      "total_output_tokens": 1880,
-      "total_llm_calls": 11
+      "total_cost": 0.0570227,
+      "total_input_tokens": 52690,
+      "total_output_tokens": 1202,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
-    "success": true,
-    "patch": "",
-    "build_artifacts_count": 3,
-    "tested_povs_count": 1,
-    "last_validation": {
-      "status": "validated_patch_accepted",
-      "message": "Patch validation succeeded",
-      "details": {
-        "ran_tests": false,
-        "tested_povs_count": 1
-      }
-    }
+    "success": false,
+    "failure_reason": "the agent did not produce a result"
   },
   "context_retrieval": {
     "source_questions": [],
@@ -318,21 +228,32 @@
         "tool_name": "read_source",
         "args": [
           "wolfssl/modules/wolfcrypt/bn_helper.cpp",
-          1
+          156
         ],
         "kwargs": {},
-        "timestamp": 415598.867286506,
+        "timestamp": 661602.095608093,
         "success": true,
-        "result_summary": "Err(CRSError(path 'wolfssl/modules/wolfcrypt/bn_helper.cpp' does not exist in directory tree. Similar paths: cryptofuzz-sp-math-all/modules/wolfcrypt/bn_helper.cpp,cryptofuzz-openssl-api/modules/wolfc..."
+        "result_summary": "Err(CRSError(path 'wolfssl/modules/wolfcrypt/bn_helper.cpp' does not exist in directory tree. Similar paths: cryptofuzz-openssl-api/modules/wolfcrypt/bn_helper.cpp,cryptofuzz-sp-math-all/modules/wolfc..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "wolfssl/modules/wolfcrypt/bn_helper.cpp",
+          29
+        ],
+        "kwargs": {},
+        "timestamp": 661602.095996181,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'wolfssl/modules/wolfcrypt/bn_helper.cpp' does not exist in directory tree. Similar paths: cryptofuzz-openssl-api/modules/wolfcrypt/bn_helper.cpp,cryptofuzz-sp-math-all/modules/wolfc..."
       },
       {
         "tool_name": "read_source",
         "args": [
           "cryptofuzz-sp-math-all/modules/wolfcrypt/bn_helper.cpp",
-          30
+          29
         ],
         "kwargs": {},
-        "timestamp": 415601.158461927,
+        "timestamp": 661604.858156817,
         "success": true,
         "result_summary": "Ok({'contents': '  1 #include \"bn_ops.h\"\\n  2 \\n  3 namespace cryptofuzz {\\n  4 namespace module {\\n  5 \\n  6 namespace wolfCrypt_detail {\\n  7 #if defined(CRYPTOFUZZ_WOLFCRYPT_ALLOCATION_FAILURES)\\n ..."
       },
@@ -340,62 +261,40 @@
         "tool_name": "read_source",
         "args": [
           "cryptofuzz-sp-math-all/modules/wolfcrypt/bn_helper.cpp",
-          160
+          156
         ],
         "kwargs": {},
-        "timestamp": 415601.163226661,
+        "timestamp": 661604.860087556,
         "success": true,
-        "result_summary": "Ok({'contents': ' 61     noFree(true)\\n 62 { }\\n 63 \\n 64 Bignum::Bignum(const Bignum& other) :\\n 65     ds(other.ds) {\\n 66     mp = (mp_int*)util::malloc(sizeof(mp_int));\\n 67     if ( mp_init(mp) !..."
+        "result_summary": "Ok({'contents': ' 57         \\n 58 Bignum::Bignum(mp_int* mp, Datasource& ds) :\\n 59     mp(mp),\\n 60     ds(ds),\\n 61     noFree(true)\\n 62 { }\\n 63 \\n 64 Bignum::Bignum(const Bignum& other) :\\n 65  ..."
       }
     ],
-    "find_references": [
-      {
-        "tool_name": "find_references",
-        "args": [
-          "baseConversion",
-          "wolfssl/modules/wolfcrypt/bn_helper.cpp",
-          false
-        ],
-        "kwargs": {},
-        "timestamp": 415596.289967157,
-        "success": true,
-        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: cryptofuzz/modules/wolfcrypt/bn_helper.h, cryptofuzz/modules/wolfcrypt/bn_helper.cpp, cryptofuzz/modules/relic/bn..."
-      }
-    ],
+    "find_references": [],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "cryptofuzz-sp-math-all/modules/wolfcrypt/bn_helper.cpp",
-          "@@ -14,13 +14,21 @@\n void Bignum::baseConversion(void) const {\n #if !defined(WOLFSSL_SP_MATH)\n     uint8_t base = 2;\n+    int baseInt;\n     char* str = nullptr;\n \n     try { base = ds.Get<uint8_t>(); } catch ( fuzzing::datasource::Datasource::OutOfData ) { }\n+\n+    baseInt = (int)base;\n+    if ( baseInt < 2 || baseInt > 64 ) {\n+        baseInt = 16;\n+    }\n \n     {\n         int size;\n-        CF_CHECK_EQ(mp_radix_size(mp, base, &size), MP_OKAY);\n+        CF_CHECK_EQ(mp_radix_size(mp, baseInt, &size), MP_OKAY);\n         CF_ASSERT(size > 0, \"Output of mp_radix_size is 0 or less\");\n \n         str = (char*)util::malloc(size);\n@@ -26,14 +34,14 @@\n \n #if defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL) || !defined(USE_FAST_MATH)\n-        CF_CHECK_EQ(mp_toradix(mp, str, base), MP_OKAY);\n+        CF_CHECK_EQ(mp_toradix(mp, str, baseInt), MP_OKAY);\n #else\n         wolfCrypt_detail::haveAllocFailure = false;\n         CF_ASSERT(\n-                    mp_toradix(mp, str, base) == MP_OKAY ||\n+                    mp_toradix(mp, str, baseInt) == MP_OKAY ||\n                     wolfCrypt_detail::haveAllocFailure ||\n-                    base < 2 ||\n-                    base > 64,\n+                    baseInt < 2 ||\n+                    baseInt > 64,\n                     \"wolfCrypt cannot convert mp to string\");\n #endif\n \n@@ -38,7 +46,7 @@\n \n         wolfCrypt_detail::haveAllocFailure = false;\n-        CF_ASSERT(mp_read_radix(mp, str, base) == MP_OKAY || wolfCrypt_detail::haveAllocFailure, \"wolfCrypt cannot parse the output of mp_toradix\");\n+        CF_ASSERT(mp_read_radix(mp, str, baseInt) == MP_OKAY || wolfCrypt_detail::haveAllocFailure, \"wolfCrypt cannot parse the output of mp_toradix\");\n     }\n \n end:"
+          "@@ -16,13 +16,20 @@ void Bignum::baseConversion(void) const {\n     uint8_t base = 2;\n     char* str = nullptr;\n \n     try { base = ds.Get<uint8_t>(); } catch ( fuzzing::datasource::Datasource::OutOfData ) { }\n+\n+#if defined(WOLFSSL_SP_MATH_ALL)\n+    /* SP math-all radix conversion only supports decimal and hexadecimal. */\n+    if ( base != 10 && base != 16 ) {\n+        base = 16;\n+    }\n+#endif\n \n     {\n         int size;\n         CF_CHECK_EQ(mp_radix_size(mp, base, &size), MP_OKAY);\n         CF_ASSERT(size > 0, \"Output of mp_radix_size is 0 or less\");\n \n-        str = (char*)util::malloc(size);\n+        str = (char*)util::malloc(size + 1);\n \n #if defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL) || !defined(USE_FAST_MATH)\n         CF_CHECK_EQ(mp_toradix(mp, str, base), MP_OKAY);\n #else"
         ],
         "kwargs": {},
-        "timestamp": 415616.060915226,
+        "timestamp": 661610.974036144,
         "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'cryptofuzz-sp-math-all/modules/wolfcrypt/bn_helper.cpp' does not exist in directory tree. Similar paths: cryptofuzz/modules/wolfcrypt/bn_helper.cpp..."
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'wolfcrypt/bn_helper.cpp' does not exist in directory tree. Similar paths: cryptofuzz/modules/wolfcrypt/bn_helper.cpp, extra={'note': 'this patch wa..."
       },
       {
         "tool_name": "apply_patch",
         "args": [
-          "cryptofuzz/modules/wolfcrypt/bn_helper.cpp",
-          "@@ -14,13 +14,21 @@\n void Bignum::baseConversion(void) const {\n #if !defined(WOLFSSL_SP_MATH)\n     uint8_t base = 2;\n+    int baseInt;\n     char* str = nullptr;\n \n     try { base = ds.Get<uint8_t>(); } catch ( fuzzing::datasource::Datasource::OutOfData ) { }\n+\n+    baseInt = (int)base;\n+    if ( baseInt < 2 || baseInt > 64 ) {\n+        baseInt = 16;\n+    }\n \n     {\n         int size;\n-        CF_CHECK_EQ(mp_radix_size(mp, base, &size), MP_OKAY);\n+        CF_CHECK_EQ(mp_radix_size(mp, baseInt, &size), MP_OKAY);\n         CF_ASSERT(size > 0, \"Output of mp_radix_size is 0 or less\");\n \n         str = (char*)util::malloc(size);\n@@ -26,14 +34,14 @@\n \n #if defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL) || !defined(USE_FAST_MATH)\n-        CF_CHECK_EQ(mp_toradix(mp, str, base), MP_OKAY);\n+        CF_CHECK_EQ(mp_toradix(mp, str, baseInt), MP_OKAY);\n #else\n         wolfCrypt_detail::haveAllocFailure = false;\n         CF_ASSERT(\n-                    mp_toradix(mp, str, base) == MP_OKAY ||\n+                    mp_toradix(mp, str, baseInt) == MP_OKAY ||\n                     wolfCrypt_detail::haveAllocFailure ||\n-                    base < 2 ||\n-                    base > 64,\n+                    baseInt < 2 ||\n+                    baseInt > 64,\n                     \"wolfCrypt cannot convert mp to string\");\n #endif\n \n@@ -38,7 +46,7 @@\n \n         wolfCrypt_detail::haveAllocFailure = false;\n-        CF_ASSERT(mp_read_radix(mp, str, base) == MP_OKAY || wolfCrypt_detail::haveAllocFailure, \"wolfCrypt cannot parse the output of mp_toradix\");\n+        CF_ASSERT(mp_read_radix(mp, str, baseInt) == MP_OKAY || wolfCrypt_detail::haveAllocFailure, \"wolfCrypt cannot parse the output of mp_toradix\");\n     }\n \n end:"
+          "cryptofuzz-sp-math-all/modules/wolfcrypt/bn_helper.cpp",
+          "@@ -16,13 +16,20 @@ void Bignum::baseConversion(void) const {\n     uint8_t base = 2;\n     char* str = nullptr;\n \n     try { base = ds.Get<uint8_t>(); } catch ( fuzzing::datasource::Datasource::OutOfData ) { }\n+\n+#if defined(WOLFSSL_SP_MATH_ALL)\n+    /* SP math-all radix conversion only supports decimal and hexadecimal. */\n+    if ( base != 10 && base != 16 ) {\n+        base = 16;\n+    }\n+#endif\n \n     {\n         int size;\n         CF_CHECK_EQ(mp_radix_size(mp, base, &size), MP_OKAY);\n         CF_ASSERT(size > 0, \"Output of mp_radix_size is 0 or less\");\n \n-        str = (char*)util::malloc(size);\n+        str = (char*)util::malloc(size + 1);\n \n #if defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL) || !defined(USE_FAST_MATH)\n         CF_CHECK_EQ(mp_toradix(mp, str, base), MP_OKAY);\n #else"
         ],
         "kwargs": {},
-        "timestamp": 415622.777411542,
+        "timestamp": 661615.291329709,
         "success": true,
-        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'wolfcrypt/bn_helper.cpp' does not exist in directory tree. Similar paths: cryptofuzz/modules/wolfcrypt/bn_helper.cpp, extra={'note': 'this patch wa..."
       }
     ],
-    "test_patch": [
-      {
-        "tool_name": "test_patch",
-        "args": [],
-        "kwargs": {},
-        "timestamp": 415980.889564027,
-        "success": true,
-        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
-      }
-    ],
+    "test_patch": [],
     "undo_last_patch": [],
     "list_current_edits": []
   }

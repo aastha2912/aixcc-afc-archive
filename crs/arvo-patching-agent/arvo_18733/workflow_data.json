@@ -1,5 +1,5 @@
 {
-  "vuln_id": 205,
+  "vuln_id": 264,
   "crash_result": {
     "output": "==8322==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x60b00000020d at pc 0x0000005a275b bp 0x7fffc52da220 sp 0x7fffc52da218\nREAD of size 2 at 0x60b00000020d thread T0\nSCARINESS: 14 (2-byte-read-heap-buffer-overflow)\n    #0 0x5a275a in getSSCertificateFingerprint /src/ndpi/src/lib/protocols/tls.c:906:21\n    #1 0x5a3b42 in tlsDetectProtocolFromCertificate /src/ndpi/src/lib/protocols/tls.c:1133:7\n    #2 0x5a4f09 in ndpi_search_tls_tcp_udp /src/ndpi/src/lib/protocols/tls.c:1502:8\n    #3",
     "stack": "#0 0x5a275a in getSSCertificateFingerprint ndpi/src/lib/protocols/tls.c:906:21\n#1 0x5a3b42 in tlsDetectProtocolFromCertificate ndpi/src/lib/protocols/tls.c:1133:7\n#2 0x5a4f09 in ndpi_search_tls_tcp_udp ndpi/src/lib/protocols/tls.c:1502:8\n#3 0x578750 in check_ndpi_tcp_flow_func ndpi/src/lib/ndpi_main.c:4111:4\n#4 0x58238d in ndpi_check_flow_func ndpi/src/lib/ndpi_main.c:4157:5\n#5 0x58238d in ndpi_detection_process_packet ndpi/src/lib/ndpi_main.c:4855:3\n#6 0x5544a8 in LLVMFuzzerTestOneInput ndpi/fu",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "getSSCertificateFingerprint",
     "file": "ndpi/src/lib/protocols/tls.c",
-    "description": "Heap-buffer-overflow due to an out-of-bounds 2-byte read when parsing non-certificate TLS handshake records. In getSSCertificateFingerprint(), the code checks `packet->payload_packet_len > flow->l4.tcp.tls_record_offset+7` but then reads `*(u_int16_t*)&packet->payload[flow->l4.tcp.tls_record_offset+7]`, which requires bytes at offsets +7 and +8. The bounds check is off by one and allows reading past the end when only 8 bytes remain.",
-    "conditions": "From fuzz_process_packet, attacker-controlled packet payload reaches ndpi_search_tls_tcp_udp() -> tlsDetectProtocolFromCertificate() -> getSSCertificateFingerprint(). The flow must take the branch handling handshake/non-certificate records (`else if(packet->payload_packet_len > flow->l4.tcp.tls_record_offset+7)`), with payload length such that `payload_packet_len == tls_record_offset + 8` (or otherwise lacking byte +8). Then `ntohs(*(u_int16_t*)&payload[offset+7])` performs a 2-byte read beyond the heap buffer, triggering ASan."
+    "description": "Heap-buffer-overflow in TLS certificate fingerprint parsing: getSSCertificateFingerprint reads a 16-bit length from packet->payload[flow->l4.tcp.tls_record_offset+7] after only checking payload_packet_len > tls_record_offset+7. This permits a 2-byte read starting at the last valid byte (needs +8 bound), causing out-of-bounds read at line ~906. Crash occurs in getSSCertificateFingerprint, and it is reached via tlsDetectProtocolFromCertificate/ndpi_search_tls_tcp_udp.",
+    "conditions": "In fuzz_process_packet, crafted short/truncated TLS-like TCP payload drives execution into getSSCertificateFingerprint with tls_srv_cert_fingerprint_processed unset and flow->l4.tcp.tls_record_offset near end of payload. The non-certificate handshake branch executes and dereferences *(u_int16_t*)&payload[offset+7] without ensuring two bytes are available (offset+8 < payload_packet_len), triggering OOB read."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.02496515,
+      "total_cost": 0.03163475,
       "total_input_tokens": 15357,
-      "total_output_tokens": 382,
-      "total_cached_tokens": 4608,
+      "total_output_tokens": 340,
+      "total_cached_tokens": 0,
       "llm_calls": [
         {
-          "timestamp": 1773524287.2673216,
+          "timestamp": 1773714804.0101635,
           "model": "gpt-5.3-codex",
-          "cost": 0.0057491,
+          "cost": 0.007563500000000001,
           "input_tokens": 3450,
           "output_tokens": 109,
           "total_tokens": 3559,
-          "cached_tokens": 1152,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_U9qvVS1RXCkkXKXXR2MIAIdF"
+              "tool_call_id": "call_DoJMwBZCaISDcbAdr0K384f8"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_pHiHOIs927rm6uwJql6aPaC5"
+              "tool_call_id": "call_PKovYx98WcF1T2rXM5o0Y5yt"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_BnhhpC3ugMiilRTdtCkz9GEM"
+              "tool_call_id": "call_Qpgq4az1yHJtZrOPiWDIjznE"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773524298.7592824,
+          "timestamp": 1773714808.7277446,
           "model": "gpt-5.3-codex",
-          "cost": 0.01921605,
+          "cost": 0.02407125,
           "input_tokens": 11907,
-          "output_tokens": 273,
-          "total_tokens": 12180,
-          "cached_tokens": 3456,
+          "output_tokens": 231,
+          "total_tokens": 12138,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_VTODDPpkyod888s68tu1y7b2"
+              "tool_call_id": "call_KaCjI8kbyOJ3gooGQZ6ZWQdT"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,19 +88,19 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.0397082,
-      "total_input_tokens": 32620,
-      "total_output_tokens": 458,
-      "total_cached_tokens": 15104,
+      "total_llm_calls": 5,
+      "total_cost": 0.0312984,
+      "total_input_tokens": 28944,
+      "total_output_tokens": 432,
+      "total_cached_tokens": 16128,
       "llm_calls": [
         {
-          "timestamp": 1773524301.8335729,
+          "timestamp": 1773714810.953973,
           "model": "gpt-5.3-codex",
-          "cost": 0.0049987,
-          "input_tokens": 3722,
-          "output_tokens": 79,
-          "total_tokens": 3801,
+          "cost": 0.0048412,
+          "input_tokens": 3680,
+          "output_tokens": 73,
+          "total_tokens": 3753,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -110,22 +110,43 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_vRqHR9eme9DmjNP4cvUtt1ce"
+              "tool_call_id": "call_M7f0hOPB9H8pH5QNHuEh4DAy"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_EEPIuOMRG7yJeKpp7xmcw3j4"
+              "tool_name": "find_references",
+              "tool_call_id": "call_KPSBW4aA81frsnlp40sryadn"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773524304.7595804,
+          "timestamp": 1773714905.1336622,
           "model": "gpt-5.3-codex",
-          "cost": 0.018954250000000002,
-          "input_tokens": 9399,
+          "cost": 0.0017349499999999999,
+          "input_tokens": 3953,
+          "output_tokens": 33,
+          "total_tokens": 3986,
+          "cached_tokens": 3584,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_oybJ3ZQiTJ5yx1JTmM1R3o8O"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773714907.9129207,
+          "model": "gpt-5.3-codex",
+          "cost": 0.014629999999999999,
+          "input_tokens": 6928,
           "output_tokens": 179,
-          "total_tokens": 9578,
+          "total_tokens": 7107,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -135,19 +156,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_ZeXU7VDGEZoXerU9Uwq7UXAx"
+              "tool_call_id": "call_cihxMwPB4skjAFdKR3e7JD8F"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773524307.614419,
+          "timestamp": 1773714909.5086157,
           "model": "gpt-5.3-codex",
-          "cost": 0.013470099999999999,
-          "input_tokens": 9622,
-          "output_tokens": 177,
-          "total_tokens": 9799,
-          "cached_tokens": 3712,
+          "cost": 0.00690025,
+          "input_tokens": 7151,
+          "output_tokens": 31,
+          "total_tokens": 7182,
+          "cached_tokens": 3840,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -155,20 +176,20 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_gNchv8rN2xd8C72x8RIhzoKg"
+              "tool_name": "read_source",
+              "tool_call_id": "call_qJmNerf6MwSPKh65oTHXUWf1"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773524308.946253,
+          "timestamp": 1773714911.937881,
           "model": "gpt-5.3-codex",
-          "cost": 0.0022851499999999997,
-          "input_tokens": 9877,
-          "output_tokens": 23,
-          "total_tokens": 9900,
-          "cached_tokens": 9728,
+          "cost": 0.003192,
+          "input_tokens": 7232,
+          "output_tokens": 116,
+          "total_tokens": 7348,
+          "cached_tokens": 7040,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,7 +198,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_TUfnCwaee29OyGuioWJys8CG"
+              "tool_call_id": "call_AysqcBMUsl9Q02ZmY9W8kxJn"
             }
           ],
           "finish_reason": "tool_calls"
@@ -185,10 +206,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.06467334999999999,
-      "total_input_tokens": 47977,
-      "total_output_tokens": 840,
-      "total_llm_calls": 6
+      "total_cost": 0.06293315,
+      "total_input_tokens": 44301,
+      "total_output_tokens": 772,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
@@ -202,13 +223,13 @@
       {
         "tool_name": "read_source",
         "args": [
-          "ndpi/src/lib/protocols/tls.c",
-          1133
+          "src/lib/protocols/tls.c",
+          906
         ],
         "kwargs": {},
-        "timestamp": 556590.499861309,
+        "timestamp": 747183.890508615,
         "success": true,
-        "result_summary": "Ok({'contents': '1034 \\t}\\n1035 \\n1036 \\toffset += len;\\n1037 \\n1038 \\tif((offset+1) < packet->payload_packet_len) {\\n1039 \\t  len = packet->payload[offset+1];\\n1040 \\n1041 \\t  offset += 2;\\n1042 \\n10..."
+        "result_summary": "Err(CRSError(path 'src/lib/protocols/tls.c' does not exist in directory tree. Similar paths: ndpi/src/lib/protocols/tls.c, extra=None))"
       },
       {
         "tool_name": "read_source",
@@ -217,25 +238,37 @@
           906
         ],
         "kwargs": {},
-        "timestamp": 556590.502057118,
+        "timestamp": 747193.708896794,
         "success": true,
         "result_summary": "Ok({'contents': ' 807     if(avail > flow->l4.tcp.tls_fingerprint_len)\\n 808       avail = flow->l4.tcp.tls_fingerprint_len;\\n 809 \\n 810 #ifdef DEBUG_TLS\\n 811     printf(\"=>> [TLS] Certificate recor..."
-      }
-    ],
-    "find_references": [],
-    "apply_patch": [
+      },
       {
-        "tool_name": "apply_patch",
+        "tool_name": "read_source",
         "args": [
           "src/lib/protocols/tls.c",
-          "@@ -901,7 +901,7 @@\n       return(0); /* That's all */\n   } else if(flow->l4.tcp.tls_seen_certificate)\n     return(0); /* That's all */  \n-  else if(packet->payload_packet_len > flow->l4.tcp.tls_record_offset+7) {\n+  else if(packet->payload_packet_len > flow->l4.tcp.tls_record_offset+8) {\n     /* This is a handshake but not a certificate record */\n     u_int16_t len = ntohs(*(u_int16_t*)&packet->payload[flow->l4.tcp.tls_record_offset+7]);\n "
+          904
         ],
         "kwargs": {},
-        "timestamp": 556596.195843919,
+        "timestamp": 747198.083594785,
         "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'src/lib/protocols/tls.c' does not exist in directory tree. Similar paths: ndpi/src/lib/protocols/tls.c, extra={'note': 'this patch was not applied ..."
+        "result_summary": "Err(CRSError(path 'src/lib/protocols/tls.c' does not exist in directory tree. Similar paths: ndpi/src/lib/protocols/tls.c, extra=None))"
       }
     ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "getSSCertificateFingerprint",
+          "",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 747192.406578724,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='ndpi/src/lib/protocols/tls.c', refs=[FileReference(line=899, content='      return(getSSCertificateFingerprint(ndpi_struct, flow));        ', enclosing_definition='getSSC..."
+      }
+    ],
+    "apply_patch": [],
     "test_patch": [],
     "undo_last_patch": [],
     "list_current_edits": []

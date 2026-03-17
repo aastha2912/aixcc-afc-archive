@@ -1,5 +1,5 @@
 {
-  "vuln_id": 229,
+  "vuln_id": 270,
   "crash_result": {
     "output": "/src/rdkit/Code/GraphMol/QueryOps.cpp:963:21: runtime error: downcast of address 0x0000340e8580 which does not point to an object of type 'RDKit::ATOM_EQUALS_QUERY' (aka 'EqualityQuery<int, const RDKit::Atom *, true>')\n0x0000340e8580: note: object is of type 'Queries::AndQuery<int, RDKit::Atom const*, true>'\n 00 00 00 00  70 9a a3 00 00 00 00 00  00 00 00 00 00 00 00 00  0e 41 74 6f 6d 41 6e 64  00 00 00 00\n              ^~~~~~~~~~~~~~~~~~~~~~~\n              vptr for 'Queries::AndQuery<int, RDKi",
     "stack": "#0 0x716080 in RDKit::QueryOps::completeMolQueries(RDKit::RWMol*, unsigned int) rdkit/Code/GraphMol/QueryOps.cpp:963:21\n#1 0x4ef6e0 in RDKit::FileParserUtils::finishMolProcessing(RDKit::RWMol*, bool, bool, bool) rdkit/Code/GraphMol/FileParsers/MolFileParser.cpp:3189:5\n#2 0x4f2887 in RDKit::MolDataStreamToMol(std::__1::basic_istream<char, std::__1::char_traits<char> >*, unsigned int&, bool, bool, bool) rdkit/Code/GraphMol/FileParsers/MolFileParser.cpp:3417:5\n#3 0x4d2531 in LLVMFuzzerTestOneInput ",
@@ -24,147 +24,54 @@
   "analyzed_vuln": {
     "function": "completeMolQueries",
     "file": "rdkit/Code/GraphMol/QueryOps.cpp",
-    "description": "`QueryOps::completeMolQueries()` assumes every atom query is an `ATOM_EQUALS_QUERY` and performs an unchecked `static_cast` (`atom->getQuery()` -> `ATOM_EQUALS_QUERY*`). For the PoV, the mol block (`M  RBC ...`) builds an `AtomAnd` query (`Queries::AndQuery<int, Atom const*, true>`), so the cast is invalid and UBSan reports a bad downcast at QueryOps.cpp:963. The crash is caused by type confusion from incorrect query-type assumptions in `completeMolQueries` (and recursive child casting in `completeQueryAndChildren`).",
-    "conditions": "Data flows from `MolDataStreamToMol()` -> `finishMolProcessing()` -> `QueryOps::completeMolQueries()` when `_NeedsQueryScan` is set by parsed mol properties. A crafted mol block containing query-producing properties (here `M  RBC  1   1  -2`) creates a non-`ATOM_EQUALS_QUERY` root query (`AtomAnd`) on an atom. When `completeMolQueries()` iterates queried atoms, it blindly casts and dereferences as `ATOM_EQUALS_QUERY`, triggering UB/crash."
+    "description": "`QueryOps::completeMolQueries()` incorrectly assumes every atom query is an `ATOM_EQUALS_QUERY` and performs an unchecked `static_cast` (`auto *query = static_cast<ATOM_EQUALS_QUERY *>(atom->getQuery());`). For this PoV, the parsed mol block creates an `AtomAnd` query (`Queries::AndQuery<int, const Atom*, true>`), so the cast is invalid and UBSan reports a bad downcast at QueryOps.cpp:963. The recursive helper `completeQueryAndChildren()` also blindly C-casts children to `ATOM_EQUALS_QUERY*`, compounding the same type-confusion assumption.",
+    "conditions": "Data flow: `MolDataStreamToMol()` parses the mol block, `finishMolProcessing()` sees `_NeedsQueryScan` and calls `QueryOps::completeMolQueries()`. The PoV includes an `M  RBC` property that leads to a composite atom query (`AtomAnd`) instead of a simple equality query. Any input that sets `_NeedsQueryScan` and leaves at least one atom with a non-`ATOM_EQUALS_QUERY` (e.g., `AtomAnd`) will trigger this undefined behavior when `completeMolQueries()` runs."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.02193205,
-      "total_input_tokens": 11051,
-      "total_output_tokens": 358,
-      "total_cached_tokens": 1536,
+      "total_cost": 0.023334849999999997,
+      "total_input_tokens": 11155,
+      "total_output_tokens": 402,
+      "total_cached_tokens": 1152,
       "llm_calls": [
         {
-          "timestamp": 1773536208.464768,
+          "timestamp": 1773715952.8972561,
           "model": "gpt-5.3-codex",
-          "cost": 0.00409255,
+          "cost": 0.00708575,
           "input_tokens": 3041,
-          "output_tokens": 85,
-          "total_tokens": 3126,
-          "cached_tokens": 1536,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_EsxBuOfIo7IuQbPkS8wUOba6"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_lwYHXu1ltPAUyhbEf4IGcvbG"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773536222.9337673,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0178395,
-          "input_tokens": 8010,
-          "output_tokens": 273,
-          "total_tokens": 8283,
+          "output_tokens": 126,
+          "total_tokens": 3167,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "terminate",
-              "tool_call_id": "call_X0rhL3679co4m9IZQzi70ng4"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        }
-      ]
-    },
-    "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.027027350000000002,
-      "total_input_tokens": 24001,
-      "total_output_tokens": 1004,
-      "total_cached_tokens": 18432,
-      "llm_calls": [
-        {
-          "timestamp": 1773536224.7650642,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0038087,
-          "input_tokens": 3546,
-          "output_tokens": 88,
-          "total_tokens": 3634,
-          "cached_tokens": 2304,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_lsPCoSgoV3p02zQ90wNl9lAb"
+              "tool_call_id": "call_zSO0L6ckSe7YbOIFyPDHiv86"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_HX1JiwhSwPzQJ6JrYsrlQI59"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_D6C7v8USG2hwakYzNbWHV3LW"
+              "tool_call_id": "call_lBodc0JccWSncXjcf8JJWBeD"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773536901.8769236,
+          "timestamp": 1773716290.7648227,
           "model": "gpt-5.3-codex",
-          "cost": 0.01369445,
-          "input_tokens": 6315,
-          "output_tokens": 448,
-          "total_tokens": 6763,
-          "cached_tokens": 2304,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_8bCW9t4SeTuNf9o35MfKjR6R"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773536907.377788,
-          "model": "gpt-5.3-codex",
-          "cost": 0.007660800000000001,
-          "input_tokens": 6808,
-          "output_tokens": 445,
-          "total_tokens": 7253,
-          "cached_tokens": 6656,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_a2KKgFCeCj2FJQYSUEE5opUV"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773536909.1206098,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0018633999999999999,
-          "input_tokens": 7332,
-          "output_tokens": 23,
-          "total_tokens": 7355,
-          "cached_tokens": 7168,
+          "cost": 0.0162491,
+          "input_tokens": 8114,
+          "output_tokens": 276,
+          "total_tokens": 8390,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -173,69 +80,12 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_trUL17iEmr0YrNubPiII9uE2"
+              "tool_call_id": "call_mTidCzu8sCm5m8Bc2f2b9nd0"
             }
           ],
           "finish_reason": "tool_calls"
         }
       ]
-    },
-    "total": {
-      "total_cost": 0.0489594,
-      "total_input_tokens": 35052,
-      "total_output_tokens": 1362,
-      "total_llm_calls": 6
     }
-  },
-  "patch_result": {
-    "success": false,
-    "failure_reason": "the agent did not produce a result"
-  },
-  "context_retrieval": {
-    "source_questions": [],
-    "read_definition": [],
-    "read_source": [
-      {
-        "tool_name": "read_source",
-        "args": [
-          "rdkit/Code/GraphMol/QueryOps.cpp",
-          963
-        ],
-        "kwargs": {},
-        "timestamp": 568513.600289614,
-        "success": true,
-        "result_summary": "Ok({'contents': ' 864       }\\n 865     }\\n 866   }\\n 867 }\\n 868 \\n 869 bool isComplexQuery(const Atom *a) {\\n 870   PRECONDITION(a, \"bad atom\");\\n 871   if (!a->hasQuery()) {\\n 872     return false;..."
-      }
-    ],
-    "find_references": [
-      {
-        "tool_name": "find_references",
-        "args": [
-          "completeQueryAndChildren",
-          "rdkit/Code/GraphMol/QueryOps.cpp",
-          false
-        ],
-        "kwargs": {},
-        "timestamp": 569184.683132376,
-        "success": true,
-        "result_summary": "Ok([FileReferences(file_name='rdkit/Code/GraphMol/QueryOps.cpp', refs=[FileReference(line=954, content='    completeQueryAndChildren((ATOM_EQUALS_QUERY *)(childIt->get()), tgt,', enclosing_definition=..."
-      }
-    ],
-    "apply_patch": [
-      {
-        "tool_name": "apply_patch",
-        "args": [
-          "Code/GraphMol/QueryOps.cpp",
-          "@@ -941,19 +941,25 @@\n \n namespace QueryOps {\n namespace {\n-void completeQueryAndChildren(ATOM_EQUALS_QUERY *query, Atom *tgt,\n+void completeQueryAndChildren(Queries::Query<int, Atom const *, true> *query,\n+                              Atom *tgt,\n                               unsigned int magicVal) {\n   PRECONDITION(query, \"no query\");\n   PRECONDITION(tgt, \"no atom\");\n-  if (static_cast<unsigned int>(query->getVal()) == magicVal) {\n-    int tgtVal = query->getDataFunc()(tgt);\n-    query->setVal(tgtVal);\n+  if (auto *eqQuery = dynamic_cast<ATOM_EQUALS_QUERY *>(query)) {\n+    if (static_cast<unsigned int>(eqQuery->getVal()) == magicVal) {\n+      int tgtVal = eqQuery->getDataFunc()(tgt);\n+      eqQuery->setVal(tgtVal);\n+    }\n   }\n   for (auto childIt = query->beginChildren(); childIt != query->endChildren();\n        ++childIt) {\n-    completeQueryAndChildren((ATOM_EQUALS_QUERY *)(childIt->get()), tgt,\n-                             magicVal);\n+    completeQueryAndChildren(childIt->get(), tgt, magicVal);\n   }\n }\n }  // namespace\n+\n void completeMolQueries(RWMol *mol, unsigned int magicVal) {\n   PRECONDITION(mol, \"bad molecule\");\n   for (auto atom : mol->atoms()) {\n     if (atom->hasQuery()) {\n-      auto *query = static_cast<ATOM_EQUALS_QUERY *>(atom->getQuery());\n+      auto *query = atom->getQuery();\n       completeQueryAndChildren(query, atom, magicVal);\n     }\n   }\n"
-        ],
-        "kwargs": {},
-        "timestamp": 569195.964905677,
-        "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'Code/GraphMol/QueryOps.cpp' does not exist in directory tree. Similar paths: rdkit/Code/GraphMol/QueryOps.cpp, extra={'note': 'this patch was not a..."
-      }
-    ],
-    "test_patch": [],
-    "undo_last_patch": [],
-    "list_current_edits": []
   }
 }

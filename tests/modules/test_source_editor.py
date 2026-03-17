@@ -63,3 +63,69 @@ async def test_get_repo_diff_accepts_repo_relative_modified_paths():
         assert "--- a/cms_universal_transform_fuzzer.c" in diff
         assert "+++ b/cms_universal_transform_fuzzer.c" in diff
         assert "+int main(void) { return 1; }" in diff
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_normalizes_unique_suffix_path():
+    with tempfile.NamedTemporaryFile() as tf:
+        _ = tarfile.open(tf.name, "w").close()
+        e = Editor(vfs := EditableOverlayFS(await TarFS.fsopen(aio.Path(tf.name))))
+        await vfs.write(
+            "ffmpeg/libavcodec/wmalosslessdec.c",
+            b"static int decode_tilehdr(void) {\n    return 0;\n}\n",
+        )
+
+        result = await e.apply_patch(
+            "libavcodec/wmalosslessdec.c",
+            "@@ -1,3 +1,7 @@\n static int decode_tilehdr(void) {\n+    if (1) {\n+        return -1;\n+    }\n     return 0;\n }\n",
+        )
+
+        assert result.is_ok()
+        edited = await e.vfs.read("ffmpeg/libavcodec/wmalosslessdec.c")
+        assert b"return -1;" in edited
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_normalizes_repo_prefix_mismatch():
+    with tempfile.NamedTemporaryFile() as tf:
+        _ = tarfile.open(tf.name, "w").close()
+        e = Editor(vfs := EditableOverlayFS(await TarFS.fsopen(aio.Path(tf.name))))
+        await vfs.write(
+            "libjxl/lib/jxl/icc_codec.cc",
+            (
+                b"void UnpredictICC() {\n"
+                b"  shuffled[i] = enc[pos + i];\n"
+                b"  pos += num;\n"
+                b"}\n"
+            ),
+        )
+
+        result = await e.apply_patch(
+            "lib/jxl/icc_codec.cc",
+            (
+                "@@ -1,4 +1,4 @@\n"
+                " void UnpredictICC() {\n"
+                "-  shuffled[i] = enc[pos + i];\n"
+                "-  pos += num;\n"
+                "+  shuffled[i] = enc[cpos + i];\n"
+                "+  cpos += num;\n"
+                " }\n"
+            ),
+        )
+
+        assert result.is_ok()
+        edited = await e.vfs.read("libjxl/lib/jxl/icc_codec.cc")
+        assert b"enc[cpos + i]" in edited
+        assert b"cpos += num;" in edited
+
+
+@pytest.mark.asyncio
+async def test_resolve_path_returns_full_repo_path():
+    with tempfile.NamedTemporaryFile() as tf:
+        _ = tarfile.open(tf.name, "w").close()
+        e = Editor(vfs := EditableOverlayFS(await TarFS.fsopen(aio.Path(tf.name))))
+        await vfs.write("libjxl/lib/jxl/icc_codec.cc", b"// test\n")
+
+        resolved = await e.resolve_path("lib/jxl/icc_codec.cc")
+
+        assert resolved == "libjxl/lib/jxl/icc_codec.cc"
