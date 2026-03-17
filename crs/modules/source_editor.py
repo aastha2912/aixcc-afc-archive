@@ -118,6 +118,19 @@ class Editor:
                 case _:
                     pass
 
+        # Some mounted repos keep an extra repo-root prefix (for example
+        # `matio/hdf5-1.12.0/...`) that `get_full_paths()` does not recover from
+        # reliably. Fall back to a boundary-aware suffix match over all known paths.
+        all_paths = tree.all_paths()
+        for candidate in candidates:
+            matches = [
+                full_path
+                for full_path in all_paths
+                if full_path == candidate or full_path.endswith(f"{os.sep}{candidate}")
+            ]
+            if len(matches) == 1:
+                return matches[0]
+
         return normalized
 
     @requireable

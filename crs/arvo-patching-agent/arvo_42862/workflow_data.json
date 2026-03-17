@@ -1,5 +1,5 @@
 {
-  "vuln_id": 228,
+  "vuln_id": 272,
   "crash_result": {
     "output": "==38747==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x60600004ce00 at pc 0x0000008e1b5d bp 0x7ffdf20062b0 sp 0x7ffdf20062a8\nREAD of size 1 at 0x60600004ce00 thread T0\nSCARINESS: 12 (1-byte-read-heap-buffer-overflow)\n    #0 0x8e1b5c in std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > SmilesParseOps::parser::read_text_to<std::__1::__wrap_iter<char const*> >(std::__1::__wrap_iter<char const*>&, std::__1::__wrap_iter<char const*>, std::__1::basic_st",
     "stack": "#0 0x8e1b5c in std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > SmilesParseOps::parser::read_text_to<std::__1::__wrap_iter<char const*> >(std::__1::__wrap_iter<char const*>&, std::__1::__wrap_iter<char const*>, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >) rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp:143:48\n#1 0x8c1400 in bool SmilesParseOps::parser::parse_data_sgroup<std::__1::__wrap_iter<char const*> >(std::__1::_",
@@ -24,19 +24,19 @@
   "analyzed_vuln": {
     "function": "parse_data_sgroup",
     "file": "rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp",
-    "description": "Heap-buffer-overflow is caused by parse_data_sgroup() unconditionally incrementing the iterator after each field parse (lines around 667, 669, 677, 684, 689, 694) without verifying that read_text_to() actually stopped on a delimiter within bounds. For malformed/truncated SgD CXSMILES blocks, read_text_to() can advance first to last, then ++first moves it past end; subsequent read_text_to() dereferences this invalid iterator in its loop condition (via *first), producing the 1-byte OOB read reported at read_text_to() line 143.",
-    "conditions": "Input must reach CXSMILES extension parsing through MolDataStreamToMol -> ParseMolBlockProperties -> ParseMarvinSmartsLine -> SmartsToMol -> parseCXExtensions, and include an SgD data SGroup token (\"SgD:\") with missing/insufficient ':'-separated fields or truncated tail so delimiters are absent. Then parse_data_sgroup() repeatedly does ++first past end and later calls read_text_to() with first > last, triggering out-of-bounds read."
+    "description": "Heap-buffer-overflow is caused by parse_data_sgroup() unconditionally incrementing the iterator (`++first`) after calls to read_text_to(..., \":\") for each optional colon-delimited field (name/data/oper/unit/tag, and coords handling). If read_text_to() stops because `first==last` (no delimiter present), parse_data_sgroup still does `++first`, pushing the iterator past end. A later read_text_to() then dereferences this invalid iterator in its loop (`delims.find_first_of(*first)`), producing the OOB read at line 143.",
+    "conditions": "From MolDataStreamToMol -> ParseMolBlockProperties -> ParseMarvinSmartsLine -> SmartsToMol -> parseCXExtensions, attacker-controlled Marvin SMARTS/CXSMILES extension containing an SgD block with missing/truncated ':'-separated fields (or truncated before expected delimiters) reaches parse_data_sgroup(). Because delimiter presence is not validated before each `++first`, end iterator is advanced out-of-range; subsequent parsing triggers 1-byte heap OOB read in read_text_to()."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.034808900000000004,
+      "total_cost": 0.0347249,
       "total_input_tokens": 24270,
-      "total_output_tokens": 403,
+      "total_output_tokens": 397,
       "total_cached_tokens": 8448,
       "llm_calls": [
         {
-          "timestamp": 1773536039.3639433,
+          "timestamp": 1773717406.0491204,
           "model": "gpt-5.3-codex",
           "cost": 0.01664425,
           "input_tokens": 8479,
@@ -51,26 +51,26 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_uflC7HH7vcAufsmVoNyNTTpZ"
+              "tool_call_id": "call_6NTvoezAsITNWcLq15PgDPf6"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_gptVwkr3lwdcIo3XYTgMuJ2k"
+              "tool_call_id": "call_obunzqD9Pz5ntqrsMmg81Pd7"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_2b74VOY4NoegN8PDt4VZie1G"
+              "tool_call_id": "call_w6cEHCLRoklBaQwGqY4wvWp2"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773536053.3276927,
+          "timestamp": 1773717412.8935528,
           "model": "gpt-5.3-codex",
-          "cost": 0.01816465,
+          "cost": 0.01808065,
           "input_tokens": 15791,
-          "output_tokens": 274,
-          "total_tokens": 16065,
+          "output_tokens": 268,
+          "total_tokens": 16059,
           "cached_tokens": 8448,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -80,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_1DrvwcIkUppVQmv1rYWtCB4t"
+              "tool_call_id": "call_QGPlac0wFuPAUBG8RA2jWooF"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,20 +88,20 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.0651343,
-      "total_input_tokens": 43442,
-      "total_output_tokens": 1411,
-      "total_cached_tokens": 19456,
+      "total_llm_calls": 3,
+      "total_cost": 0.04607085,
+      "total_input_tokens": 30651,
+      "total_output_tokens": 1029,
+      "total_cached_tokens": 13952,
       "llm_calls": [
         {
-          "timestamp": 1773536055.6494694,
+          "timestamp": 1773717415.3577151,
           "model": "gpt-5.3-codex",
-          "cost": 0.012892250000000001,
-          "input_tokens": 6631,
+          "cost": 0.010260950000000001,
+          "input_tokens": 6625,
           "output_tokens": 92,
-          "total_tokens": 6723,
-          "cached_tokens": 0,
+          "total_tokens": 6717,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -110,22 +110,22 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_VB7YncHqKQja2UNcObX663xx"
+              "tool_call_id": "call_NlOs472OgI2KZz1mw5KR2bNV"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_j6N4OSoPOTzCGKonmO6fJMCh"
+              "tool_call_id": "call_RtwLDi5vpVzjavnLfa7Kxnwg"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773536064.0598068,
+          "timestamp": 1773717426.8282917,
           "model": "gpt-5.3-codex",
-          "cost": 0.029326500000000002,
-          "input_tokens": 11558,
-          "output_tokens": 650,
-          "total_tokens": 12208,
+          "cost": 0.03241,
+          "input_tokens": 11552,
+          "output_tokens": 871,
+          "total_tokens": 12423,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -135,40 +135,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_eyGxx5Gzgg6JGKpKVb4qYioq"
+              "tool_call_id": "call_jJo9nc6F4LdeTXUkupTJ5lxB"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773536073.5456815,
+          "timestamp": 1773717429.363092,
           "model": "gpt-5.3-codex",
-          "cost": 0.0200123,
-          "input_tokens": 12258,
-          "output_tokens": 646,
-          "total_tokens": 12904,
-          "cached_tokens": 6656,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_JDgO4OCB5AfNRAxgxJZG6rUp"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773536075.4257126,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0029032499999999996,
-          "input_tokens": 12995,
-          "output_tokens": 23,
-          "total_tokens": 13018,
-          "cached_tokens": 12800,
+          "cost": 0.0033998999999999995,
+          "input_tokens": 12474,
+          "output_tokens": 66,
+          "total_tokens": 12540,
+          "cached_tokens": 12288,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,7 +156,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_hoFDTN3aufFNP5br38kGRCO4"
+              "tool_call_id": "call_Ux93LTgHJThuy8hI2QZ5R7P2"
             }
           ],
           "finish_reason": "tool_calls"
@@ -185,10 +164,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.09994320000000001,
-      "total_input_tokens": 67712,
-      "total_output_tokens": 1814,
-      "total_llm_calls": 6
+      "total_cost": 0.08079575,
+      "total_input_tokens": 54921,
+      "total_output_tokens": 1426,
+      "total_llm_calls": 5
     }
   },
   "patch_result": {
@@ -206,7 +185,7 @@
           143
         ],
         "kwargs": {},
-        "timestamp": 568344.461948113,
+        "timestamp": 749703.948347771,
         "success": true,
         "result_summary": "Ok({'contents': ' 44   delete qa;\\n 45 }\\n 46 \\n 47 void processCXSmilesLabels(RDKit::RWMol &mol) {\\n 48   if (mol.hasProp(\"_cxsmilesLabelsProcessed\")) {\\n 49     return;\\n 50   }\\n 51   for (auto ato..."
       },
@@ -217,25 +196,13 @@
           676
         ],
         "kwargs": {},
-        "timestamp": 568344.465086921,
+        "timestamp": 749703.951148926,
         "success": true,
         "result_summary": "Ok({'contents': '577   //   1:1.3.2.6: 1-3 repeats, atom 1-2, 1-6\\n578   //   4:1.4.3.6: 1-4 repeats, atom 4-4, 4-6\\n579   // which maps to the property value \"1 3 2 2 3 2 7|1 4 2 5 4 5 7\"\\n580   // I..."
       }
     ],
     "find_references": [],
-    "apply_patch": [
-      {
-        "tool_name": "apply_patch",
-        "args": [
-          "Code/GraphMol/SmilesParse/CXSmilesOps.cpp",
-          "@@ -664,34 +664,49 @@\n   for (auto idx : atoms) {\n     sgroup.addAtomWithIdx(idx);\n   }\n-  ++first;\n+  if (first >= last || *first != ':') {\n+    return false;\n+  }\n+  ++first;\n   std::string name = read_text_to(first, last, \":\");\n-  ++first;\n+  if (first < last && *first == ':') {\n+    ++first;\n+  }\n   if (!name.empty()) {\n     sgroup.setProp(\"FIELDNAME\", name);\n   }\n   // FIX:\n   sgroup.setProp(\"FIELDDISP\", \"    0.0000    0.0000    DR    ALL  0       0\");\n \n   std::string data = read_text_to(first, last, \":\");\n-  ++first;\n+  if (first < last && *first == ':') {\n+    ++first;\n+  }\n   if (!data.empty()) {\n     std::vector<std::string> dataFields = {data};\n     sgroup.setProp(\"DATAFIELDS\", dataFields);\n   }\n \n   std::string oper = read_text_to(first, last, \":\");\n-  ++first;\n+  if (first < last && *first == ':') {\n+    ++first;\n+  }\n   if (!oper.empty()) {\n     sgroup.setProp(\"QUERYOP\", oper);\n   }\n   std::string unit = read_text_to(first, last, \":\");\n-  ++first;\n+  if (first < last && *first == ':') {\n+    ++first;\n+  }\n   if (!unit.empty()) {\n     sgroup.setProp(\"FIELDINFO\", unit);\n   }\n   std::string tag = read_text_to(first, last, \":\");\n-  ++first;\n+  if (first < last && *first == ':') {\n+    ++first;\n+  }\n   if (!tag.empty()) {\n     // not actually part of what ends up in the output, but\n     // it is part of CXSMARTS\n     sgroup.setProp(\"FIELDTAG\", tag);\n   }\n   if (first < last && *first == '(') {\n     // FIX\n     std::string coords = read_text_to(first, last, \")\");\n-    ++first;\n+    if (first < last && *first == ')') {\n+      ++first;\n+    }\n     sgroup.setProp(\"COORDS\", coords);\n   }\n"
-        ],
-        "kwargs": {},
-        "timestamp": 568362.128353233,
-        "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'Code/GraphMol/SmilesParse/CXSmilesOps.cpp' does not exist in directory tree. Similar paths: rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp, extra=..."
-      }
-    ],
+    "apply_patch": [],
     "test_patch": [],
     "undo_last_patch": [],
     "list_current_edits": []

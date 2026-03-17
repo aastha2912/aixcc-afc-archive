@@ -376,6 +376,16 @@ def process_id(arvo_id: str, *, force: bool) -> RunResult:
             append_log(arvo_id, f"WARNING: failed to remove CRS cache: {exc}")
 
 
+def process_config_with_project_lock(
+    cfg: ArvoRunConfig,
+    *,
+    force: bool,
+    project_locks: dict[str, Lock],
+) -> RunResult:
+    with project_locks[cfg.project_name]:
+        return process_id(cfg.arvo_id, force=force)
+
+
 def determine_effective_workers(configs: list[ArvoRunConfig], requested_workers: int) -> tuple[int, str]:
     if not configs:
         return 1, "no runnable IDs"
@@ -386,8 +396,8 @@ def determine_effective_workers(configs: list[ArvoRunConfig], requested_workers:
 
     if colliding_projects:
         projects = ", ".join(colliding_projects)
-        return 1, (
-            "running sequentially because multiple ARVO IDs map to the same CRS project cache: "
+        return capped_workers, (
+            f"running with {capped_workers} worker(s); serializing IDs that share a CRS project cache: "
             f"{projects}"
         )
 
@@ -470,9 +480,15 @@ def main() -> int:
                 append_log(arvo_id, f"Workflow failed: {exc}")
                 results.append(RunResult(arvo_id=arvo_id, status="failed", detail=str(exc)))
     else:
+        project_locks = {project_name: Lock() for project_name in {cfg.project_name for cfg in configs}}
         with ThreadPoolExecutor(max_workers=effective_workers) as executor:
             futures = {
-                executor.submit(process_id, arvo_id, force=True): arvo_id
+                executor.submit(
+                    process_config_with_project_lock,
+                    config_by_id[arvo_id],
+                    force=True,
+                    project_locks=project_locks,
+                ): arvo_id
                 for arvo_id in ready_ids
             }
             for future in as_completed(futures):

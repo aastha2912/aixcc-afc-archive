@@ -1,5 +1,5 @@
 {
-  "vuln_id": 249,
+  "vuln_id": 275,
   "crash_result": {
     "output": "==1307==ERROR: AddressSanitizer: global-buffer-overflow on address 0x0000019b9d10 at pc 0x00000073ee2e bp 0x7ffeced1cdb0 sp 0x7ffeced1cda8\nREAD of size 4 at 0x0000019b9d10 thread T0\nSCARINESS: 17 (4-byte-read-global-buffer-overflow)\n    #0 0x73ee2d in Visit /src/arrow/cpp/src/arrow/array/util.cc:210:53\n    #1 0x73ee2d in arrow::Status arrow::VisitTypeInline<arrow::(anonymous namespace)::ArrayDataEndianSwapper>(arrow::DataType const&, arrow::(anonymous namespace)::ArrayDataEndianSwapper*) /src/ar",
     "stack": "#0 0x73ee2d in Visit arrow/cpp/src/arrow/array/util.cc:210:53\n#1 0x73ee2d in arrow::Status arrow::VisitTypeInline<arrow::(anonymous namespace)::ArrayDataEndianSwapper>(arrow::DataType const&, arrow::(anonymous namespace)::ArrayDataEndianSwapper*) arrow/cpp/src/arrow/visit_type_inline.h:54:5\n#2 0x725e12 in arrow::(anonymous namespace)::ArrayDataEndianSwapper::SwapType(arrow::DataType const&) arrow/cpp/src/arrow/array/util.cc:86:5\n#3 0x725408 in arrow::internal::SwapEndianArrayData(std::__1::share",
@@ -22,26 +22,26 @@
     "dedup": "Visit--arrow::Status arrow::VisitTypeInline<arrow::(anonymous namespace)::ArrayDataEndianSwapper>(arrow::DataType const&, arrow::(anonymous namespace)::ArrayDataEndianSwapper*)--arrow::(anonymous namespace)::ArrayDataEndianSwapper::SwapType(arrow::DataType const&)"
   },
   "analyzed_vuln": {
-    "function": "ReadDictionary",
-    "file": "arrow/cpp/src/arrow/ipc/reader.cc",
-    "description": "ReadDictionary calls internal::SwapEndianArrayData() on dictionary ArrayData parsed from untrusted IPC metadata when swap_endian is enabled, without validating that buffer sizes are consistent with the declared logical length/type layout. In ArrayDataEndianSwapper::Visit(const MonthDayNanoIntervalType&) (arrow/cpp/src/arrow/array/util.cc:210), the loop uses data_->length to index reinterpret_cast MonthDayNanos elements from buffers[1], causing out-of-bounds read when length is larger than the actual value buffer size.",
-    "conditions": "The PoV must produce an IPC stream with schema endianness different from native (so context.swap_endian becomes true in schema unpacking), include a dictionary batch whose value type is MonthDayNanoInterval (or another path using unchecked length/buffer assumptions), and craft dictionary ArrayData with inconsistent metadata (large length, undersized data buffer). Data flow: fuzz input -> StreamDecoderInternal::ReadDictionary -> ReadDictionary(metadata, context, ...) -> SwapEndianArrayData(dict_data) -> ArrayDataEndianSwapper::Visit(MonthDayNanoIntervalType) OOB read."
+    "function": "Visit",
+    "file": "arrow/cpp/src/arrow/array/util.cc",
+    "description": "In ArrayDataEndianSwapper::Visit(const MonthDayNanoIntervalType&), the code iterates `for (i = 0; i < data_->length; i++)` and reads `data[i]` from buffer[1] without validating that buffer[1] is large enough for `length * sizeof(MonthDayNanos)`. A malformed IPC dictionary batch can set an inconsistent array length vs buffer size, causing out-of-bounds read during endian swapping (ASan global-buffer-overflow at util.cc:210).",
+    "conditions": "The PoV is an IPC stream with schema/metadata that enables `swap_endian_` and includes a dictionary batch whose value type is MonthDayNanoIntervalType (or path reaching that Visit overload) with corrupted/inconsistent ArrayData: large `length` but undersized values buffer. Data flows via stream_fuzz -> ipc::ReadDictionary (reader.cc) -> internal::SwapEndianArrayData -> ArrayDataEndianSwapper::SwapType -> Visit(MonthDayNanoIntervalType), where missing size checks trigger OOB read."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.026342749999999998,
-      "total_input_tokens": 17853,
-      "total_output_tokens": 370,
+      "total_cost": 0.025994499999999997,
+      "total_input_tokens": 17726,
+      "total_output_tokens": 361,
       "total_cached_tokens": 6400,
       "llm_calls": [
         {
-          "timestamp": 1773626753.4888651,
+          "timestamp": 1773717570.7732334,
           "model": "gpt-5.3-codex",
-          "cost": 0.00900935,
+          "cost": 0.00902335,
           "input_tokens": 5321,
-          "output_tokens": 108,
-          "total_tokens": 5429,
+          "output_tokens": 109,
+          "total_tokens": 5430,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,26 +51,26 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_dkoZnsHP27e1y2IX30Y4l7U1"
+              "tool_call_id": "call_oPEvCtnfo4kA7wEC6PqFVGIS"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_jnsB6PzghfSoALIg0PNuvc3W"
+              "tool_call_id": "call_q3ryRgzv96kNPWqMaV69EkAa"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_iX0VwedmDQmsU0rCx3Qb1p9U"
+              "tool_call_id": "call_xVeC9evjhTw5eCajVwjz7m6E"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773626759.3736553,
+          "timestamp": 1773717576.5156293,
           "model": "gpt-5.3-codex",
-          "cost": 0.0173334,
-          "input_tokens": 12532,
-          "output_tokens": 262,
-          "total_tokens": 12794,
+          "cost": 0.016971149999999997,
+          "input_tokens": 12405,
+          "output_tokens": 252,
+          "total_tokens": 12657,
           "cached_tokens": 5248,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -80,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_lVP4QhNlV3b3A7Ui9g22B7sn"
+              "tool_call_id": "call_qH380hGf4ZpEuIsBBK2y7QEJ"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,18 +88,18 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.0321965,
-      "total_input_tokens": 37070,
-      "total_output_tokens": 834,
+      "total_llm_calls": 5,
+      "total_cost": 0.0311815,
+      "total_input_tokens": 38834,
+      "total_output_tokens": 541,
       "total_cached_tokens": 28160,
       "llm_calls": [
         {
-          "timestamp": 1773626761.1905797,
+          "timestamp": 1773717578.8852527,
           "model": "gpt-5.3-codex",
-          "cost": 0.0079072,
-          "input_tokens": 5384,
-          "output_tokens": 79,
+          "cost": 0.00804195,
+          "input_tokens": 5373,
+          "output_tokens": 90,
           "total_tokens": 5463,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
@@ -110,23 +110,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_IYopIxG4LCvF1LX1f74zKOU0"
+              "tool_call_id": "call_O7OEK3tfJyqG7ElzJkceyIZK"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_dd1p8TbRO4aKVbAGX2vKzhnH"
+              "tool_name": "find_references",
+              "tool_call_id": "call_rj7fIluMPbqT4orfEUh6AtB0"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773626766.0242076,
+          "timestamp": 1773717737.105558,
           "model": "gpt-5.3-codex",
-          "cost": 0.01408855,
-          "input_tokens": 10169,
-          "output_tokens": 340,
-          "total_tokens": 10509,
-          "cached_tokens": 5376,
+          "cost": 0.01429645,
+          "input_tokens": 8003,
+          "output_tokens": 208,
+          "total_tokens": 8211,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,19 +135,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_AUbdVoX6jtqMJeDSTsHfNCOx"
+              "tool_call_id": "call_7qmdrw0YZBRxrE9jJtR7idJE"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773626770.7795122,
+          "timestamp": 1773717741.2218754,
           "model": "gpt-5.3-codex",
-          "cost": 0.00687015,
-          "input_tokens": 10553,
-          "output_tokens": 338,
-          "total_tokens": 10891,
-          "cached_tokens": 10368,
+          "cost": 0.00462945,
+          "input_tokens": 8255,
+          "output_tokens": 206,
+          "total_tokens": 8461,
+          "cached_tokens": 8064,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,19 +156,40 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_Mxc3T3gUnuQ8rN33r6t4m08z"
+              "tool_call_id": "call_v14IGo1y9Ma9NNwqnl1faAnB"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773626772.7390382,
+          "timestamp": 1773717745.5015378,
           "model": "gpt-5.3-codex",
-          "cost": 0.0033306,
-          "input_tokens": 10964,
-          "output_tokens": 77,
-          "total_tokens": 11041,
-          "cached_tokens": 10752,
+          "cost": 0.00205275,
+          "input_tokens": 8549,
+          "output_tokens": 14,
+          "total_tokens": 8563,
+          "cached_tokens": 8320,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_0tLPdBRdJGPI4lNe9hWVljUm"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1773717852.7618828,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0021609,
+          "input_tokens": 8654,
+          "output_tokens": 23,
+          "total_tokens": 8677,
+          "cached_tokens": 8448,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,7 +198,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_xSHPe814yxg1bNhrYtK2xrqG"
+              "tool_call_id": "call_y4dFu51UFJ6rt5Q8VqPX0Mlh"
             }
           ],
           "finish_reason": "tool_calls"
@@ -185,15 +206,25 @@
       ]
     },
     "total": {
-      "total_cost": 0.05853925,
-      "total_input_tokens": 54923,
-      "total_output_tokens": 1204,
-      "total_llm_calls": 6
+      "total_cost": 0.057176,
+      "total_input_tokens": 56560,
+      "total_output_tokens": 902,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
-    "success": false,
-    "failure_reason": "the agent did not produce a result"
+    "success": true,
+    "patch": "--- a/arrow/cpp/src/arrow/array/util.cc\n+++ b/arrow/cpp/src/arrow/array/util.cc\n@@ -205,7 +205,8 @@\n     auto data = reinterpret_cast<const MonthDayNanos*>(data_->buffers[1]->data());\n     ARROW_ASSIGN_OR_RAISE(auto new_buffer, AllocateBuffer(data_->buffers[1]->size()));\n     auto new_data = reinterpret_cast<MonthDayNanos*>(new_buffer->mutable_data());\n-    int64_t length = data_->length;\n+    int64_t length =\n+        std::min(data_->length, data_->buffers[1]->size() / static_cast<int64_t>(sizeof(MonthDayNanos)));\n     for (int64_t i = 0; i < length; i++) {\n       MonthDayNanoIntervalType::MonthDayNanos tmp = data[i];\n #if ARROW_LITTLE_ENDIAN\n",
+    "build_artifacts_count": 1,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
   },
   "context_retrieval": {
     "source_questions": [],
@@ -202,41 +233,52 @@
       {
         "tool_name": "read_source",
         "args": [
-          "arrow/cpp/src/arrow/ipc/reader.cc",
-          826
-        ],
-        "kwargs": {},
-        "timestamp": 659049.766845179,
-        "success": true,
-        "result_summary": "Ok({'contents': '727   }\\n728 \\n729   *out_schema = schema(std::move(included_fields), full_schema->endianness(),\\n730                        full_schema->metadata());\\n731   return Status::OK();\\n732..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
           "arrow/cpp/src/arrow/array/util.cc",
           210
         ],
         "kwargs": {},
-        "timestamp": 659049.769513335,
+        "timestamp": 749867.462674796,
         "success": true,
         "result_summary": "Ok({'contents': '111     ARROW_ASSIGN_OR_RAISE(auto out_buffer, AllocateBuffer(in_buffer->size()));\\n112     auto out_data = reinterpret_cast<T*>(out_buffer->mutable_data());\\n113     int64_t length =..."
       }
     ],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "Visit(const MonthDayNanoIntervalType&",
+          "arrow/cpp/src/arrow/array/util.cc",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 750022.603124343,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='/src/arrow/cpp/src/arrow/array/util.cc', refs=[FileReference(line=203, content='  Status Visit(const MonthDayNanoIntervalType& type) {', enclosing_definition='N/A')])])"
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "cpp/src/arrow/array/util.cc",
-          "@@ -203,10 +203,17 @@\n   Status Visit(const MonthDayNanoIntervalType& type) {\n     using MonthDayNanos = MonthDayNanoIntervalType::MonthDayNanos;\n     auto data = reinterpret_cast<const MonthDayNanos*>(data_->buffers[1]->data());\n+    const int64_t value_count = data_->buffers[1]->size() / sizeof(MonthDayNanos);\n+    if (data_->length > value_count) {\n+      return Status::Invalid(\"Invalid MonthDayNanoInterval array: value buffer too small for \"\n+                             \"declared length\");\n+    }\n     ARROW_ASSIGN_OR_RAISE(auto new_buffer, AllocateBuffer(data_->buffers[1]->size()));\n     auto new_data = reinterpret_cast<MonthDayNanos*>(new_buffer->mutable_data());\n-    int64_t length = data_->length;\n-    for (int64_t i = 0; i < length; i++) {\n+    // data_->length may originate from untrusted IPC metadata; bound reads by\n+    // actual value buffer size.\n+    for (int64_t i = 0; i < data_->length; i++) {\n       MonthDayNanoIntervalType::MonthDayNanos tmp = data[i];\n #if ARROW_LITTLE_ENDIAN\n       tmp.months = bit_util::FromBigEndian(tmp.months);\n"
+          "@@ -205,7 +205,8 @@\n     auto data = reinterpret_cast<const MonthDayNanos*>(data_->buffers[1]->data());\n     ARROW_ASSIGN_OR_RAISE(auto new_buffer, AllocateBuffer(data_->buffers[1]->size()));\n     auto new_data = reinterpret_cast<MonthDayNanos*>(new_buffer->mutable_data());\n-    int64_t length = data_->length;\n+    int64_t length =\n+        std::min(data_->length, data_->buffers[1]->size() / static_cast<int64_t>(sizeof(MonthDayNanos)));\n     for (int64_t i = 0; i < length; i++) {\n       MonthDayNanoIntervalType::MonthDayNanos tmp = data[i];\n #if ARROW_LITTLE_ENDIAN\n"
         ],
         "kwargs": {},
-        "timestamp": 659059.361988166,
+        "timestamp": 750029.817264068,
         "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'array/util.cc' does not exist in directory tree. Similar paths: arrow/cpp/src/arrow/array/util.cc, extra={'note': 'this patch was not applied and d..."
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
     ],
-    "test_patch": [],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 750138.6786558,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
     "undo_last_patch": [],
     "list_current_edits": []
   }

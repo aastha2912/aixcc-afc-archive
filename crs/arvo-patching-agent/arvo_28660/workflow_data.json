@@ -1,5 +1,5 @@
 {
-  "vuln_id": 237,
+  "vuln_id": 282,
   "crash_result": {
     "output": "==39189==ERROR: AddressSanitizer: container-overflow on address 0x606000000088 at pc 0x0000006dfc26 bp 0x7ffcc698f850 sp 0x7ffcc698f848\nWRITE of size 4 at 0x606000000088 thread T0\nSCARINESS: 36 (4-byte-write-container-overflow)\n    #0 0x6dfc25 in RDKit::Chirality::iterateCIPRanks(RDKit::ROMol const&, std::__1::vector<double, std::__1::allocator<double> > const&, std::__1::vector<unsigned int, std::__1::allocator<unsigned int> >&, bool) /src/rdkit/Code/GraphMol/Chirality.cpp:969:33\n    #1 0x6e19e",
     "stack": "#0 0x6dfc25 in RDKit::Chirality::iterateCIPRanks(RDKit::ROMol const&, std::__1::vector<double, std::__1::allocator<double> > const&, std::__1::vector<unsigned int, std::__1::allocator<unsigned int> >&, bool) rdkit/Code/GraphMol/Chirality.cpp:969:33\n#1 0x6e19ea in RDKit::Chirality::assignAtomCIPRanks(RDKit::ROMol const&, std::__1::vector<unsigned int, std::__1::allocator<unsigned int> >&) rdkit/Code/GraphMol/Chirality.cpp:996:3\n#2 0x6f697d in RDKit::Chirality::assignAtomChiralCodes(RDKit::ROMol&,",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "iterateCIPRanks",
     "file": "rdkit/Code/GraphMol/Chirality.cpp",
-    "description": "In `RDKit::Chirality::iterateCIPRanks`, each `cipEntries[i]` vector is initialized with only 2 elements (`atomicNum`, `rank`) but later, inside the refinement loop, code unconditionally writes `cipEntries[i][numIts + 1] = ranks[i]` (line ~969). As `numIts` grows, this index can exceed the current vector size (especially when an entry has few/no neighbors and remains short), causing an out-of-bounds write into vector capacity (ASan container-overflow). The crash is at this write site, and the bug is missing bounds-safe growth before indexed assignment.",
-    "conditions": "The deserialization harness (`mol_deserialization_fuzzer`) feeds crafted pickle bytes into `MolPickler::molFromPickle()`, which for older pickle versions calls `MolOps::assignStereochemistry()`, then `legacyStereoPerception()`, then `assignAtomCIPRanks()`, reaching `iterateCIPRanks()`. A malformed but accepted molecule topology/ranking state that keeps CIP refinement iterating while some `cipEntries[i]` are not long enough for `numIts+1` triggers the OOB indexed write at line ~969."
+    "description": "Container overflow in CIP ranking refinement: iterateCIPRanks() initializes each cipEntries[i] with only 1 element when seedWithInvars=true (or 2 when false), but later unconditionally writes cipEntries[i][numIts+1] each loop iteration. For molecules requiring many refinement iterations, numIts+1 can exceed current vector size/capacity assumptions (only reserve(16) is done), causing out-of-bounds write at line ~969.",
+    "conditions": "PoV is deserialized via MolPickler::molFromPickle(), which calls MolOps::assignStereochemistry() for old pickle versions, reaching assignAtomCIPRanks()->iterateCIPRanks(). A crafted molecule topology from pickle input drives repeated CIP iterations (numRanks<numAtoms across many rounds), so numIts grows until cipEntries[i][numIts+1] indexes past the actual vector size, triggering ASan container-overflow."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.03914575,
+      "total_cost": 0.02032135,
       "total_input_tokens": 19153,
-      "total_output_tokens": 402,
-      "total_cached_tokens": 0,
+      "total_output_tokens": 339,
+      "total_cached_tokens": 11392,
       "llm_calls": [
         {
-          "timestamp": 1773548135.3814209,
+          "timestamp": 1773718629.3951318,
           "model": "gpt-5.3-codex",
-          "cost": 0.01160425,
+          "cost": 0.00273385,
           "input_tokens": 5719,
           "output_tokens": 114,
           "total_tokens": 5833,
-          "cached_tokens": 0,
+          "cached_tokens": 5632,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Nr56CozSFfjQ5rbqZ0KlWYhW"
+              "tool_call_id": "call_LnyeibmHmkwPpZxWU9knNeo4"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_5antkNwuJCnDmtL194RdNXF2"
+              "tool_call_id": "call_MdFMsajFh2x4RkQaQp6vZI8L"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_2f3OWZFEhSR1G4Kf02HkIXWn"
+              "tool_call_id": "call_5yrGZ5bXPzgMHesARoLuIeEG"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773548151.7301157,
+          "timestamp": 1773718635.0994399,
           "model": "gpt-5.3-codex",
-          "cost": 0.0275415,
+          "cost": 0.0175875,
           "input_tokens": 13434,
-          "output_tokens": 288,
-          "total_tokens": 13722,
-          "cached_tokens": 0,
+          "output_tokens": 225,
+          "total_tokens": 13659,
+          "cached_tokens": 5760,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,164 +80,12 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_OvnNdjatnqLVUb5cO3Fm6Ilm"
+              "tool_call_id": "call_PTNHqfwh2wD5iSWz4OqXNm3w"
             }
           ],
           "finish_reason": "tool_calls"
         }
       ]
-    },
-    "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.0313103,
-      "total_input_tokens": 37402,
-      "total_output_tokens": 542,
-      "total_cached_tokens": 26496,
-      "llm_calls": [
-        {
-          "timestamp": 1773548153.4372008,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0100135,
-          "input_tokens": 5066,
-          "output_tokens": 82,
-          "total_tokens": 5148,
-          "cached_tokens": 0,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_v3c2O6JPza0iQBxSAPpkl6Bz"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_0TikvPlLl0RmvWqtHrdvG0Pu"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773548156.7652204,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0135961,
-          "input_tokens": 10502,
-          "output_tokens": 220,
-          "total_tokens": 10722,
-          "cached_tokens": 4992,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_zfHuK0TQGnWweHeqRVrkpr9v"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773548160.0554552,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0051492,
-          "input_tokens": 10768,
-          "output_tokens": 217,
-          "total_tokens": 10985,
-          "cached_tokens": 10624,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_gKBkpwFrUmxWtA0nORsuWu4G"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773548161.2382371,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0025515,
-          "input_tokens": 11066,
-          "output_tokens": 23,
-          "total_tokens": 11089,
-          "cached_tokens": 10880,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "terminate",
-              "tool_call_id": "call_nY7iWeWiTHU5UAEPnPXyBbXI"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        }
-      ]
-    },
-    "total": {
-      "total_cost": 0.07045604999999999,
-      "total_input_tokens": 56555,
-      "total_output_tokens": 944,
-      "total_llm_calls": 6
     }
-  },
-  "patch_result": {
-    "success": false,
-    "failure_reason": "the agent did not produce a result"
-  },
-  "context_retrieval": {
-    "source_questions": [],
-    "read_definition": [],
-    "read_source": [
-      {
-        "tool_name": "read_source",
-        "args": [
-          "rdkit/Code/GraphMol/Chirality.cpp",
-          969
-        ],
-        "kwargs": {},
-        "timestamp": 580442.203554989,
-        "success": true,
-        "result_summary": "Ok({'contents': ' 870   unsigned int maxIts = numAtoms / 2 + 1;\\n 871   unsigned int numIts = 0;\\n 872   int lastNumRanks = -1;\\n 873   unsigned int numRanks = *std::max_element(ranks.begin(), ranks.e..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "rdkit/Code/GraphMol/Chirality.cpp",
-          900
-        ],
-        "kwargs": {},
-        "timestamp": 580442.204484636,
-        "success": true,
-        "result_summary": "Ok({'contents': ' 801         case Atom::SP: hyb=6;break;\\n 802         case Atom::SP2: hyb=5;break;\\n 803         case Atom::SP3: hyb=1;break;\\n 804         case Atom::SP3D: hyb=3;break;\\n 805       ..."
-      }
-    ],
-    "find_references": [],
-    "apply_patch": [
-      {
-        "tool_name": "apply_patch",
-        "args": [
-          "Code/GraphMol/Chirality.cpp",
-          "@@ -965,8 +965,13 @@\n     numRanks = *std::max_element(ranks.begin(), ranks.end()) + 1;\n \n     // now truncate each vector and stick the rank at the end\n+    const auto rankPos = numIts + 1;\n     for (unsigned int i = 0; i < numAtoms; ++i) {\n-      cipEntries[i][numIts + 1] = ranks[i];\n+      if (cipEntries[i].size() <= rankPos) {\n+        cipEntries[i].resize(rankPos + 1, -1);\n+      }\n+\n+      cipEntries[i][rankPos] = ranks[i];\n       cipEntries[i].erase(cipEntries[i].begin() + numIts + 2,\n                           cipEntries[i].end());\n     }\n"
-        ],
-        "kwargs": {},
-        "timestamp": 580448.638594719,
-        "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'Code/GraphMol/Chirality.cpp' does not exist in directory tree. Similar paths: rdkit/Code/GraphMol/Chirality.cpp, extra={'note': 'this patch was not..."
-      }
-    ],
-    "test_patch": [],
-    "undo_last_patch": [],
-    "list_current_edits": []
   }
 }

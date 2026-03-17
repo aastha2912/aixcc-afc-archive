@@ -129,3 +129,15 @@ async def test_resolve_path_returns_full_repo_path():
         resolved = await e.resolve_path("lib/jxl/icc_codec.cc")
 
         assert resolved == "libjxl/lib/jxl/icc_codec.cc"
+
+
+@pytest.mark.asyncio
+async def test_resolve_path_recovers_repo_root_prefixed_suffix():
+    with tempfile.NamedTemporaryFile() as tf:
+        _ = tarfile.open(tf.name, "w").close()
+        e = Editor(vfs := EditableOverlayFS(await TarFS.fsopen(aio.Path(tf.name))))
+        await vfs.write("matio/hdf5-1.12.0/src/H5Oattr.c", b"/* test */\n")
+
+        resolved = await e.resolve_path("hdf5-1.12.0/src/H5Oattr.c")
+
+        assert resolved == "matio/hdf5-1.12.0/src/H5Oattr.c"

@@ -1,5 +1,5 @@
 {
-  "vuln_id": 84,
+  "vuln_id": 274,
   "crash_result": {
     "output": "AddressSanitizer:DEADLYSIGNAL\n=================================================================\n==1785==ERROR: AddressSanitizer: SEGV on unknown address 0x75e34f8807f8 (pc 0x000000651bc1 bp 0x7ffc70b62550 sp 0x7ffc70b62440 T0)\n==1785==The signal is caused by a READ memory access.\nSCARINESS: 20 (wild-addr-read)\n    #0 0x651bc1 in is_avrule_redundant /src/selinux/libsepol/src/optimize.c:215:35\n    #1 0x6527bf in optimize_cond_av_list /src/selinux/libsepol/src/optimize.c:351:7\n    #2 0x650cb1 in op",
     "stack": "#0 0x651bc1 in is_avrule_redundant selinux/libsepol/src/optimize.c:215:35\n#1 0x6527bf in optimize_cond_av_list selinux/libsepol/src/optimize.c:351:7\n#2 0x650cb1 in optimize_cond_avtab selinux/libsepol/src/optimize.c:375:3\n#3 0x650020 in policydb_optimize selinux/libsepol/src/optimize.c:443:2\n#4 0x557e70 in sepol_policydb_optimize selinux/libsepol/src/policydb_public.c:173:9\n#5 0x557500 in LLVMFuzzerTestOneInput secilc-fuzzer.c:65:6\n#6 0x459d93 in fuzzer::Fuzzer::ExecuteCallback(unsigned char con",
@@ -24,53 +24,57 @@
   "analyzed_vuln": {
     "function": "is_avrule_redundant",
     "file": "selinux/libsepol/src/optimize.c",
-    "description": "`is_avrule_redundant()` trusts `entry->key.source_type` and `entry->key.target_type` and computes `s_idx = source_type - 1`, `t_idx = target_type - 1` without validating bounds before indexing `type_map[s_idx]` / `type_map[t_idx]` (and then iterating their `count`). With malformed policy input, these type IDs can be invalid, causing out-of-bounds access to `type_map` and a wild read crash at optimize.c:215 in the inner loop. Crash is observed while called from `optimize_cond_av_list()`, but root cause is missing index validation in `is_avrule_redundant()`.",
-    "conditions": "Fuzzer input is parsed into a policy containing conditional AV rules with corrupted/invalid type IDs (e.g., zero or very large source/target type values). During `sepol_policydb_optimize()` -> `policydb_optimize()` -> `optimize_cond_avtab()` -> `optimize_cond_av_list()`, each conditional rule is checked by `is_avrule_redundant()`. When an invalid type ID is used, `s_idx/t_idx` become out of range and `type_map` is indexed out of bounds, triggering the ASan SEGV read."
+    "description": "`is_avrule_redundant()` indexes `type_map` using `s_idx = entry->key.source_type - 1` and `t_idx = entry->key.target_type - 1` without validating that `source_type/target_type` are in-range and nonzero. With malformed policy input, conditional AV rules can carry invalid type IDs, so `s_idx`/`t_idx` become out-of-bounds (or underflow), and the loop reads `type_map[s_idx].count` / `type_map[t_idx].count`, causing a wild read and SEGV at optimize.c:215.",
+    "conditions": "Fuzzer input is parsed into a kernel policy and reaches `sepol_policydb_optimize()` -> `policydb_optimize()` -> `optimize_cond_avtab()` -> `optimize_cond_av_list()`, which calls `is_avrule_redundant((*cond)->node, &p->te_avtab, type_map, 0)`. Trigger requires a malformed conditional avtab entry whose `key.source_type` or `key.target_type` is outside `[1, p->p_types.nprim]` (or 0), so subtracting 1 yields invalid indices and dereference of `type_map` out of bounds."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.042487899999999995,
-      "total_input_tokens": 33178,
-      "total_output_tokens": 414,
-      "total_cached_tokens": 13568,
+      "total_cost": 0.04446749999999999,
+      "total_input_tokens": 35178,
+      "total_output_tokens": 435,
+      "total_cached_tokens": 14720,
       "llm_calls": [
         {
-          "timestamp": 1773388084.3035169,
+          "timestamp": 1773717537.520019,
           "model": "gpt-5.3-codex",
-          "cost": 0.02530325,
+          "cost": 0.02389485,
           "input_tokens": 13603,
-          "output_tokens": 107,
-          "total_tokens": 13710,
-          "cached_tokens": 0,
+          "output_tokens": 136,
+          "total_tokens": 13739,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_UqK8ufND9DCUWcFlPBaeNJqR"
+              "tool_call_id": "call_76pTv9mDYGpsgPjTBRbyF7Hc"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_6Yw5wPfKQIMmRY1IFGbeNuhY"
+              "tool_call_id": "call_1fWSsokl0EK3YFvKIhMgSqBK"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_gkWWQN7Wra8iUZV9xdcZWwcj"
+              "tool_call_id": "call_WEyg10eHIthtOWcjGNflFquM"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Ste4VnD5Zk8gT5sVbe7hCuK9"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773388092.7906086,
+          "timestamp": 1773717543.5953975,
           "model": "gpt-5.3-codex",
-          "cost": 0.01718465,
-          "input_tokens": 19575,
-          "output_tokens": 307,
-          "total_tokens": 19882,
+          "cost": 0.020572649999999998,
+          "input_tokens": 21575,
+          "output_tokens": 299,
+          "total_tokens": 21874,
           "cached_tokens": 13568,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -80,7 +84,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_p3ojJG6z0xrQlBgg7nxjpEci"
+              "tool_call_id": "call_4xR69XP7xgqcUVSbx7ovRqOu"
             }
           ],
           "finish_reason": "tool_calls"
@@ -89,19 +93,19 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.045104849999999995,
-      "total_input_tokens": 65411,
-      "total_output_tokens": 647,
-      "total_cached_tokens": 49792,
+      "total_cost": 0.047501999999999996,
+      "total_input_tokens": 66312,
+      "total_output_tokens": 504,
+      "total_cached_tokens": 48000,
       "llm_calls": [
         {
-          "timestamp": 1773388094.796624,
+          "timestamp": 1773717546.4353762,
           "model": "gpt-5.3-codex",
-          "cost": 0.023398199999999997,
-          "input_tokens": 14156,
+          "cost": 0.02600675,
+          "input_tokens": 14149,
           "output_tokens": 89,
-          "total_tokens": 14245,
-          "cached_tokens": 1664,
+          "total_tokens": 14238,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -110,22 +114,22 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_xA9ga5ywwFWlSdfT872R2jmf"
+              "tool_call_id": "call_K4yBh2tEHLfg0Eg0VeDK7HOZ"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_CAmNOcvmh9OpsMQ8up8InLFy"
+              "tool_call_id": "call_SkNfXoWH7P3oLyT0kO1yYSci"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773388126.7193923,
+          "timestamp": 1773717642.3767662,
           "model": "gpt-5.3-codex",
-          "cost": 0.0102445,
-          "input_tokens": 16782,
-          "output_tokens": 218,
-          "total_tokens": 17000,
+          "cost": 0.01055425,
+          "input_tokens": 16775,
+          "output_tokens": 241,
+          "total_tokens": 17016,
           "cached_tokens": 14080,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -135,18 +139,18 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_kra0w77jnSTHsqLTumzw8OB3"
+              "tool_call_id": "call_a7fcoPzxupT0o1On3sDn4lL3"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773388130.8318274,
+          "timestamp": 1773717644.5699399,
           "model": "gpt-5.3-codex",
-          "cost": 0.0068418,
-          "input_tokens": 17044,
-          "output_tokens": 259,
-          "total_tokens": 17303,
+          "cost": 0.0046998,
+          "input_tokens": 17060,
+          "output_tokens": 104,
+          "total_tokens": 17164,
           "cached_tokens": 16896,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -155,24 +159,24 @@
           "tool_call_count": 2,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_Yq8NzUNkNEUiPUIgj81NMPt7"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_pZuEUuio5uzi4tAnj9thQsdm"
             },
             {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_N6UoPugdM4s9VAQ24srDmdfD"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_jY3G27ToJg44HBVocC678QTH"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773388134.263354,
+          "timestamp": 1773717660.2849145,
           "model": "gpt-5.3-codex",
-          "cost": 0.00462035,
-          "input_tokens": 17429,
-          "output_tokens": 81,
-          "total_tokens": 17510,
-          "cached_tokens": 17152,
+          "cost": 0.006241200000000001,
+          "input_tokens": 18328,
+          "output_tokens": 70,
+          "total_tokens": 18398,
+          "cached_tokens": 17024,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,7 +185,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_a5tcOnIEhiRNcDgYwKfXoHDy"
+              "tool_call_id": "call_CGLVD6TkYd8HDtxECPNDQkC7"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,9 +193,9 @@
       ]
     },
     "total": {
-      "total_cost": 0.08759275,
-      "total_input_tokens": 98589,
-      "total_output_tokens": 1061,
+      "total_cost": 0.09196949999999998,
+      "total_input_tokens": 101490,
+      "total_output_tokens": 939,
       "total_llm_calls": 6
     }
   },
@@ -201,7 +205,34 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "is_avrule_redundant",
+          "selinux/libsepol/src/optimize.c",
+          190,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 749939.697321636,
+        "success": true,
+        "result_summary": "Ok({'contents': '190 static int is_avrule_redundant(avtab_ptr_t entry, avtab_t *tab,\\n191 \\t\\t\\t       const struct type_vec *type_map,\\n192 \\t\\t\\t       unsigned char not_cond)\\n193 {\\n194 \\tunsigned..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "optimize_cond_av_list",
+          "selinux/libsepol/src/optimize.c",
+          314,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 749946.031953771,
+        "success": true,
+        "result_summary": "Ok({'contents': '314 static void optimize_cond_av_list(cond_av_list_t **cond, cond_av_list_t **del,\\n315 \\t\\t\\t\\t  policydb_t *p, const struct type_vec *type_map)\\n316 {\\n317 \\tcond_av_list_t **listp ..."
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
@@ -210,20 +241,9 @@
           215
         ],
         "kwargs": {},
-        "timestamp": 420383.403139378,
+        "timestamp": 749835.014727879,
         "success": true,
         "result_summary": "Ok({'contents': '116 \\t\\t\\t\\tif (p->type_val_to_struct[k]->flavor != TYPE_ATTRIB)\\n117 \\t\\t\\t\\t\\tcontinue;\\n118 \\n119 \\t\\t\\t\\tif (ebitmap_contains(types_k, types_i)) {\\n120 \\t\\t\\t\\t\\tif (type_vec_appe..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "libsepol/src/optimize.c",
-          205
-        ],
-        "kwargs": {},
-        "timestamp": 420419.85639254,
-        "success": true,
-        "result_summary": "Err(CRSError(path 'libsepol/src/optimize.c' does not exist in directory tree. Similar paths: selinux/libsepol/src/optimize.c, extra=None))"
       }
     ],
     "find_references": [
@@ -235,24 +255,12 @@
           false
         ],
         "kwargs": {},
-        "timestamp": 420412.110884707,
+        "timestamp": 749926.41767236,
         "success": true,
         "result_summary": "Ok([FileReferences(file_name='selinux/libsepol/src/optimize.c', refs=[FileReference(line=295, content='\\t\\t\\tif (is_avrule_redundant(*cur, tab, type_map, 1)) {', enclosing_definition='optimize_avtab')..."
       }
     ],
-    "apply_patch": [
-      {
-        "tool_name": "apply_patch",
-        "args": [
-          "libsepol/src/optimize.c",
-          "@@ -199,9 +199,15 @@\n \t/* we only care about AV rules */\n \tif (!(entry->key.specified & (AVTAB_AV|AVTAB_XPERMS)))\n \t\treturn 0;\n+\n+\tif (entry->key.source_type == 0 || entry->key.target_type == 0)\n+\t\treturn 0;\n \n \ts_idx = entry->key.source_type - 1;\n \tt_idx = entry->key.target_type - 1;\n+\n+\tif (s_idx >= tab->p.policy->p_types.nprim || t_idx >= tab->p.policy->p_types.nprim)\n+\t\treturn 0;\n \n \tkey.target_class = entry->key.target_class;\n \tkey.specified    = entry->key.specified;\n"
-        ],
-        "kwargs": {},
-        "timestamp": 420419.419839676,
-        "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'libsepol/src/optimize.c' does not exist in directory tree. Similar paths: selinux/libsepol/src/optimize.c, extra={'note': 'this patch was not appli..."
-      }
-    ],
+    "apply_patch": [],
     "test_patch": [],
     "undo_last_patch": [],
     "list_current_edits": []
