@@ -1,0 +1,44 @@
+--- a/src/sksl/SkSLCompiler.cpp
++++ b/src/sksl/SkSLCompiler.cpp
+@@ -1061,26 +1061,27 @@
+             if (c.type().columns() > 1) {
+                 // Inspect each constructor argument to see if it's a candidate for flattening.
+                 // Remember matched arguments in a bitfield, "argsToOptimize".
+-                int argsToOptimize = 0;
+-                int currBit = 1;
++                std::vector<bool> argsToOptimize;
++                argsToOptimize.reserve(c.arguments().size());
+                 for (const std::unique_ptr<Expression>& arg : c.arguments()) {
++                    bool optimizeArg = false;
+                     if (arg->is<Constructor>()) {
+                         Constructor& inner = arg->as<Constructor>();
+                         if (inner.arguments().size() > 1 &&
+                             inner.type().componentType() == c.type().componentType()) {
+-                            argsToOptimize |= currBit;
++                            optimizeArg = true;
+                         }
+                     }
+-                    currBit <<= 1;
++                    argsToOptimize.push_back(optimizeArg);
+                 }
+-                if (argsToOptimize) {
++                if (std::any_of(argsToOptimize.begin(), argsToOptimize.end(), [](bool b) { return b; })) {
+                     // We found at least one argument that could be flattened out. Re-walk the
+                     // constructor args and flatten the candidates we found during our initial pass.
+                     ExpressionArray flattened;
+                     flattened.reserve_back(c.type().columns());
+                     currBit = 1;
+                     for (const std::unique_ptr<Expression>& arg : c.arguments()) {
+-                        if (argsToOptimize & currBit) {
++                        if (argsToOptimize[flattened.size()]) {
+                             Constructor& inner = arg->as<Constructor>();
+                             for (const std::unique_ptr<Expression>& innerArg : inner.arguments()) {
+                                 flattened.push_back(innerArg->clone());
+@@ -1088,7 +1089,6 @@
+                         } else {
+                             flattened.push_back(arg->clone());
+                         }
+-                        currBit <<= 1;
+                     }
+                     auto optimized = std::unique_ptr<Expression>(
+                             new Constructor(c.fOffset, &c.type(), std::move(flattened)));

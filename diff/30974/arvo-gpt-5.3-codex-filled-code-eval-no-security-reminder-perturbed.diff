@@ -1,0 +1,32 @@
+--- a/blosc/frame.c
++++ b/blosc/frame.c
+@@ -1736,10 +1736,28 @@
+     return BLOSC2_ERROR_DATA;
+   }
+ 
++  // Validate that coffsets is a sane Blosc buffer before reading items from it.
++  // Corrupted frame metadata may point to invalid/non-Blosc memory here.
++  int32_t offsets_nbytes, offsets_cbytes, offsets_blocksize;
++  int rc = blosc_cbuffer_sizes(coffsets, &offsets_nbytes, &offsets_cbytes, &offsets_blocksize);
++  if (rc < 0) {
++    BLOSC_TRACE_ERROR("Invalid offsets chunk while retrieving chunk %d offset.", nchunk);
++    return BLOSC2_ERROR_DATA;
++  }
++
++  // We request one int64 item at index nchunk.
++  if (offsets_nbytes < 0 || (int64_t)offsets_nbytes < ((int64_t)nchunk + 1) * (int64_t)sizeof(int64_t)) {
++    BLOSC_TRACE_ERROR("Offsets chunk too small for chunk %d offset.", nchunk);
++    return BLOSC2_ERROR_DATA;
++  }
++
+   // Get the 64-bit offset
+-  int rc = blosc_getitem(coffsets, nchunk, 1, offset);
++  rc = blosc_getitem(coffsets, nchunk, 1, offset);
+   if (rc < 0) {
+     BLOSC_TRACE_ERROR("Problems retrieving a chunk offset.");
++  } else if (rc != 1) {
++    BLOSC_TRACE_ERROR("Unexpected number of items retrieved for chunk offset: %d", rc);
++    rc = BLOSC2_ERROR_DATA;
+   } else if (*offset > frame->len) {
+     BLOSC_TRACE_ERROR("Cannot read chunk %d outside of frame boundary.", nchunk);
+     rc = BLOSC2_ERROR_READ_BUFFER;
