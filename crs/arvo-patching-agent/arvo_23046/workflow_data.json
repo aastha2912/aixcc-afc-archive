@@ -1,5 +1,5 @@
 {
-  "vuln_id": 56,
+  "vuln_id": 348,
   "crash_result": {
     "output": "==7775==ERROR: AddressSanitizer: heap-use-after-free on address 0x62b000012b9a at pc 0x0000004bc596 bp 0x7ffe4704fed0 sp 0x7ffe4704f678\nREAD of size 3 at 0x62b000012b9a thread T0\nSCARINESS: 43 (3-byte-read-heap-use-after-free)\n    #0 0x4bc595 in MemcmpInterceptorCommon(void*, int (*)(void const*, void const*, unsigned long), void const*, void const*, unsigned long) /src/llvm-project/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc:841:7\n    #1 0x4bcaea in bcmp /src/llvm",
     "stack": "#0 0x4bc595 in MemcmpInterceptorCommon(void*, int (*)(void const*, void const*, unsigned long), void const*, void const*, unsigned long) llvm-project/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc:841:7\n#1 0x4bcaea in bcmp llvm-project/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc:887:10\n#2 0x641087 in ndpi_http_check_content ndpi/src/lib/protocols/http.c:149:11\n#3 0x63f18a in check_content_type_and_change_protocol ndpi/src/lib/protocols/h",
@@ -22,56 +22,93 @@
     "dedup": "MemcmpInterceptorCommon(void*, int (*)(void const*, void const*, unsigned long), void const*, void const*, unsigned long)--bcmp--ndpi_http_check_content"
   },
   "analyzed_vuln": {
-    "function": "ndpi_http_check_content",
+    "function": "check_content_type_and_change_protocol",
     "file": "ndpi/src/lib/protocols/http.c",
-    "description": "Heap use-after-free in HTTP extra-packet reprocessing: ndpi_http_check_content() memcmp()s packet->content_disposition_line.ptr (derived from flow packet payload) during extra packet analysis, but that pointer can still reference a previously processed packet buffer that has already been freed by the fuzz harness. The crash occurs at http.c:149 in ndpi_http_check_content while reading stale content_disposition_line data.",
-    "conditions": "In fuzz_ndpi_reader, each packet is copied to a temporary malloc buffer (packet_checked), passed to ndpi_workflow_process_packet(), then immediately freed. For flows where HTTP sets flow->extra_packets_func (ndpi_search_http_tcp_again), ndpi_process_extra_packet() may invoke HTTP parsing again on later packets. With crafted traffic that leaves HTTP header field pointers (notably content_disposition_line.ptr) in flow state and then triggers extra-packet parsing after the original backing buffer is freed, ndpi_http_check_content() performs memcmp on dangling memory, causing UAF."
+    "description": "Heap UAF is caused by stale header pointers in flow->packet being reused during HTTP extra-packet reprocessing. check_content_type_and_change_protocol calls ndpi_http_check_content(), which memcmp()s packet->content_disposition_line.ptr without ensuring that pointer still refers to live packet storage. In the fuzz harness each packet buffer is malloc'ed, processed, then immediately freed; extra-packet callbacks later run on subsequent packets while flow state still carries line pointers from prior packet parsing, so ndpi_http_check_content reads freed memory.",
+    "conditions": "Trigger requires a flow that enters HTTP extra packet processing (flow->extra_packets_func = ndpi_search_http_tcp_again), with Content-Disposition parsing path active (content_disposition_line.len/offset conditions reaching memcmp at http.c:149). The harness allocates packet_checked, passes it into ndpi_workflow_process_packet, then frees it after return; if flow-level HTTP parsed-line pointers are retained across packets instead of revalidated/reset, a later extra-packet invocation dereferences a pointer into the previously freed packet buffer, producing UAF in bcmp/memcmp."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 2,
-      "total_cost": 0.2119803,
-      "total_input_tokens": 211314,
-      "total_output_tokens": 348,
-      "total_cached_tokens": 103296,
+      "total_llm_calls": 3,
+      "total_cost": 0.23751735,
+      "total_input_tokens": 316905,
+      "total_output_tokens": 522,
+      "total_cached_tokens": 205952,
       "llm_calls": [
         {
-          "timestamp": 1773372908.411087,
+          "timestamp": 1774820326.9044182,
           "model": "gpt-5.3-codex",
-          "cost": 0.17841985000000002,
-          "input_tokens": 102143,
-          "output_tokens": 106,
-          "total_tokens": 102249,
+          "cost": 0.17885384999999998,
+          "input_tokens": 102231,
+          "output_tokens": 126,
+          "total_tokens": 102357,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_iJ6O2GfT2XQY0jjWycjs6UbV"
+              "tool_call_id": "call_gLpeMgPPjAkfhgPb2IphDUiF"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_4TPBKTkwxSTvmndXogiqOrAm"
+              "tool_call_id": "call_hobb5delGuWPheCRRFXfmdVD"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_y9tGuxQOtqvGjaJWf3Q3iD4G"
+              "tool_call_id": "call_zL5z6WMTnYRJXY1ou6v5i2Ea"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_useGQCsl6OetfYQ6GjQfUH2F"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773372918.276704,
+          "timestamp": 1774820477.2868977,
           "model": "gpt-5.3-codex",
-          "cost": 0.03356045,
-          "input_tokens": 109171,
-          "output_tokens": 242,
-          "total_tokens": 109413,
-          "cached_tokens": 102144,
+          "cost": 0.020251349999999998,
+          "input_tokens": 102545,
+          "output_tokens": 134,
+          "total_tokens": 102679,
+          "cached_tokens": 102272,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_SgrNKWufyWvZ0cpeBtYzigcg"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_N3xBpBYjeAu2LsWXafyFMGSm"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_XiVk3sa84kQOtUW26lA4Xwcv"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_JwYWGa7Uw3HMMSbMCzU5mlSC"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774820482.1519601,
+          "model": "gpt-5.3-codex",
+          "cost": 0.03841215,
+          "input_tokens": 112129,
+          "output_tokens": 262,
+          "total_tokens": 112391,
+          "cached_tokens": 102528,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +117,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_j6GdEHrHUa2OrHJZ9ERKR5DP"
+              "tool_call_id": "call_MArW7oYq7defPOABzZ1jT06P"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,20 +125,20 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.24728095,
-      "total_input_tokens": 418065,
-      "total_output_tokens": 584,
-      "total_cached_tokens": 312704,
+      "total_llm_calls": 5,
+      "total_cost": 0.26577285,
+      "total_input_tokens": 528587,
+      "total_output_tokens": 488,
+      "total_cached_tokens": 422912,
       "llm_calls": [
         {
-          "timestamp": 1773372923.0208552,
+          "timestamp": 1774820485.9094853,
           "model": "gpt-5.3-codex",
-          "cost": 0.17948525,
-          "input_tokens": 101891,
-          "output_tokens": 84,
-          "total_tokens": 101975,
-          "cached_tokens": 0,
+          "cost": 0.1796837,
+          "input_tokens": 103534,
+          "output_tokens": 80,
+          "total_tokens": 103614,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -110,23 +147,48 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_qFsbxi2NJ4FI6x0lBPkCWKEt"
+              "tool_call_id": "call_IwF9Ckeaum0uI0wDuru77ume"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_Wmi2rnSvi5knJvITk4zSnc4y"
+              "tool_call_id": "call_05rFQbDAfKcFOsZEcrE2VLwA"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773373028.6550465,
+          "timestamp": 1774820495.4981856,
           "model": "gpt-5.3-codex",
-          "cost": 0.02973915,
-          "input_tokens": 104989,
-          "output_tokens": 463,
-          "total_tokens": 105452,
-          "cached_tokens": 101888,
+          "cost": 0.0198037,
+          "input_tokens": 103726,
+          "output_tokens": 84,
+          "total_tokens": 103810,
+          "cached_tokens": 103424,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_CILG4kVsiYP7Q6COJj3PSxa5"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_UuTyZWzkDhcqdEGojgcxGkYk"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774820527.8541424,
+          "model": "gpt-5.3-codex",
+          "cost": 0.027664,
+          "input_tokens": 106824,
+          "output_tokens": 287,
+          "total_tokens": 107111,
+          "cached_tokens": 103680,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,19 +197,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_OeMuVVm0cBRiFd5vsdbIIsgj"
+              "tool_call_id": "call_4zafMsQIjfa2I7hn4jGZR0r7"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773373030.1040788,
+          "timestamp": 1774820529.8378937,
           "model": "gpt-5.3-codex",
-          "cost": 0.018974199999999997,
-          "input_tokens": 105540,
+          "cost": 0.01925665,
+          "input_tokens": 107199,
           "output_tokens": 14,
-          "total_tokens": 105554,
-          "cached_tokens": 105344,
+          "total_tokens": 107213,
+          "cached_tokens": 107008,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,19 +218,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_U6dzroujqHaX2klspMfRRLJD"
+              "tool_call_id": "call_nA9X3oWS0j9qHJayzK4qXnYx"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773373102.374587,
+          "timestamp": 1774820629.2304332,
           "model": "gpt-5.3-codex",
-          "cost": 0.019082349999999998,
-          "input_tokens": 105645,
+          "cost": 0.019364799999999998,
+          "input_tokens": 107304,
           "output_tokens": 23,
-          "total_tokens": 105668,
-          "cached_tokens": 105472,
+          "total_tokens": 107327,
+          "cached_tokens": 107136,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,7 +239,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_d8P7ytaB52l4bMoOP8ojRsPu"
+              "tool_call_id": "call_sYsdrTrBI269PxwuP3iU5wKG"
             }
           ],
           "finish_reason": "tool_calls"
@@ -185,15 +247,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.45926125,
-      "total_input_tokens": 629379,
-      "total_output_tokens": 932,
-      "total_llm_calls": 6
+      "total_cost": 0.5032902,
+      "total_input_tokens": 845492,
+      "total_output_tokens": 1010,
+      "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/ndpi/src/lib/protocols/http.c\n+++ b/ndpi/src/lib/protocols/http.c\n@@ -136,17 +136,18 @@\n     /* check for attachment */\n     if(packet->content_disposition_line.len > 0) {\n       u_int8_t attachment_len = sizeof(\"attachment; filename\");\n+      const u_int8_t *cd_ptr = packet->content_disposition_line.ptr;\n \n-      if(packet->content_disposition_line.len > attachment_len) {\n+      if((cd_ptr != NULL) && (packet->content_disposition_line.len > attachment_len)) {\n \tu_int8_t filename_len = packet->content_disposition_line.len - attachment_len;\n \n \tif(filename_len > ATTACHMENT_LEN) {\n-\t  attachment_len += filename_len-ATTACHMENT_LEN-1;\n+\t  u_int attachment_off = attachment_len + filename_len - ATTACHMENT_LEN - 1;\n \n-\t  if((attachment_len+ATTACHMENT_LEN) <= packet->content_disposition_line.len) {\n+\t  if((attachment_off + ATTACHMENT_LEN) <= packet->content_disposition_line.len) {\n \t    for(int i = 0; binary_file_ext[i] != NULL; i++) {\n \t      /* Use memcmp in case content-disposition contains binary data */\n-\t      if(memcmp((const char*)&packet->content_disposition_line.ptr[attachment_len],\n+\t      if(memcmp((const char*)&cd_ptr[attachment_off],\n \t\t\t binary_file_ext[i], ATTACHMENT_LEN) == 0) {\n \t\tflow->guessed_category = flow->category = NDPI_PROTOCOL_CATEGORY_DOWNLOAD_FT;\n \t\tNDPI_SET_BIT(flow->risk, NDPI_BINARY_APPLICATION_TRANSFER);\n",
+    "patch": "--- a/ndpi/src/lib/protocols/http.c\n+++ b/ndpi/src/lib/protocols/http.c\n@@ -99,6 +99,20 @@\n \t\t\t\t\t\t\tstruct ndpi_flow_struct *flow) {\n   struct ndpi_packet_struct *packet = &flow->packet;\n \n+  /*\n+   * HTTP line pointers refer to the current packet payload buffer.\n+   * In extra-packet reprocessing paths, stale pointers from previous packets\n+   * may survive in flow->packet while lengths remain non-zero, causing UAF.\n+   * Validate that pointers still point inside the current packet payload before\n+   * dereferencing them.\n+   */\n+  if(packet->content_disposition_line.len > 0) {\n+    if((packet->content_disposition_line.ptr == NULL)\n+       || (packet->content_disposition_line.ptr < packet->payload)\n+       || ((packet->content_disposition_line.ptr + packet->content_disposition_line.len) > (packet->payload + packet->payload_packet_len)))\n+      packet->content_disposition_line.len = 0;\n+  }\n+\n   if(packet->content_line.len > 0) {\n     u_int app_len = sizeof(\"application\");\n \n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -212,11 +274,22 @@
       {
         "tool_name": "read_source",
         "args": [
+          "src/lib/protocols/http.c",
+          149
+        ],
+        "kwargs": {},
+        "timestamp": 1852774.74706458,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'src/lib/protocols/http.c' does not exist in directory tree. Similar paths: ndpi/src/lib/protocols/http.c, extra=None))"
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
           "ndpi/src/lib/protocols/http.c",
           149
         ],
         "kwargs": {},
-        "timestamp": 405211.74420198,
+        "timestamp": 1852784.074559291,
         "success": true,
         "result_summary": "Ok({'contents': ' 50     NDPI_SET_BIT(flow->risk, NDPI_BINARY_APPLICATION_TRANSFER); /* Win executable */\\n 51   else if((flow->initial_binary_bytes_len >= 4) && (flow->initial_binary_bytes[0] == 0x7F..."
       }
@@ -226,11 +299,23 @@
         "tool_name": "find_references",
         "args": [
           "content_disposition_line",
+          "src/lib/protocols/http.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1852782.152899144,
+        "success": true,
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: ndpi/src/include/ndpi_typedefs.h, ndpi/src/lib/ndpi_main.c, ndpi/src/lib/protocols/http.c, extra=None))"
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "content_disposition_line",
           "ndpi/src/lib/protocols/http.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 405311.156735738,
+        "timestamp": 1852812.446912168,
         "success": true,
         "result_summary": "Ok([FileReferences(file_name='ndpi/src/lib/protocols/http.c', refs=[FileReference(line=137, content='    if(packet->content_disposition_line.len > 0) {', enclosing_definition='ndpi_http_check_content'..."
       }
@@ -240,10 +325,10 @@
         "tool_name": "apply_patch",
         "args": [
           "ndpi/src/lib/protocols/http.c",
-          "@@ -136,24 +136,26 @@\n     /* check for attachment */\n     if(packet->content_disposition_line.len > 0) {\n       u_int8_t attachment_len = sizeof(\"attachment; filename\");\n+      const u_int8_t *cd_ptr = packet->content_disposition_line.ptr;\n \n-      if(packet->content_disposition_line.len > attachment_len) {\n+      if((cd_ptr != NULL) && (packet->content_disposition_line.len > attachment_len)) {\n \tu_int8_t filename_len = packet->content_disposition_line.len - attachment_len;\n \n \tif(filename_len > ATTACHMENT_LEN) {\n-\t  attachment_len += filename_len-ATTACHMENT_LEN-1;\n+\t  u_int attachment_off = attachment_len + filename_len - ATTACHMENT_LEN - 1;\n \n-\t  if((attachment_len+ATTACHMENT_LEN) <= packet->content_disposition_line.len) {\n+\t  if((attachment_off + ATTACHMENT_LEN) <= packet->content_disposition_line.len) {\n \t    for(int i = 0; binary_file_ext[i] != NULL; i++) {\n \t      /* Use memcmp in case content-disposition contains binary data */\n-\t      if(memcmp((const char*)&packet->content_disposition_line.ptr[attachment_len],\n+\t      if(memcmp((const char*)&cd_ptr[attachment_off],\n \t\t\t binary_file_ext[i], ATTACHMENT_LEN) == 0) {\n \t\tflow->guessed_category = flow->category = NDPI_PROTOCOL_CATEGORY_DOWNLOAD_FT;\n \t\tNDPI_SET_BIT(flow->risk, NDPI_BINARY_APPLICATION_TRANSFER);\n \t\tNDPI_LOG_INFO(ndpi_struct, \"found executable HTTP transfer\");\n \t\treturn(flow->category);\n \t      }\n \t    }\n \t  }\n \t}\n       }\n     }\n"
+          "@@ -99,6 +99,19 @@ static ndpi_protocol_category_t ndpi_http_check_content(struct ndpi_detection_mo\n   struct ndpi_packet_struct *packet = &flow->packet;\n \n+  /*\n+   * HTTP line pointers refer to the current packet payload buffer.\n+   * In extra-packet reprocessing paths, stale pointers from previous packets\n+   * may survive in flow->packet while lengths remain non-zero, causing UAF.\n+   * Validate that pointers still point inside the current packet payload before\n+   * dereferencing them.\n+   */\n+  if(packet->content_disposition_line.len > 0) {\n+    if((packet->content_disposition_line.ptr == NULL)\n+       || (packet->content_disposition_line.ptr < packet->payload)\n+       || ((packet->content_disposition_line.ptr + packet->content_disposition_line.len) > (packet->payload + packet->payload_packet_len)))\n+      packet->content_disposition_line.len = 0;\n+  }\n+\n   if(packet->content_line.len > 0) {\n     u_int app_len = sizeof(\"application\");\n"
         ],
         "kwargs": {},
-        "timestamp": 405317.249194421,
+        "timestamp": 1852816.507429409,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -253,7 +338,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 405389.42897091,
+        "timestamp": 1852916.366490138,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

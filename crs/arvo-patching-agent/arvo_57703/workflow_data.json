@@ -1,5 +1,5 @@
 {
-  "vuln_id": 170,
+  "vuln_id": 489,
   "crash_result": {
     "output": "==1050==ERROR: AddressSanitizer: heap-use-after-free on address 0x62f000044410 at pc 0x00000074d63d bp 0x7ffdcd1fdf30 sp 0x7ffdcd1fdf28\nREAD of size 4 at 0x62f000044410 thread T0\nSCARINESS: 45 (4-byte-read-heap-use-after-free)\n    #0 0x74d63c in mrb_gc_mark /src/mruby/src/gc.c:743:8\n    #1 0x724810 in iv_mark_i /src/mruby/src/variable.c:238:3\n    #2 0x724810 in iv_foreach /src/mruby/src/variable.c:188:11\n    #3 0x724810 in mark_tbl /src/mruby/src/variable.c:245:3\n    #4 0x724810 in mrb_gc_mark_i",
     "stack": "#0 0x74d63c in mrb_gc_mark mruby/src/gc.c:743:8\n#1 0x724810 in iv_mark_i mruby/src/variable.c:238:3\n#2 0x724810 in iv_foreach mruby/src/variable.c:188:11\n#3 0x724810 in mark_tbl mruby/src/variable.c:245:3\n#4 0x724810 in mrb_gc_mark_iv mruby/src/variable.c:264:3\n#5 0x7542a0 in gc_mark_children mruby/src/gc.c:654:5\n#6 0x7503c4 in incremental_marking_phase mruby/src/gc.c:1052:5\n#7 0x7503c4 in incremental_gc mruby/src/gc.c:1192:14\n#8 0x74a791 in incremental_gc_finish mruby/src/gc.c:1217:5\n#9 0x74a79",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "mrb_objspace_each_objects",
     "file": "mruby/src/gc.c",
-    "description": "Use-after-free caused by running a full GC at the start of ObjectSpace iteration (`mrb_full_gc(mrb)` in `mrb_objspace_each_objects`) and then iterating raw heap slots without ensuring all references reachable from object instance-variable tables are safely marked/stable for this traversal mode. During `ObjectSpace.count_objects`, sweep frees an object/slot, but later marking (`iv_mark_i` -> `mrb_gc_mark_value` -> `mrb_gc_mark`) still visits a stale value from an iv table, producing a heap UAF read in `mrb_gc_mark` (crash site gc.c:743).",
-    "conditions": "Triggered by `mruby_proto_fuzzer` script that creates many arrays/objects (COMB/PERM/etc.) and repeatedly calls `ObjectSpace.count_objects` (`os_count_objects` -> `mrb_objspace_each_objects`). The call forces full GC and object-space walk; with sufficient heap churn and iv-table contents, incremental/full GC transitions sweep freed slots and then mark through stale iv entries, causing UAF during GC mark phase."
+    "description": "`mrb_objspace_each_objects` performs `mrb_full_gc(mrb)` before setting `mrb->gc.iterating = TRUE`. During that full GC, sweep can free objects while other live structures (notably instance-variable tables) may still contain references to those soon-freed RVALUE slots. Marking then later traverses stale iv entries (`iv_foreach` -> `iv_mark_i` -> `mrb_gc_mark_value` -> `mrb_gc_mark`) and reads freed RVALUE memory, causing the heap-use-after-free. The root issue is unsafe GC state transition/order in objectspace iteration, not the mark helper itself.",
+    "conditions": "Triggered by Ruby code that invokes `ObjectSpace.count_objects` (from the proto fuzzer script) after creating many arrays/objects and complex nested blocks, causing heavy GC activity. The call path is: fuzz input -> generated Ruby -> `os_count_objects` -> `mrb_objspace_each_objects` -> forced full GC. Because iteration mode is enabled too late (after GC), full GC can sweep/free entries that are still reachable via iv-table traversal during marking, leading to UAF in `mrb_gc_mark`."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.0883036,
-      "total_input_tokens": 108216,
-      "total_output_tokens": 470,
-      "total_cached_tokens": 68352,
+      "total_cost": 0.086814,
+      "total_input_tokens": 108480,
+      "total_output_tokens": 489,
+      "total_cached_tokens": 69760,
       "llm_calls": [
         {
-          "timestamp": 1773467269.7663267,
+          "timestamp": 1774876214.9719296,
           "model": "gpt-5.3-codex",
-          "cost": 0.061124,
-          "input_tokens": 34056,
+          "cost": 0.059463600000000005,
+          "input_tokens": 34144,
           "output_tokens": 109,
-          "total_tokens": 34165,
-          "cached_tokens": 0,
+          "total_tokens": 34253,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_LxXRZzy7enLGna2ti7H5nmHn"
+              "tool_call_id": "call_t0gXV4hBtwFhvG94XRF6BPSA"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_3zgtC8d07Tb0f7rdyiIauRxE"
+              "tool_call_id": "call_vu9LlfNOeIIK4DiHs6gPCXO1"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_xZdpzN0RrAfdvpw3v8nxxDMR"
+              "tool_call_id": "call_4KDjkw8RX2AKT9XZjh7423Lp"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467275.5732706,
+          "timestamp": 1774876238.8667033,
           "model": "gpt-5.3-codex",
-          "cost": 0.007911399999999999,
-          "input_tokens": 34316,
+          "cost": 0.0078638,
+          "input_tokens": 34404,
           "output_tokens": 106,
-          "total_tokens": 34422,
-          "cached_tokens": 34048,
+          "total_tokens": 34510,
+          "cached_tokens": 34176,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,27 +80,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_2S2BaWqLuTuRR6jYXBGozT7m"
+              "tool_call_id": "call_fhJsqigzCQO8gNuj9Z6U4edr"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_UQmS1FGUVeZybwdn02acAH1A"
+              "tool_call_id": "call_NE3miGkZUL57BlxosPg1ULv2"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_IzsfFrzf2pLw9JtUzq1kvKAX"
+              "tool_call_id": "call_LWMr8pW2ypNav3WGJqbJRZnV"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467280.599859,
+          "timestamp": 1774876246.7555246,
           "model": "gpt-5.3-codex",
-          "cost": 0.0192682,
-          "input_tokens": 39844,
-          "output_tokens": 255,
-          "total_tokens": 40099,
-          "cached_tokens": 34304,
+          "cost": 0.0194866,
+          "input_tokens": 39932,
+          "output_tokens": 274,
+          "total_tokens": 40206,
+          "cached_tokens": 34432,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -109,7 +109,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_94XXRnOxroPWLZlCM8EMRHN0"
+              "tool_call_id": "call_BpPvLM0Xby64RnTZKjyr9Ah8"
             }
           ],
           "finish_reason": "tool_calls"
@@ -118,18 +118,18 @@
     },
     "patching": {
       "total_llm_calls": 5,
-      "total_cost": 0.09288054999999999,
-      "total_input_tokens": 174009,
-      "total_output_tokens": 320,
-      "total_cached_tokens": 137216,
+      "total_cost": 0.09663814999999999,
+      "total_input_tokens": 184921,
+      "total_output_tokens": 290,
+      "total_cached_tokens": 146688,
       "llm_calls": [
         {
-          "timestamp": 1773467284.480126,
+          "timestamp": 1774876251.873565,
           "model": "gpt-5.3-codex",
-          "cost": 0.05773775,
-          "input_tokens": 32457,
-          "output_tokens": 67,
-          "total_tokens": 32524,
+          "cost": 0.0630805,
+          "input_tokens": 35470,
+          "output_tokens": 72,
+          "total_tokens": 35542,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -139,48 +139,44 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_1Rwsoq3KUEmTB99vElHKY24i"
+              "tool_call_id": "call_aEafnLvVaOroMAiWMZC8wk7L"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_RvwUjpPHwukT2RHnX3uzGrUG"
+              "tool_name": "find_references",
+              "tool_call_id": "call_gPmnBrCvhJOvnFlS7aeoa18a"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467287.0604877,
+          "timestamp": 1774876322.7094638,
           "model": "gpt-5.3-codex",
-          "cost": 0.0070497,
-          "input_tokens": 32606,
-          "output_tokens": 71,
-          "total_tokens": 32677,
-          "cached_tokens": 32384,
+          "cost": 0.00749105,
+          "input_tokens": 35951,
+          "output_tokens": 30,
+          "total_tokens": 35981,
+          "cached_tokens": 35456,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 1,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_uftyfZxI9Dq1pWFvTnNqvWRW"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_CgjoPCtJZUJ8rHiJDDzzBP8u"
+              "tool_call_id": "call_QytOf3wTq1SaFFRs2hbdxsL5"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467289.4517426,
+          "timestamp": 1774876325.9369109,
           "model": "gpt-5.3-codex",
-          "cost": 0.01404235,
-          "input_tokens": 36125,
-          "output_tokens": 145,
-          "total_tokens": 36270,
-          "cached_tokens": 32512,
+          "cost": 0.01153425,
+          "input_tokens": 37639,
+          "output_tokens": 151,
+          "total_tokens": 37790,
+          "cached_tokens": 35840,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -189,19 +185,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_nnj2AtvcimKp8FykJfusRDvf"
+              "tool_call_id": "call_8HoJbvel8ztRQPMm5ZKXYqK4"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467290.5461714,
+          "timestamp": 1774876327.1615348,
           "model": "gpt-5.3-codex",
-          "cost": 0.0069713,
-          "input_tokens": 36358,
+          "cost": 0.0072121,
+          "input_tokens": 37878,
           "output_tokens": 14,
-          "total_tokens": 36372,
-          "cached_tokens": 36096,
+          "total_tokens": 37892,
+          "cached_tokens": 37632,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -210,19 +206,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_7KCi5cxMHqnI9ShpEOmFYoGk"
+              "tool_call_id": "call_OpjBiw85M7EELPxO55W2VD8H"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467321.1354601,
+          "timestamp": 1774876363.496696,
           "model": "gpt-5.3-codex",
-          "cost": 0.00707945,
-          "input_tokens": 36463,
+          "cost": 0.0073202499999999995,
+          "input_tokens": 37983,
           "output_tokens": 23,
-          "total_tokens": 36486,
-          "cached_tokens": 36224,
+          "total_tokens": 38006,
+          "cached_tokens": 37760,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -231,7 +227,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_kP1zETVZAoX8j4E38QwYyTkW"
+              "tool_call_id": "call_VR2EJaLS41PzixRMIL65Vx7c"
             }
           ],
           "finish_reason": "tool_calls"
@@ -239,9 +235,9 @@
       ]
     },
     "total": {
-      "total_cost": 0.18118415,
-      "total_input_tokens": 282225,
-      "total_output_tokens": 790,
+      "total_cost": 0.18345214999999998,
+      "total_input_tokens": 293401,
+      "total_output_tokens": 779,
       "total_llm_calls": 8
     }
   },
@@ -270,31 +266,9 @@
           1589
         ],
         "kwargs": {},
-        "timestamp": 499573.509991682,
+        "timestamp": 1908565.049911938,
         "success": true,
         "result_summary": "Err(CRSError(path 'src/gc.c' does not exist in directory tree. Similar paths: mruby/src/gc.c, extra=None))"
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "src/variable.c",
-          238
-        ],
-        "kwargs": {},
-        "timestamp": 499573.916636421,
-        "success": true,
-        "result_summary": "Err(CRSError(path 'src/variable.c' does not exist in directory tree. Similar paths: mruby/src/variable.c, extra=None))"
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "mruby/src/variable.c",
-          238
-        ],
-        "kwargs": {},
-        "timestamp": 499575.636702993,
-        "success": true,
-        "result_summary": "Ok({'contents': '139   }\\n140 }\\n141 \\n142 /* Deletes the value for the symbol from the instance variable table. */\\n143 static mrb_bool\\n144 iv_del(mrb_state *mrb, iv_tbl *t, mrb_sym sym, mrb_value *..."
       },
       {
         "tool_name": "read_source",
@@ -303,21 +277,34 @@
           1589
         ],
         "kwargs": {},
-        "timestamp": 499575.637587537,
+        "timestamp": 1908611.286092118,
         "success": true,
         "result_summary": "Ok({'contents': '1490 \\n1491 /*\\n1492  *  call-seq:\\n1493  *     GC.step_ratio = int   -> nil\\n1494  *\\n1495  *  Updates step span ratio of Incremental GC. Default value is 200(%).\\n1496  *  1 step of..."
       }
     ],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "mrb_objspace_each_objects",
+          "",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1908607.381198375,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='mruby/src/class.c', refs=[FileReference(line=1488, content='    mrb_objspace_each_objects(mrb, fix_include_module, data);', enclosing_definition='mrb_include_module'), Fi..."
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "mruby/src/gc.c",
-          "@@ -1586,8 +1586,8 @@\n mrb_objspace_each_objects(mrb_state *mrb, mrb_each_object_callback *callback, void *data)\n {\n   mrb_bool iterating = mrb->gc.iterating;\n \n-  mrb_full_gc(mrb);\n   mrb->gc.iterating = TRUE;\n+  mrb_full_gc(mrb);\n   if (iterating) {\n     gc_each_objects(mrb, &mrb->gc, callback, data);\n   }\n"
+          "@@ -1584,10 +1584,10 @@\n void\n mrb_objspace_each_objects(mrb_state *mrb, mrb_each_object_callback *callback, void *data)\n {\n   mrb_bool iterating = mrb->gc.iterating;\n \n-  mrb_full_gc(mrb);\n   mrb->gc.iterating = TRUE;\n+  mrb_full_gc(mrb);\n   if (iterating) {\n     gc_each_objects(mrb, &mrb->gc, callback, data);\n   }\n   else {\n"
         ],
         "kwargs": {},
-        "timestamp": 499578.05979271,
+        "timestamp": 1908614.533888496,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -327,7 +314,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 499608.155525839,
+        "timestamp": 1908650.380875769,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

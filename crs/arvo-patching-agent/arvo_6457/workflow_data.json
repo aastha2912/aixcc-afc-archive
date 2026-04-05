@@ -1,5 +1,5 @@
 {
-  "vuln_id": 194,
+  "vuln_id": 302,
   "crash_result": {
     "output": "==39652==ERROR: AddressSanitizer: attempting free on address which was not malloc()-ed: 0x631000000800 in thread T0\nSCARINESS: 40 (bad-free)\n    #0 0x4e6068 in __interceptor_cfree.localalias.0 /src/llvm/projects/compiler-rt/lib/asan/asan_malloc_linux.cc:76\n    #1 0x7b4951 in RelinquishMagickMemory /src/imagemagick/MagickCore/memory.c:1032:3\n    #2 0x65e38d in ImageToBlob /src/imagemagick/MagickCore/blob.c:1916:29\n    #3 0x65fe58 in ImagesToBlob /src/imagemagick/MagickCore/blob.c:2300:14\n    #4 0",
     "stack": "#0 0x4e6068 in __interceptor_cfree.localalias.0 llvm/projects/compiler-rt/lib/asan/asan_malloc_linux.cc:76\n#1 0x7b4951 in RelinquishMagickMemory imagemagick/MagickCore/memory.c:1032:3\n#2 0x65e38d in ImageToBlob imagemagick/MagickCore/blob.c:1916:29\n#3 0x65fe58 in ImagesToBlob imagemagick/MagickCore/blob.c:2300:14\n#4 0x5cb808 in Magick::Image::write(Magick::Blob*, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&) imagemagick/Magick++/lib/Image.cpp:4896:",
@@ -22,59 +22,55 @@
     "dedup": "__interceptor_cfree.localalias.0--RelinquishMagickMemory--ImageToBlob"
   },
   "analyzed_vuln": {
-    "function": "WritePCDTile",
-    "file": "imagemagick/coders/pcd.c",
-    "description": "Invalid free is caused by type confusion in WritePCDTile(): it fetches pixels from downsample_image into q, but then uses GetPixelGreen(tile_image,q)/GetPixelBlue(tile_image,q) and advances q with GetPixelChannels(tile_image). If tile_image and downsample_image channel layouts differ, q is interpreted with the wrong image metadata and stepped with the wrong stride, producing out-of-bounds reads and memory corruption. That corruption later manifests as a bad free in ImageToBlob()/RelinquishMagickMemory when the blob buffer pointer is no longer valid.",
-    "conditions": "The encoder_pcd_fuzzer decodes attacker-controlled input into an Image and then writes it as PCD via Magick::Image::write -> ImagesToBlob -> ImageToBlob -> WriteImage(s) -> WritePCDImage -> WritePCDTile. A crafted input that yields a tile_image/downsample_image channel mismatch (or otherwise makes their pixel channel counts differ) triggers mis-strided q access in WritePCDTile\u2019s chroma write loops, corrupting heap state; crash is observed later as attempting to free a non-malloc pointer in ImageToBlob."
+    "function": "ImageToBlob",
+    "file": "imagemagick/MagickCore/blob.c",
+    "description": "ImageToBlob() assumes that the pointer returned by DetachBlob(image->blob) is always heap-owned by Magick allocator and unconditionally frees it on write failure (`else if (status == MagickFalse) blob=RelinquishMagickMemory(blob);`). For this PoV, the PCD encode path leaves image->blob data pointer in a non-owned/non-malloc state, so DetachBlob returns a wild/non-heap pointer and ImageToBlob performs an invalid free (ASan bad-free). The crash is observed in RelinquishMagickMemory, but the root cause is ownership validation missing in ImageToBlob\u2019s blob-detach/error-cleanup logic.",
+    "conditions": "In encoder_pcd_fuzzer, attacker-controlled bytes are read as a PCD image (`image.read(blob)`), then re-encoded via `image.write(&outBlob, \"PCD\")`, which reaches ImagesToBlob -> ImageToBlob. The input must drive the PCD write path to fail after blob detachment (status==MagickFalse) while `image->blob` points to non-owned storage; then ImageToBlob frees that detached pointer. Thus trigger requires crafted PCD content that corrupts/poisons blob ownership state during decode/encode so cleanup path frees a non-malloc pointer."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 5,
-      "total_cost": 0.06603275,
-      "total_input_tokens": 108485,
-      "total_output_tokens": 516,
-      "total_cached_tokens": 83200,
+      "total_llm_calls": 2,
+      "total_cost": 0.04201679999999999,
+      "total_input_tokens": 35368,
+      "total_output_tokens": 409,
+      "total_cached_tokens": 16256,
       "llm_calls": [
         {
-          "timestamp": 1773519862.1486692,
+          "timestamp": 1774811113.7140477,
           "model": "gpt-5.3-codex",
-          "cost": 0.02648485,
-          "input_tokens": 15035,
-          "output_tokens": 142,
-          "total_tokens": 15177,
+          "cost": 0.02621885,
+          "input_tokens": 15123,
+          "output_tokens": 112,
+          "total_tokens": 15235,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_J1Y2wYGfXy8g05pGCV3tBq8F"
+              "tool_call_id": "call_PJEH7QMWdeJeiC5PHGZF9SMV"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Y260PRdCKDwGDB1AcydBpV9X"
+              "tool_call_id": "call_xury1Bwn3OwLLLppGz9hB6cb"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_aVv74dpOLDm2ucHx8UY00AFu"
-            },
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_wKbSJ75lLStPH5jKZMu1BmQZ"
+              "tool_call_id": "call_d0VnaSifHsHvyMUQYMKRJT7W"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773520127.763393,
+          "timestamp": 1774811119.4201405,
           "model": "gpt-5.3-codex",
-          "cost": 0.0146062,
-          "input_tokens": 21620,
-          "output_tokens": 40,
-          "total_tokens": 21660,
+          "cost": 0.015797949999999998,
+          "input_tokens": 20245,
+          "output_tokens": 297,
+          "total_tokens": 20542,
           "cached_tokens": 15104,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -83,71 +79,8 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "find_references",
-              "tool_call_id": "call_SyChmXgUF5nJCXG7YBnG8kdw"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773520185.417142,
-          "model": "gpt-5.3-codex",
-          "cost": 0.004627699999999999,
-          "input_tokens": 21742,
-          "output_tokens": 32,
-          "total_tokens": 21774,
-          "cached_tokens": 21504,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_x7VmAO7f0CyFwsxAZGVHVZGJ"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773520187.5438209,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0083216,
-          "input_tokens": 23960,
-          "output_tokens": 33,
-          "total_tokens": 23993,
-          "cached_tokens": 21632,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_yQKL4ied11dtvDk6eKlMMHBR"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773520192.035868,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0119924,
-          "input_tokens": 26128,
-          "output_tokens": 269,
-          "total_tokens": 26397,
-          "cached_tokens": 23808,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
               "tool_name": "terminate",
-              "tool_call_id": "call_pws7qTWUkDQmwfx2fwL9y64O"
+              "tool_call_id": "call_YAzTKmzhb1W8RJxMPcsjtWHw"
             }
           ],
           "finish_reason": "tool_calls"
@@ -156,18 +89,18 @@
     },
     "patching": {
       "total_llm_calls": 6,
-      "total_cost": 0.060528649999999996,
-      "total_input_tokens": 110959,
-      "total_output_tokens": 764,
-      "total_cached_tokens": 91648,
+      "total_cost": 0.0626892,
+      "total_input_tokens": 118440,
+      "total_output_tokens": 732,
+      "total_cached_tokens": 98304,
       "llm_calls": [
         {
-          "timestamp": 1773520194.3234112,
+          "timestamp": 1774811121.599868,
           "model": "gpt-5.3-codex",
-          "cost": 0.02586395,
-          "input_tokens": 15517,
-          "output_tokens": 95,
-          "total_tokens": 15612,
+          "cost": 0.02690345,
+          "input_tokens": 16207,
+          "output_tokens": 83,
+          "total_tokens": 16290,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -176,24 +109,24 @@
           "tool_call_count": 2,
           "tool_calls": [
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_1Xo4neLXGrrgK3XdntrJcsIa"
+              "tool_name": "read_source",
+              "tool_call_id": "call_Wg37ozqiiOoXFWPnuDK28W2V"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_eyUsC00nEmJxng1t8L294PRV"
+              "tool_call_id": "call_qmQ93cRoldtbiJQzpys8efTZ"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773520293.632787,
+          "timestamp": 1774811582.4064558,
           "model": "gpt-5.3-codex",
-          "cost": 0.00365365,
-          "input_tokens": 15771,
-          "output_tokens": 32,
-          "total_tokens": 15803,
-          "cached_tokens": 15488,
+          "cost": 0.00986965,
+          "input_tokens": 18627,
+          "output_tokens": 191,
+          "total_tokens": 18818,
+          "cached_tokens": 16128,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -201,20 +134,20 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_BzDrunePaG09Zyt9Re2hs1hr"
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_nqoE0vua3C9T6agc5reQ4eUH"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773520294.9894712,
+          "timestamp": 1774811585.8291028,
           "model": "gpt-5.3-codex",
-          "cost": 0.00713405,
-          "input_tokens": 17867,
+          "cost": 0.00428015,
+          "input_tokens": 19001,
           "output_tokens": 33,
-          "total_tokens": 17900,
-          "cached_tokens": 15616,
+          "total_tokens": 19034,
+          "cached_tokens": 18688,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -223,19 +156,19 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_EitAB9M9xCBJM3UCYYmrXkWI"
+              "tool_call_id": "call_YDQPvTKs0mcY68niPFnV98us"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773520299.4580646,
+          "timestamp": 1774811588.6013532,
           "model": "gpt-5.3-codex",
-          "cost": 0.011450599999999998,
-          "input_tokens": 20132,
-          "output_tokens": 303,
-          "total_tokens": 20435,
-          "cached_tokens": 17792,
+          "cost": 0.0096607,
+          "input_tokens": 21234,
+          "output_tokens": 167,
+          "total_tokens": 21401,
+          "cached_tokens": 18944,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -244,19 +177,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_ep3mBjNZl0XUR034v3GIT7EU"
+              "tool_call_id": "call_RvgfmgjxpwcpqXBI4d1bHrvU"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773520303.3540354,
+          "timestamp": 1774811590.9228685,
           "model": "gpt-5.3-codex",
-          "cost": 0.0079016,
-          "input_tokens": 20608,
-          "output_tokens": 278,
-          "total_tokens": 20886,
-          "cached_tokens": 20352,
+          "cost": 0.00608615,
+          "input_tokens": 21577,
+          "output_tokens": 128,
+          "total_tokens": 21705,
+          "cached_tokens": 21248,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -265,19 +198,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_kdFVnpfyKlvJBvVWUCFtD1uz"
+              "tool_call_id": "call_AzePPmJs3Mo6UGWZQBWhpiHR"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773520304.6781979,
+          "timestamp": 1774811593.3083746,
           "model": "gpt-5.3-codex",
-          "cost": 0.0045248,
-          "input_tokens": 21064,
-          "output_tokens": 23,
-          "total_tokens": 21087,
-          "cached_tokens": 20736,
+          "cost": 0.0058890999999999995,
+          "input_tokens": 21794,
+          "output_tokens": 130,
+          "total_tokens": 21924,
+          "cached_tokens": 21632,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -286,7 +219,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_teD03DUGtQP21spksVA4Jfvl"
+              "tool_call_id": "call_aZVwle1PFEopS7zF7SDfnpor"
             }
           ],
           "finish_reason": "tool_calls"
@@ -294,10 +227,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.1265614,
-      "total_input_tokens": 219444,
-      "total_output_tokens": 1280,
-      "total_llm_calls": 11
+      "total_cost": 0.104706,
+      "total_input_tokens": 153808,
+      "total_output_tokens": 1141,
+      "total_llm_calls": 8
     }
   },
   "patch_result": {
@@ -306,81 +239,78 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "WritePCDTile",
-          "imagemagick/coders/pcd.c",
-          1,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 552507.734117978,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n969 %    o image_info: the image info., extra=None))"
-      }
-    ],
+    "read_definition": [],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
-          "imagemagick/coders/pcd.c",
-          969
+          "imagemagick/MagickCore/blob.c",
+          1916
         ],
         "kwargs": {},
-        "timestamp": 552582.359029299,
+        "timestamp": 1843410.177088065,
         "success": true,
-        "result_summary": "Ok({'contents': ' 870   image->gamma=1.000f/2.200f;\\n 871   image->colorspace=YCCColorspace;\\n 872   if (LocaleCompare(image_info->magick,\"PCDS\") == 0)\\n 873     (void) SetImageColorspace(image,sRGBCo..."
+        "result_summary": "Ok({'contents': '1817 }\\n1818 \\n1819 \\n1820 /*\\n1821 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%\\n1822 %                                                            ..."
       },
       {
         "tool_name": "read_source",
         "args": [
-          "imagemagick/coders/pcd.c",
-          1070
+          "imagemagick/MagickCore/blob.c",
+          1943
         ],
         "kwargs": {},
-        "timestamp": 552583.565172805,
+        "timestamp": 1843874.405408029,
         "success": true,
-        "result_summary": "Ok({'contents': ' 971 %    o image:  The image.\\n 972 %\\n 973 %    o exception: return any errors or warnings in this structure.\\n 974 %\\n 975 */\\n 976 \\n 977 static MagickBooleanType WritePCDTile(Ima..."
+        "result_summary": "Ok({'contents': '1844   assert(image != (const Image *) NULL);\\n1845   assert(image->signature == MagickCoreSignature);\\n1846   if (image->debug != MagickFalse)\\n1847     (void) LogMagickEvent(TraceEv..."
       }
     ],
     "find_references": [
       {
         "tool_name": "find_references",
         "args": [
-          "WritePCDTile",
-          "imagemagick/coders/pcd.c",
+          "DetachBlob",
+          "imagemagick/MagickCore/blob.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 552578.526559003,
+        "timestamp": 1843868.370422289,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='imagemagick/coders/pcd.c', refs=[FileReference(line=1181, content=\"    (void) WriteBlobByte(pcd_image,'\\\\1');\", enclosing_definition='WritePCDImage'), FileReference(line=..."
+        "result_summary": "Ok([FileReferences(file_name='imagemagick/MagickCore/blob.c', refs=[FileReference(line=471, content='', enclosing_definition='BlobToImage'), FileReference(line=707, content='    case FifoStream:', enc..."
       }
     ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
-          "imagemagick/coders/pcd.c",
-          "@@ -1082,18 +1082,18 @@\n     for (x=0; x < (ssize_t) downsample_image->columns; x++)\n     {\n       (void) WriteBlobByte(image,ScaleQuantumToChar(\n-        GetPixelGreen(tile_image,q)));\n-      q+=GetPixelChannels(tile_image);\n+        GetPixelGreen(downsample_image,q)));\n+      q+=GetPixelChannels(downsample_image);\n     }\n     q=GetVirtualPixels(downsample_image,0,y >> 1,downsample_image->columns,1,\n       exception);\n     if (q == (Quantum *) NULL)\n       break;\n     for (x=0; x < (ssize_t) downsample_image->columns; x++)\n     {\n       (void) WriteBlobByte(image,ScaleQuantumToChar(\n-        GetPixelBlue(tile_image,q)));\n-      q+=GetPixelChannels(tile_image);\n+        GetPixelBlue(downsample_image,q)));\n+      q+=GetPixelChannels(downsample_image);\n     }\n     status=SetImageProgress(image,SaveImageTag,y,tile_image->rows);\n     if (status == MagickFalse)\n"
+          "imagemagick/MagickCore/blob.c",
+          "@@ -1943,8 +1943,13 @@\n           blob=DetachBlob(image->blob);\n           if (blob == (void *) NULL)\n             blob_info->blob=RelinquishMagickMemory(blob_info->blob);\n-          else if (status == MagickFalse)\n-            blob=RelinquishMagickMemory(blob);\n+          else if (status == MagickFalse)\n+            {\n+              if (image->blob->mapped != MagickFalse)\n+                blob=(void *) NULL;\n+              else\n+                blob=RelinquishMagickMemory(blob);\n+            }\n           else\n             blob=ResizeQuantumMemory(blob,*length+1,sizeof(unsigned char));\n         }\n"
         ],
         "kwargs": {},
-        "timestamp": 552588.064252644,
+        "timestamp": 1843871.032360911,
         "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 1082): The patch context lines have introduced a typographic error. The context you provided removed `{`. Please double check..."
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 1943): The patch context lines have introduced a typographic error. The context you provided removed `)`. Please double check..."
       },
       {
         "tool_name": "apply_patch",
         "args": [
-          "imagemagick/coders/pcd.c",
-          "@@ -1081,16 +1081,16 @@\n       break;\n     for (x=0; x < (ssize_t) downsample_image->columns; x++)\n     {\n       (void) WriteBlobByte(image,ScaleQuantumToChar(\n-        GetPixelGreen(tile_image,q)));\n-      q+=GetPixelChannels(tile_image);\n+        GetPixelGreen(downsample_image,q)));\n+      q+=GetPixelChannels(downsample_image);\n     }\n     q=GetVirtualPixels(downsample_image,0,y >> 1,downsample_image->columns,1,\n       exception);\n     if (q == (Quantum *) NULL)\n       break;\n     for (x=0; x < (ssize_t) downsample_image->columns; x++)\n     {\n       (void) WriteBlobByte(image,ScaleQuantumToChar(\n-        GetPixelBlue(tile_image,q)));\n-      q+=GetPixelChannels(tile_image);\n+        GetPixelBlue(downsample_image,q)));\n+      q+=GetPixelChannels(downsample_image);\n     }\n"
+          "imagemagick/MagickCore/blob.c",
+          "@@ -1944,7 +1944,12 @@\n           if (blob == (void *) NULL)\n             blob_info->blob=RelinquishMagickMemory(blob_info->blob);\n           else if (status == MagickFalse)\n-            blob=RelinquishMagickMemory(blob);\n+            {\n+              if (image->blob->mapped != MagickFalse)\n+                blob=(void *) NULL;\n+              else\n+                blob=RelinquishMagickMemory(blob);\n+            }\n           else\n             blob=ResizeQuantumMemory(blob,*length+1,sizeof(unsigned char));\n         }"
         ],
         "kwargs": {},
-        "timestamp": 552591.960995077,
+        "timestamp": 1843877.228723052,
         "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 1081): The patch context lines have introduced a typographic error. The context you provided removed `)`. Please double check..."
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 1944): The patch context lines have introduced a typographic error. The context you provided inserted `)`. Please double chec..."
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "imagemagick/MagickCore/blob.c",
+          "@@ -1946,2 +1946,7 @@\n-          else if (status == MagickFalse)\n-            blob=RelinquishMagickMemory(blob);\n+          else if (status == MagickFalse)\n+            {\n+              if (image->blob->mapped != MagickFalse)\n+                blob=(void *) NULL;\n+              else\n+                blob=RelinquishMagickMemory(blob);\n+            }"
+        ],
+        "kwargs": {},
+        "timestamp": 1843879.539929218,
+        "success": true,
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 1946): sw_align failed: Context lines did not match OR matched multiple locations. Please double-check the correctness of the..."
       }
     ],
     "test_patch": [],

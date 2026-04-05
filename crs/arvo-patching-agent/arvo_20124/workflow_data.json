@@ -1,5 +1,5 @@
 {
-  "vuln_id": 232,
+  "vuln_id": 334,
   "crash_result": {
     "output": "AddressSanitizer:DEADLYSIGNAL\n=================================================================\n==640==ERROR: AddressSanitizer: SEGV on unknown address (pc 0x000000ed2a5d bp 0x7ffd0c501ad0 sp 0x7ffd0c5019c0 T0)\n==640==The signal is caused by a READ memory access.\n==640==Hint: this fault was caused by a dereference of a high value address (see register values below).  Dissassemble the provided pc to learn which register was used.\nSCARINESS: 20 (wild-addr-read)\n    #0 0xed2a5d in SafeLoadAs<int> /",
     "stack": "#0 0xed2a5d in SafeLoadAs<int> arrow/cpp/src/arrow/util/ubsan.h:58:3\n#1 0xed2a5d in arrow::ipc::ReadMessage(long, int, arrow::io::RandomAccessFile*, std::__1::unique_ptr<arrow::ipc::Message, std::__1::default_delete<arrow::ipc::Message> >*) arrow/cpp/src/arrow/ipc/message.cc:254:32\n#2 0x6da171 in arrow::ipc::RecordBatchFileReader::RecordBatchFileReaderImpl::ReadMessageFromBlock(arrow::ipc::internal::FileBlock const&, std::__1::unique_ptr<arrow::ipc::Message, std::__1::default_delete<arrow::ipc::",
@@ -22,27 +22,27 @@
     "dedup": "SafeLoadAs<int>--arrow::ipc::ReadMessage(long, int, arrow::io::RandomAccessFile*, std::__1::unique_ptr<arrow::ipc::Message, std::__1::default_delete<arrow::ipc::Message> >*)--arrow::ipc::RecordBatchFileReader::RecordBatchFileReaderImpl::ReadMessageFromBlock(arrow::ipc::internal::FileBlock const&, std::__1::unique_ptr<arrow::ipc::Message, std::__1::default_delete<arrow::ipc::Message> >*)"
   },
   "analyzed_vuln": {
-    "function": "ReadFooter",
-    "file": "arrow/cpp/src/arrow/ipc/reader.cc",
-    "description": "`RecordBatchFileReaderImpl::ReadFooter()` reads the 4-byte footer length using `*reinterpret_cast<const int32_t*>(buffer->data())` (line ~644) without using a safe unaligned load helper. This can produce a corrupted/host-endian-dependent `footer_length` from fuzzed bytes, which is then trusted to locate footer blocks. Later, `ReadMessageFromBlock()` passes attacker-controlled `block.metadata_length` into `ReadMessage()`, where `SafeLoadAs<int32_t>(buffer->data())` dereferences an invalid pointer and crashes. The crash is observed in `ReadMessage`/`SafeLoadAs`, but the root cause is insufficient validation/safe parsing of footer-derived block metadata in `ReadFooter` path.",
-    "conditions": "In `arrow-ipc-file-fuzz`, attacker input is treated as an IPC file. The file must pass basic magic/footer checks enough to reach footer parsing, then provide crafted footer/block values (especially dictionary block metadata_length/offset) so `ReadDictionaries()` -> `ReadMessageFromBlock()` calls `ReadMessage()` with invalid metadata parameters. This leads to a wild read when loading the continuation token from the returned buffer in `SafeLoadAs<int32_t>`. The PoV\u2019s malformed footer/block table with many 0xFF fields satisfies this."
+    "function": "ReadMessage",
+    "file": "arrow/cpp/src/arrow/ipc/message.cc",
+    "description": "`ReadMessage(int64_t offset, int32_t metadata_length, io::RandomAccessFile*, ...)` trusts `metadata_length` from file metadata and only guards it with `ARROW_CHECK_GT((size_t)metadata_length, sizeof(int32_t))`. If `metadata_length` is negative, the cast to `size_t` makes the check pass, `ReadAt(offset, metadata_length)` can return an empty/invalid buffer, and then `util::SafeLoadAs<int32_t>(buffer->data())` unconditionally memcpy-reads 4 bytes from an invalid pointer, causing the wild read/SEGV. The root bug is missing signed-range validation of `metadata_length` before use, not `SafeLoadAs` itself.",
+    "conditions": "In IPC file fuzzing, attacker-controlled footer `FileBlock` values flow through `RecordBatchFileReaderImpl::ReadMessageFromBlock` into `ReadMessage`. A crafted file with a dictionary/record block whose `metadata_length` is negative (or otherwise invalid for a 4-byte prefix read) bypasses the current check due to signed-to-unsigned cast, and triggers crash when `SafeLoadAs` reads from `buffer->data()`."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.023653,
-      "total_input_tokens": 14228,
-      "total_output_tokens": 415,
-      "total_cached_tokens": 4480,
+      "total_cost": 0.021567,
+      "total_input_tokens": 14404,
+      "total_output_tokens": 388,
+      "total_cached_tokens": 5760,
       "llm_calls": [
         {
-          "timestamp": 1773539800.7193954,
+          "timestamp": 1774818446.6849654,
           "model": "gpt-5.3-codex",
-          "cost": 0.009486749999999999,
-          "input_tokens": 4549,
+          "cost": 0.00782635,
+          "input_tokens": 4637,
           "output_tokens": 109,
-          "total_tokens": 4658,
-          "cached_tokens": 0,
+          "total_tokens": 4746,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_c5in2nFAvabh1eZvVsncwGY0"
+              "tool_call_id": "call_iDZYn5mv1CazAyxQNO0egtX0"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_uAwaojhRytzq3wJehZqGQJV0"
+              "tool_call_id": "call_iUAdAmTygvJdVIoNDnvaB1ua"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_v5ADn47IJJ7qRxDkGgEz0fFH"
+              "tool_call_id": "call_fD0pcWBtKJY4fpVdMWtrikO4"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773539811.602793,
+          "timestamp": 1774818451.5045292,
           "model": "gpt-5.3-codex",
-          "cost": 0.01416625,
-          "input_tokens": 9679,
-          "output_tokens": 306,
-          "total_tokens": 9985,
-          "cached_tokens": 4480,
+          "cost": 0.01374065,
+          "input_tokens": 9767,
+          "output_tokens": 279,
+          "total_tokens": 10046,
+          "cached_tokens": 4608,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_zxSq5prytnCopbJyz8uhKDUh"
+              "tool_call_id": "call_kduez05uM7l5lvJBgLIHaArs"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,20 +88,20 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.03073035,
-      "total_input_tokens": 33149,
-      "total_output_tokens": 269,
-      "total_cached_tokens": 19712,
+      "total_llm_calls": 5,
+      "total_cost": 0.02713095,
+      "total_input_tokens": 44473,
+      "total_output_tokens": 382,
+      "total_cached_tokens": 35584,
       "llm_calls": [
         {
-          "timestamp": 1773539813.956538,
+          "timestamp": 1774818452.948747,
           "model": "gpt-5.3-codex",
-          "cost": 0.00964075,
-          "input_tokens": 4877,
-          "output_tokens": 79,
-          "total_tokens": 4956,
-          "cached_tokens": 0,
+          "cost": 0.00776545,
+          "input_tokens": 5871,
+          "output_tokens": 80,
+          "total_tokens": 5951,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -110,23 +110,48 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_PkrUywysbPi8kqrfLAInMoqH"
+              "tool_call_id": "call_J2y6uZCNGrTf0Ehm9aEgXbbe"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_EqqH1wtzOxpSy4AVMqCZvhmN"
+              "tool_name": "find_references",
+              "tool_call_id": "call_1G8IoqQvrTWkYs5TScfIbUFC"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773539817.3767362,
+          "timestamp": 1774818570.1642687,
           "model": "gpt-5.3-codex",
-          "cost": 0.01567195,
-          "input_tokens": 9229,
-          "output_tokens": 153,
-          "total_tokens": 9382,
-          "cached_tokens": 1664,
+          "cost": 0.00280875,
+          "input_tokens": 6165,
+          "output_tokens": 78,
+          "total_tokens": 6243,
+          "cached_tokens": 5760,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_zmwPMpb2V1Ebvq3VUM5GsLvF"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_gvT5UN0Hpgff1EcRijTBEU3O"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774818572.722368,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0114807,
+          "input_tokens": 10594,
+          "output_tokens": 187,
+          "total_tokens": 10781,
+          "cached_tokens": 6144,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,19 +160,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_dfdo1DJcAkyKkLzgWCSexXCa"
+              "tool_call_id": "call_L9jZUBHb57F32WV1QUPuA1Eh"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773539819.4668405,
+          "timestamp": 1774818573.6650174,
           "model": "gpt-5.3-codex",
-          "cost": 0.00305795,
-          "input_tokens": 9469,
+          "cost": 0.00248395,
+          "input_tokens": 10869,
           "output_tokens": 14,
-          "total_tokens": 9483,
-          "cached_tokens": 8704,
+          "total_tokens": 10883,
+          "cached_tokens": 10624,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,19 +181,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_Uyf8bex1o1tUgNjQWVBQWSMP"
+              "tool_call_id": "call_yHV3N9aZ3V86iJKUNLx9Mnmy"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773539945.413605,
+          "timestamp": 1774818698.9804199,
           "model": "gpt-5.3-codex",
-          "cost": 0.0023597,
-          "input_tokens": 9574,
+          "cost": 0.0025921,
+          "input_tokens": 10974,
           "output_tokens": 23,
-          "total_tokens": 9597,
-          "cached_tokens": 9344,
+          "total_tokens": 10997,
+          "cached_tokens": 10752,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,7 +202,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_1zAOnC5WA6TCsKGDxKqlsy1k"
+              "tool_call_id": "call_uUlr2bWlFXTTITU1CokhMiW6"
             }
           ],
           "finish_reason": "tool_calls"
@@ -185,15 +210,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.05438335,
-      "total_input_tokens": 47377,
-      "total_output_tokens": 684,
-      "total_llm_calls": 6
+      "total_cost": 0.048697950000000004,
+      "total_input_tokens": 58877,
+      "total_output_tokens": 770,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/arrow/cpp/src/arrow/ipc/reader.cc\n+++ b/arrow/cpp/src/arrow/ipc/reader.cc\n@@ -641,7 +641,7 @@\n       return Status::Invalid(\"Not an Arrow file\");\n     }\n \n-    int32_t footer_length = *reinterpret_cast<const int32_t*>(buffer->data());\n+    int32_t footer_length = util::SafeLoadAs<int32_t>(buffer->data());\n \n     if (footer_length <= 0 || footer_length + magic_size * 2 + 4 > footer_offset_) {\n       return Status::Invalid(\"File is smaller than indicated metadata size\");\n",
+    "patch": "--- a/arrow/cpp/src/arrow/ipc/message.cc\n+++ b/arrow/cpp/src/arrow/ipc/message.cc\n@@ -241,8 +241,10 @@\n \n Status ReadMessage(int64_t offset, int32_t metadata_length, io::RandomAccessFile* file,\n                    std::unique_ptr<Message>* message) {\n-  ARROW_CHECK_GT(static_cast<size_t>(metadata_length), sizeof(int32_t))\n-      << \"metadata_length should be at least 4\";\n+  if (metadata_length <= static_cast<int32_t>(sizeof(int32_t))) {\n+    return Status::Invalid(\"metadata_length should be at least 4, got \",\n+                           metadata_length);\n+  }\n \n   ARROW_ASSIGN_OR_RAISE(auto buffer, file->ReadAt(offset, metadata_length));\n \n",
     "build_artifacts_count": 1,
     "tested_povs_count": 1,
     "last_validation": {
@@ -212,36 +237,60 @@
       {
         "tool_name": "read_source",
         "args": [
+          "cpp/src/arrow/ipc/message.cc",
+          240
+        ],
+        "kwargs": {},
+        "timestamp": 1850857.187164556,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'cpp/src/arrow/ipc/message.cc' does not exist in directory tree. Similar paths: arrow/cpp/src/arrow/ipc/message.cc, extra=None))"
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
           "arrow/cpp/src/arrow/ipc/message.cc",
           254
         ],
         "kwargs": {},
-        "timestamp": 572102.735024835,
+        "timestamp": 1850858.740234036,
         "success": true,
         "result_summary": "Ok({'contents': '155 \\n156 Status CheckMetadataAndGetBodyLength(const Buffer& metadata, int64_t* body_length) {\\n157   const flatbuf::Message* fb_message;\\n158   RETURN_NOT_OK(internal::VerifyMessage(..."
       },
       {
         "tool_name": "read_source",
         "args": [
-          "arrow/cpp/src/arrow/ipc/reader.cc",
-          644
+          "arrow/cpp/src/arrow/ipc/message.cc",
+          220
         ],
         "kwargs": {},
-        "timestamp": 572102.736484223,
+        "timestamp": 1850858.743902907,
         "success": true,
-        "result_summary": "Ok({'contents': '545       *batch = nullptr;\\n546       return Status::OK();\\n547     }\\n548 \\n549     if (message->type() == Message::DICTIONARY_BATCH) {\\n550       // TODO(wesm): implement delta dic..."
+        "result_summary": "Ok({'contents': '121 \\n122 bool Message::Equals(const Message& other) const {\\n123   int64_t metadata_bytes = std::min(metadata()->size(), other.metadata()->size());\\n124 \\n125   if (!metadata()->Equa..."
       }
     ],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "ReadMessage",
+          "cpp/src/arrow/ipc/message.cc",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1850857.214501557,
+        "success": true,
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: arrow/cpp/src/arrow/ipc/message.h, arrow/cpp/src/plasma/io.h, arrow/r/src/message.cpp, arrow/cpp/src/arrow/ipc/re..."
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
-          "arrow/cpp/src/arrow/ipc/reader.cc",
-          "@@ -641,7 +641,7 @@\n       return Status::Invalid(\"Not an Arrow file\");\n     }\n \n-    int32_t footer_length = *reinterpret_cast<const int32_t*>(buffer->data());\n+    int32_t footer_length = util::SafeLoadAs<int32_t>(buffer->data());\n \n     if (footer_length <= 0 || footer_length + magic_size * 2 + 4 > footer_offset_) {\n       return Status::Invalid(\"File is smaller than indicated metadata size\");\n"
+          "arrow/cpp/src/arrow/ipc/message.cc",
+          "@@ -242,8 +242,10 @@\n Status ReadMessage(int64_t offset, int32_t metadata_length, io::RandomAccessFile* file,\n                    std::unique_ptr<Message>* message) {\n-  ARROW_CHECK_GT(static_cast<size_t>(metadata_length), sizeof(int32_t))\n-      << \"metadata_length should be at least 4\";\n+  if (metadata_length <= static_cast<int32_t>(sizeof(int32_t))) {\n+    return Status::Invalid(\"metadata_length should be at least 4, got \",\n+                           metadata_length);\n+  }\n \n   ARROW_ASSIGN_OR_RAISE(auto buffer, file->ReadAt(offset, metadata_length));\n "
         ],
         "kwargs": {},
-        "timestamp": 572105.968330981,
+        "timestamp": 1850861.316351708,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -251,7 +300,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 572232.498959783,
+        "timestamp": 1850986.508355949,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

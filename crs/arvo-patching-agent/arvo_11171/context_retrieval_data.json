@@ -9,7 +9,7 @@
         1450
       ],
       "kwargs": {},
-      "timestamp": 393996.148080923,
+      "timestamp": 1844997.956759723,
       "success": true,
       "result_summary": "Ok({'contents': \"1351     offsetPolygon->setReserve(offsetVertexCount);\\n1352     int currIndex = 0;\\n1353     *offsetPolygon->push() = head->fIntersection;\\n1354     if (polygonIndices) {\\n1355      ..."
     },
@@ -17,12 +17,12 @@
       "tool_name": "read_source",
       "args": [
         "skia/src/utils/SkPolyUtils.cpp",
-        1615
+        1600
       ],
       "kwargs": {},
-      "timestamp": 393996.148926642,
+      "timestamp": 1844997.958276455,
       "success": true,
-      "result_summary": "Ok({'contents': '1516         SkASSERT(v*fHCount + h >= 0);\\n1517         return v*fHCount + h;\\n1518     }\\n1519 \\n1520     SkRect fBounds;\\n1521     int fHCount;\\n1522     int fVCount;\\n1523     int..."
+      "result_summary": "Ok({'contents': '1501                         point_in_triangle(p0, p1, p2, reflexVertex->fPosition)) {\\n1502                         return true;\\n1503                     }\\n1504                 }\\n..."
     }
   ],
   "find_references": [],
@@ -31,10 +31,10 @@
       "tool_name": "apply_patch",
       "args": [
         "skia/src/utils/SkPolyUtils.cpp",
-        "@@ -1450,11 +1450,16 @@\n             return false;\n         }\n         fHCount = SkTMax(SkTMin(SkScalarRoundToInt(hCount), vertexCount), 1);\n-        fVCount = vertexCount/fHCount;\n+        fVCount = SkTMax(vertexCount/fHCount, 1);\n         fGridConversion.set(sk_ieee_float_divide(fHCount - 0.001f, bounds.width()),\n                             sk_ieee_float_divide(fVCount - 0.001f, bounds.height()));\n         if (!fGridConversion.isFinite()) {\n             return false;\n         }\n+\n+        // Guard against degenerate bounds producing negative conversion factors.\n+        if (fGridConversion.fX < 0 || fGridConversion.fY < 0) {\n+            return false;\n+        }\n \n         fGrid.setCount(fHCount*fVCount);\n         for (int i = 0; i < fGrid.count(); ++i) {\n@@ -1466,12 +1471,18 @@\n     }\n \n     void add(TriangulationVertex* v) {\n-        int index = hash(v);\n+        int index = this->hash(v);\n+        if (index < 0) {\n+            return;\n+        }\n         fGrid[index].addToTail(v);\n         ++fNumVerts;\n     }\n \n     void remove(TriangulationVertex* v) {\n-        int index = hash(v);\n+        int index = this->hash(v);\n+        if (index < 0) {\n+            return;\n+        }\n         fGrid[index].remove(v);\n         --fNumVerts;\n     }\n@@ -1510,11 +1521,19 @@\n \n private:\n     int hash(TriangulationVertex* vert) const {\n-        int h = (vert->fPosition.fX - fBounds.fLeft)*fGridConversion.fX;\n-        int v = (vert->fPosition.fY - fBounds.fTop)*fGridConversion.fY;\n-        SkASSERT(v*fHCount + h >= 0);\n-        return v*fHCount + h;\n+        int h = (vert->fPosition.fX - fBounds.fLeft) * fGridConversion.fX;\n+        int v = (vert->fPosition.fY - fBounds.fTop) * fGridConversion.fY;\n+        if (h < 0 || h >= fHCount || v < 0 || v >= fVCount) {\n+            return -1;\n+        }\n+        int index = v * fHCount + h;\n+        if (index < 0 || index >= fGrid.count()) {\n+            return -1;\n+        }\n+        return index;\n     }\n+\n+\n \n     SkRect fBounds;\n     int fHCount;\n"
+        "@@ -1511,11 +1511,18 @@\n \n private:\n     int hash(TriangulationVertex* vert) const {\n-        int h = (vert->fPosition.fX - fBounds.fLeft)*fGridConversion.fX;\n-        int v = (vert->fPosition.fY - fBounds.fTop)*fGridConversion.fY;\n-        SkASSERT(v*fHCount + h >= 0);\n+        int h = (vert->fPosition.fX - fBounds.fLeft) * fGridConversion.fX;\n+        int v = (vert->fPosition.fY - fBounds.fTop) * fGridConversion.fY;\n+\n+        // Numerical instability and near-collinear/degenerate geometry can place\n+        // vertices slightly outside the expected bounds. Clamp to the valid grid\n+        // range before indexing into fGrid.\n+        h = SkTPin(h, 0, fHCount - 1);\n+        v = SkTPin(v, 0, fVCount - 1);\n+\n+        SkASSERT(v*fHCount + h >= 0 && v*fHCount + h < fGrid.count());\n         return v*fHCount + h;\n     }\n"
       ],
       "kwargs": {},
-      "timestamp": 394004.192184375,
+      "timestamp": 1845001.725157055,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
@@ -44,7 +44,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 394255.466779287,
+      "timestamp": 1845265.882531285,
       "success": true,
       "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
     }

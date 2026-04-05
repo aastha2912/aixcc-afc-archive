@@ -1,5 +1,5 @@
 {
-  "vuln_id": 90,
+  "vuln_id": 399,
   "crash_result": {
     "output": "==2729==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x60f0000001d5 at pc 0x0000005290f7 bp 0x7ffee8d6a150 sp 0x7ffee8d69918\nREAD of size 222 at 0x60f0000001d5 thread T0\nSCARINESS: 26 (multi-byte-read-heap-buffer-overflow)\n    #0 0x5290f6 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n    #1 0x98ba36 in ZSTD_initDDict_internal /src/c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_ddict.c:134:9\n    #2 0x98ba36 in ZSTD_createDDict_",
     "stack": "#0 0x5290f6 in __asan_memcpy llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n#1 0x98ba36 in ZSTD_initDDict_internal c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_ddict.c:134:9\n#2 0x98ba36 in ZSTD_createDDict_advanced c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_ddict.c:155:39\n#3 0x98c3e2 in ZSTD_createDDict c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_ddict.c:173:12\n#4 0x56db03 in initialize_context_decompression c-blosc2/blosc/blosc2.c:1881:2",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "initialize_context_decompression",
     "file": "c-blosc2/blosc/blosc2.c",
-    "description": "Heap OOB read is caused by trusting an attacker-controlled dictionary length from chunk data after narrowing it to int32_t for bounds checks, then using the original size_t value for ZSTD_createDDict(). In initialize_context_decompression(), dict_size is read from frame bytes and checked with `if (srcsize < (int32_t)context->dict_size)`, which can overflow/truncate when dict_size > INT32_MAX. The check can pass incorrectly, but then `ZSTD_createDDict(context->dict_buffer, context->dict_size)` copies `dict_size` bytes (by memcpy in ZSTD_initDDict_internal), reading past the provided input buffer.",
-    "conditions": "In decompress_frame_fuzzer, attacker-controlled frame/chunk bytes reach frame_decompress_chunk() -> blosc2_decompress_ctx() -> initialize_context_decompression(). The chunk must set BLOSC2_USEDICT and encode a large dictionary size value (via sw32_ field) such that cast to int32_t breaks the `srcsize` comparison, while remaining <= BLOSC2_MAXDICTSIZE. Then dict_buffer points into the input, and ZSTD_createDDict() performs an oversized memcpy from that pointer, triggering heap-buffer-overflow read."
+    "description": "The root cause is trusting a dictionary size field parsed from untrusted chunk data (`context->dict_size = sw32_(...)`) without validating that the dictionary bytes are fully contained within the actual compressed chunk boundaries. `initialize_context_decompression()` only checks against the caller-provided `srcsize`, but in this path `frame_decompress_chunk()` passes `chunk_cbytes` from `blosc2_cbuffer_sizes()`, which can be attacker-inflated relative to the real lazychunk buffer length returned by `frame_get_lazychunk()`. As a result, `context->dict_buffer` points near the end of the real buffer and `ZSTD_createDDict()` copies `dict_size` bytes via memcpy, causing an OOB read in `ZSTD_initDDict_internal`.",
+    "conditions": "In `decompress_frame_fuzzer`, attacker-controlled frame bytes are loaded via `blosc2_schunk_from_buffer()`, then each chunk is decompressed through `blosc2_schunk_decompress_chunk()` -> `frame_decompress_chunk()` -> `blosc2_decompress_ctx()` -> `initialize_context_decompression()`. Trigger requires a crafted chunk with BLOSC2_USEDICT set and forged header fields such that parsed `chunk_cbytes`/dictionary size are consistent enough to pass local checks but exceed the actual bytes available in the lazychunk buffer. Then dictionary creation (`ZSTD_createDDict` by-copy) performs memcpy past the heap allocation, producing the ASan heap-buffer-overflow read."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.023821349999999998,
-      "total_input_tokens": 15193,
-      "total_output_tokens": 436,
-      "total_cached_tokens": 5632,
+      "total_cost": 0.03139255,
+      "total_input_tokens": 15369,
+      "total_output_tokens": 494,
+      "total_cached_tokens": 1536,
       "llm_calls": [
         {
-          "timestamp": 1773389976.9093983,
+          "timestamp": 1774842736.9689746,
           "model": "gpt-5.3-codex",
-          "cost": 0.0067753,
-          "input_tokens": 4038,
+          "cost": 0.0093485,
+          "input_tokens": 4126,
           "output_tokens": 152,
-          "total_tokens": 4190,
-          "cached_tokens": 1536,
+          "total_tokens": 4278,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,31 +51,31 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_df7maVexHwpshb3WO6ij9VnK"
+              "tool_call_id": "call_pAdMj0516cRZFIhQXRxkc2G9"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_0w4p2pvpjxFWUXe9qlMnqEPo"
+              "tool_call_id": "call_BfgCSsKzT2KCFXxlNblmak4I"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_C0EhHja5Nt5tOwm5CfYb27Wc"
+              "tool_call_id": "call_XwInzj0cMmrOkXBKlB5Xxk3y"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_F0SYqPPWS8piuXDymyNm8zGF"
+              "tool_call_id": "call_QCDD9X1GkSbLDZU0Hqqw5VkC"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773389984.930236,
+          "timestamp": 1774842743.1816363,
           "model": "gpt-5.3-codex",
-          "cost": 0.01704605,
-          "input_tokens": 11155,
-          "output_tokens": 284,
-          "total_tokens": 11439,
-          "cached_tokens": 4096,
+          "cost": 0.02204405,
+          "input_tokens": 11243,
+          "output_tokens": 342,
+          "total_tokens": 11585,
+          "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -84,7 +84,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_qcKJKdIJBbCFaOsQv3N2G9tj"
+              "tool_call_id": "call_NEKQTbYaZnUFEGZ4ss0udCCu"
             }
           ],
           "finish_reason": "tool_calls"
@@ -92,45 +92,70 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.01769005,
-      "total_input_tokens": 25931,
-      "total_output_tokens": 355,
-      "total_cached_tokens": 20736,
+      "total_llm_calls": 5,
+      "total_cost": 0.0265433,
+      "total_input_tokens": 42134,
+      "total_output_tokens": 474,
+      "total_cached_tokens": 34176,
       "llm_calls": [
         {
-          "timestamp": 1773389986.5618544,
+          "timestamp": 1774842745.2566633,
           "model": "gpt-5.3-codex",
-          "cost": 0.00486745,
-          "input_tokens": 4175,
-          "output_tokens": 85,
-          "total_tokens": 4260,
+          "cost": 0.00757295,
+          "input_tokens": 5401,
+          "output_tokens": 125,
+          "total_tokens": 5526,
           "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 3,
           "tool_calls": [
             {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_qurnZGdjTNJjv7TAIZagO5T6"
+            },
+            {
               "tool_name": "read_source",
-              "tool_call_id": "call_WlyT7CJUsiQEbenOHYHR0B3H"
+              "tool_call_id": "call_JkA3G12cSmK0VWCwjh4AN8bL"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_zI5eNWrEyl5yxSYXBcmKavj1"
+              "tool_call_id": "call_K7LuEwpnHNFebVDBcByAyLdX"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773390077.290515,
+          "timestamp": 1774842830.3567708,
           "model": "gpt-5.3-codex",
-          "cost": 0.009066049999999999,
-          "input_tokens": 7003,
-          "output_tokens": 233,
-          "total_tokens": 7236,
-          "cached_tokens": 4096,
+          "cost": 0.0043323,
+          "input_tokens": 7042,
+          "output_tokens": 34,
+          "total_tokens": 7076,
+          "cached_tokens": 5376,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_EIQc1doyu46LgHidPKFTlfHF"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774842834.9833252,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0098371,
+          "input_tokens": 9618,
+          "output_tokens": 278,
+          "total_tokens": 9896,
+          "cached_tokens": 6912,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +164,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_rYKMPn7CypR5FSgYKW5H7uR8"
+              "tool_call_id": "call_dnPQ5wSv2UP6kzI6lgnhgrzM"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773390078.4398553,
+          "timestamp": 1774842836.2762704,
           "model": "gpt-5.3-codex",
-          "cost": 0.0017234,
-          "input_tokens": 7324,
+          "cost": 0.0023464,
+          "input_tokens": 9984,
           "output_tokens": 14,
-          "total_tokens": 7338,
-          "cached_tokens": 7168,
+          "total_tokens": 9998,
+          "cached_tokens": 9728,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +185,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_ilGO34K9rpZHVyBQXXLrfrH2"
+              "tool_call_id": "call_27CddhFMGDD9s48JTEB7PqN2"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773390123.8213482,
+          "timestamp": 1774842904.135065,
           "model": "gpt-5.3-codex",
-          "cost": 0.00203315,
-          "input_tokens": 7429,
+          "cost": 0.00245455,
+          "input_tokens": 10089,
           "output_tokens": 23,
-          "total_tokens": 7452,
-          "cached_tokens": 7168,
+          "total_tokens": 10112,
+          "cached_tokens": 9856,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,7 +206,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_tH4J5l6Q4x65gx64AFhGXXEW"
+              "tool_call_id": "call_GvfDUa5CKXCFZrjQpqt9IBiI"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,15 +214,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.0415114,
-      "total_input_tokens": 41124,
-      "total_output_tokens": 791,
-      "total_llm_calls": 6
+      "total_cost": 0.05793585,
+      "total_input_tokens": 57503,
+      "total_output_tokens": 968,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/blosc/blosc2.c\n+++ b/blosc/blosc2.c\n@@ -1871,10 +1871,14 @@\n       BLOSC_TRACE_ERROR(\"Dictionary size is smaller than minimum or larger than maximum allowed.\");\n       return BLOSC2_ERROR_CODEC_DICT;\n     }\n-    if (srcsize < (int32_t)context->dict_size) {\n+    if ((size_t)srcsize < context->dict_size) {\n       BLOSC_TRACE_ERROR(\"Not enough space to read entire dictionary.\");\n       return BLOSC2_ERROR_READ_BUFFER;\n     }\n+    if (context->dict_size > (size_t)INT32_MAX) {\n+      BLOSC_TRACE_ERROR(\"Dictionary size exceeds supported source buffer bounds.\");\n+      return BLOSC2_ERROR_CODEC_DICT;\n+    }\n     srcsize -= context->dict_size;\n     // Read dictionary\n     context->dict_buffer = (void*)(context->src + bstarts_end + sizeof(int32_t));\n",
+    "patch": "--- a/blosc/frame.c\n+++ b/blosc/frame.c\n@@ -2786,7 +2786,12 @@\n   }\n   /* And decompress it */\n   dctx->header_overhead = BLOSC_EXTENDED_HEADER_LENGTH;\n-  int32_t chunksize = blosc2_decompress_ctx(dctx, src, chunk_cbytes, dest, nbytes);\n+  // Use the actual lazychunk buffer length returned by frame_get_lazychunk()\n+  // when decompressing.  Header fields inside the chunk can be attacker-\n+  // controlled and may advertise a larger cbytes than what is really available\n+  // in `src`; passing that inflated value can make downstream parsing trust\n+  // out-of-bounds optional sections (e.g. dictionaries).\n+  int32_t chunksize = blosc2_decompress_ctx(dctx, src, rc, dest, nbytes);\n   if (chunksize < 0 || chunksize != chunk_nbytes) {\n     BLOSC_TRACE_ERROR(\"Error in decompressing chunk.\");\n     if (chunksize < 0)\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -211,43 +236,68 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "initialize_context_decompression",
+          "c-blosc2/blosc/blosc2.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1875100.081433533,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1811 static int initialize_context_decompression(blosc2_context* context, blosc_header* header, const void* ..."
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
-          "c-blosc2/blosc/blosc2.c",
-          1881
+          "c-blosc2/blosc/frame.c",
+          2789
         ],
         "kwargs": {},
-        "timestamp": 422275.178295928,
+        "timestamp": 1875033.843524023,
         "success": true,
-        "result_summary": "Ok({'contents': '1782   }\\n1783 \\n1784   if (destsize < BLOSC_MAX_OVERHEAD) {\\n1785     if (warnlvl > 0) {\\n1786       BLOSC_TRACE_ERROR(\"Output buffer size should be larger than %d bytes.\",\\n1787    ..."
+        "result_summary": "Ok({'contents': '2690     free(offsets);\\n2691     free(off_chunk);\\n2692     return new_off_cbytes;\\n2693   }\\n2694   free(offsets);\\n2695   int64_t new_frame_len;\\n2696   if (frame->sframe) {\\n2697 ..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "c-blosc2/blosc/blosc2.c",
+          1811
+        ],
+        "kwargs": {},
+        "timestamp": 1875118.935211204,
+        "success": true,
+        "result_summary": "Ok({'contents': '1712     /* The context for this \\'thread\\' has no been initialized yet */\\n1713     if (context->serial_context == NULL) {\\n1714       context->serial_context = create_thread_context..."
       }
     ],
     "find_references": [
       {
         "tool_name": "find_references",
         "args": [
-          "dict_size",
-          "c-blosc2/blosc/blosc2.c",
+          "frame_get_lazychunk",
+          "c-blosc2/blosc/frame.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 422361.67901522,
+        "timestamp": 1875117.653594052,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/blosc2.c', refs=[FileReference(line=1869, content='    context->dict_size = (size_t)sw32_(context->src + bstarts_end);', enclosing_definition='initialize_c..."
+        "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/frame.c', refs=[FileReference(line=1598, content='        rbytes = frame_get_lazychunk(frame, offsets[i], &data_chunk, &needs_free);', enclosing_definition..."
       }
     ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
-          "c-blosc2/blosc/blosc2.c",
-          "@@ -1871,10 +1871,14 @@\n       BLOSC_TRACE_ERROR(\"Dictionary size is smaller than minimum or larger than maximum allowed.\");\n       return BLOSC2_ERROR_CODEC_DICT;\n     }\n-    if (srcsize < (int32_t)context->dict_size) {\n+    if ((size_t)srcsize < context->dict_size) {\n       BLOSC_TRACE_ERROR(\"Not enough space to read entire dictionary.\");\n       return BLOSC2_ERROR_READ_BUFFER;\n     }\n+    if (context->dict_size > (size_t)INT32_MAX) {\n+      BLOSC_TRACE_ERROR(\"Dictionary size exceeds supported source buffer bounds.\");\n+      return BLOSC2_ERROR_CODEC_DICT;\n+    }\n     srcsize -= context->dict_size;\n     // Read dictionary\n     context->dict_buffer = (void*)(context->src + bstarts_end + sizeof(int32_t));"
+          "c-blosc2/blosc/frame.c",
+          "@@ -2786,7 +2786,14 @@ int frame_decompress_chunk(blosc2_context *dctx, blosc2_frame_s* frame, int nch\n   }\n   /* And decompress it */\n   dctx->header_overhead = BLOSC_EXTENDED_HEADER_LENGTH;\n-  int32_t chunksize = blosc2_decompress_ctx(dctx, src, chunk_cbytes, dest, nbytes);\n+  // Use the actual lazychunk buffer length returned by frame_get_lazychunk()\n+  // when decompressing.  Header fields inside the chunk can be attacker-\n+  // controlled and may advertise a larger cbytes than what is really available\n+  // in `src`; passing that inflated value can make downstream parsing trust\n+  // out-of-bounds optional sections (e.g. dictionaries).\n+  int32_t chunksize = blosc2_decompress_ctx(dctx, src, rc, dest, nbytes);\n   if (chunksize < 0 || chunksize != chunk_nbytes) {\n     BLOSC_TRACE_ERROR(\"Error in decompressing chunk.\");\n     if (chunksize < 0)\n"
         ],
         "kwargs": {},
-        "timestamp": 422365.920361901,
+        "timestamp": 1875123.585311896,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -257,7 +307,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 422411.157422349,
+        "timestamp": 1875191.459357229,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

@@ -1,5 +1,5 @@
 {
-  "vuln_id": 112,
+  "vuln_id": 419,
   "crash_result": {
     "output": "==39182==ERROR: AddressSanitizer: heap-use-after-free on address 0x607000037b84 at pc 0x000000dcf1c8 bp 0x7ffc05aec1d0 sp 0x7ffc05aec1c8\nREAD of size 4 at 0x607000037b84 thread T0\nSCARINESS: 45 (4-byte-read-heap-use-after-free)\n    #0 0xdcf1c7 in RDKit::Atom::getIdx() const /src/rdkit/Code/GraphMol/Atom.h:143:40\n    #1 0xdcf1c7 in RDKit::ROMol::initFromOther(RDKit::ROMol const&, bool, int) /src/rdkit/Code/GraphMol/ROMol.cpp:115:49\n    #2 0x71e9f5 in RDKit::ROMol::ROMol(RDKit::ROMol const&, bool,",
     "stack": "#0 0xdcf1c7 in RDKit::Atom::getIdx() const rdkit/Code/GraphMol/Atom.h:143:40\n#1 0xdcf1c7 in RDKit::ROMol::initFromOther(RDKit::ROMol const&, bool, int) rdkit/Code/GraphMol/ROMol.cpp:115:49\n#2 0x71e9f5 in RDKit::ROMol::ROMol(RDKit::ROMol const&, bool, int) rdkit/Code/GraphMol/ROMol.h:338:5\n#3 0x71c628 in RDKit::RecursiveStructureQuery::copy() const rdkit/Code/GraphMol/QueryOps.h:779:32\n#4 0x5c7c60 in RDKit::(anonymous namespace)::ParseNewAtomList(RDKit::RWMol*, std::__1::basic_string<char, std::_",
@@ -22,56 +22,60 @@
     "dedup": "RDKit::Atom::getIdx() const--RDKit::ROMol::initFromOther(RDKit::ROMol const&, bool, int)--RDKit::ROMol::ROMol(RDKit::ROMol const&, bool, int)"
   },
   "analyzed_vuln": {
-    "function": "SmilesParseOps::addquery",
+    "function": "addquery",
     "file": "rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp",
-    "description": "Heap-use-after-free is caused by replacing an atom in-place (RWMol::replaceAtom) while other query structures still hold pointers to the old atom/query tree. In SmilesParseOps::addquery(), mol.replaceAtom(idx, qa) deletes the previous atom, but later parsing/copying paths (notably ParseNewAtomList -> RecursiveStructureQuery::copy -> ROMol::initFromOther) traverse query objects that still reference the freed atom and call getIdx() on it.",
-    "conditions": "The PoV must drive MolDataStreamToMol through mol block property parsing that mixes Marvin SMARTS/CXSMILES-derived query replacement and later atom-list/query processing. Data flow: MolDataStreamToMol -> ParseV2000CTAB -> ParseMolBlockProperties; ParseMarvinSmartsLine/SmartsToMol invokes processCXSmilesLabels/addquery, which calls replaceAtom and frees old atom; later ParseNewAtomList copies/expands queries containing stale references, triggering UAF during ROMol copy (Atom::getIdx in initFromOther)."
+    "description": "Heap use-after-free is caused by SmilesParseOps::addquery() calling RWMol::replaceAtom() on an atom that may already be referenced by existing query structures (notably RecursiveStructureQuery query molecules). replaceAtom() deletes the original atom object immediately, but stale pointers to that atom remain inside previously built query-mol state. Later, during ParseNewAtomList(), copying a recursive query (RecursiveStructureQuery::copy -> ROMol copy) traverses those stale atom pointers and reads freed memory (Atom::getIdx). The crash appears in ROMol::initFromOther/Atom::getIdx, but root cause is unsafe atom replacement without updating/invalidation of all external/internal query references.",
+    "conditions": "Trigger requires mol block content that causes both: (1) Marvin SMARTS/CXSMARTS parsing (e.g. MRV SMA lines) to build query atoms/recursive query structures tied to the molecule, and (2) subsequent CX label processing path (processCXSmilesLabels -> addquery) to replace an atom via replaceAtom, freeing the old atom while query structures still reference it, and then (3) later atom-list/query handling (e.g. M  ALS / ParseNewAtomList) that copies/uses those recursive queries. This sequence propagates dangling atom pointers and leads to UAF read during query-mol copy."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.07517405,
-      "total_input_tokens": 68331,
-      "total_output_tokens": 385,
-      "total_cached_tokens": 31616,
+      "total_cost": 0.08240085,
+      "total_input_tokens": 70883,
+      "total_output_tokens": 467,
+      "total_cached_tokens": 30592,
       "llm_calls": [
         {
-          "timestamp": 1773408505.7333906,
+          "timestamp": 1774845860.6389089,
           "model": "gpt-5.3-codex",
-          "cost": 0.0531671,
-          "input_tokens": 30450,
-          "output_tokens": 121,
-          "total_tokens": 30571,
-          "cached_tokens": 1152,
+          "cost": 0.055555499999999994,
+          "input_tokens": 30538,
+          "output_tokens": 151,
+          "total_tokens": 30689,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ya9lcFowPESzmmb2zwlM0Vek"
+              "tool_call_id": "call_gZr7AiPGF7qaUBeG11Xwp05y"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_pQuXF3qCiMtbvAsQ0FhKu0gi"
+              "tool_call_id": "call_pOBNVdlWfKzAPDqCqKKFlibJ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_atT19MutQsmJoBPmlbR54btH"
+              "tool_call_id": "call_gkSeKKuaE9i13AUyBjJsMOc6"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_p7I3a00aTzcZChsCNISC0PAw"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773408519.4327364,
+          "timestamp": 1774845866.8515222,
           "model": "gpt-5.3-codex",
-          "cost": 0.02200695,
-          "input_tokens": 37881,
-          "output_tokens": 264,
-          "total_tokens": 38145,
-          "cached_tokens": 30464,
+          "cost": 0.02684535,
+          "input_tokens": 40345,
+          "output_tokens": 316,
+          "total_tokens": 40661,
+          "cached_tokens": 30592,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +84,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Q0bIvSVuE1blw6wFgeaBesZG"
+              "tool_call_id": "call_mAgW9Z2MAu4dgyO8SYHP98tC"
             }
           ],
           "finish_reason": "tool_calls"
@@ -89,44 +93,48 @@
     },
     "patching": {
       "total_llm_calls": 5,
-      "total_cost": 0.18391835,
-      "total_input_tokens": 160733,
-      "total_output_tokens": 303,
-      "total_cached_tokens": 64512,
+      "total_cost": 0.15364755,
+      "total_input_tokens": 180821,
+      "total_output_tokens": 353,
+      "total_cached_tokens": 106496,
       "llm_calls": [
         {
-          "timestamp": 1773408521.9414728,
+          "timestamp": 1774845869.3248422,
           "model": "gpt-5.3-codex",
-          "cost": 0.05100375,
-          "input_tokens": 28385,
-          "output_tokens": 95,
-          "total_tokens": 28480,
-          "cached_tokens": 0,
+          "cost": 0.05543895,
+          "input_tokens": 32081,
+          "output_tokens": 137,
+          "total_tokens": 32218,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_IoGfPBFkTr0w0hhs7EH62Iw0"
+              "tool_call_id": "call_KksoCw8M0pTzOuC9wcYSkc0b"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_1CPW1MvouQtCQql6YxE88e1P"
+              "tool_call_id": "call_1sL9pUXymDz4SV3vULpUuCA7"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_rMshb129oXnrYRJZdgYdfx79"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773409498.2169342,
+          "timestamp": 1774847589.2334156,
           "model": "gpt-5.3-codex",
-          "cost": 0.05491325,
-          "input_tokens": 31107,
+          "cost": 0.011476150000000001,
+          "input_tokens": 35201,
           "output_tokens": 34,
-          "total_tokens": 31141,
-          "cached_tokens": 0,
+          "total_tokens": 35235,
+          "cached_tokens": 32128,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,19 +143,19 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_hilJdoGicNzEkmIyrIA4Cex3"
+              "tool_call_id": "call_yUiNkfsi7JQW35tToolTUdz3"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773409500.6455278,
+          "timestamp": 1774847591.9668884,
           "model": "gpt-5.3-codex",
-          "cost": 0.0118643,
-          "input_tokens": 33562,
-          "output_tokens": 137,
-          "total_tokens": 33699,
-          "cached_tokens": 30976,
+          "cost": 0.0126896,
+          "input_tokens": 37656,
+          "output_tokens": 145,
+          "total_tokens": 37801,
+          "cached_tokens": 35072,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,19 +164,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_ysbxcrw7uaKKKoPgYHD2qsFR"
+              "tool_call_id": "call_pUqQJNe4GyCgkofCK8bUwLPR"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773409502.406852,
+          "timestamp": 1774847593.7560122,
           "model": "gpt-5.3-codex",
-          "cost": 0.006504049999999999,
-          "input_tokens": 33787,
+          "cost": 0.007231349999999999,
+          "input_tokens": 37889,
           "output_tokens": 14,
-          "total_tokens": 33801,
-          "cached_tokens": 33536,
+          "total_tokens": 37903,
+          "cached_tokens": 37632,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,18 +185,18 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_HTQpleTIZeMULSqXiAV3L6cQ"
+              "tool_call_id": "call_351JfJnuGRUv1KBxKs2AMnMm"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773410644.8919055,
+          "timestamp": 1774849148.7731185,
           "model": "gpt-5.3-codex",
-          "cost": 0.059633,
-          "input_tokens": 33892,
+          "cost": 0.0668115,
+          "input_tokens": 37994,
           "output_tokens": 23,
-          "total_tokens": 33915,
+          "total_tokens": 38017,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -198,7 +206,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_DUzS8sv6EvaC7HYAt4nWpfTJ"
+              "tool_call_id": "call_9dXMyoEA1EpaeD3r3YNJUmpA"
             }
           ],
           "finish_reason": "tool_calls"
@@ -206,9 +214,9 @@
       ]
     },
     "total": {
-      "total_cost": 0.2590924,
-      "total_input_tokens": 229064,
-      "total_output_tokens": 688,
+      "total_cost": 0.2360484,
+      "total_input_tokens": 251704,
+      "total_output_tokens": 820,
       "total_llm_calls": 7
     }
   },
@@ -238,7 +246,7 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 441784.745631752,
+        "timestamp": 1879209.02184303,
         "success": true,
         "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n131 void RWMol::replaceAtom(unsigned int idx, Atom *atom_pin, bool,, extra=None))"
       }
@@ -248,10 +256,10 @@
         "tool_name": "read_source",
         "args": [
           "rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp",
-          47
+          1
         ],
         "kwargs": {},
-        "timestamp": 440810.739365298,
+        "timestamp": 1878157.903479529,
         "success": true,
         "result_summary": "Ok({'contents': '  1 //\\n  2 //  Copyright (C) 2016-2021 Greg Landrum and other RDKit contributors\\n  3 //\\n  4 //   @@ All Rights Reserved @@\\n  5 //  This file is part of the RDKit.\\n  6 //  The con..."
       },
@@ -262,21 +270,34 @@
           131
         ],
         "kwargs": {},
-        "timestamp": 441786.79225026,
+        "timestamp": 1879877.808364727,
         "success": true,
         "result_summary": "Ok({'contents': ' 32 }\\n 33 \\n 34 void RWMol::insertMol(const ROMol &other) {\\n 35   std::vector<unsigned int> newAtomIds(other.getNumAtoms());\\n 36   VERTEX_ITER firstA, lastA;\\n 37   boost::tie(firs..."
       }
     ],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "addquery",
+          "rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1879875.549226023,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp', refs=[FileReference(line=65, content='        addquery(makeAtomNullQuery(), symb, mol, atom->getIdx());', enclosing_defi..."
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp",
-          "@@ -44,7 +44,7 @@\n   auto *qa = new QueryAtom(0);\n   qa->setQuery(qry);\n   qa->setNoImplicit(true);\n-  mol.replaceAtom(idx, qa);\n+  mol.replaceAtom(idx, qa, false, true);\n   if (symbol != \"\") {\n     mol.getAtomWithIdx(idx)->setProp(RDKit::common_properties::atomLabel,\n                                      symbol);\n"
+          "@@ -44,9 +44,9 @@\n   auto *qa = new QueryAtom(0);\n   qa->setQuery(qry);\n   qa->setNoImplicit(true);\n-  mol.replaceAtom(idx, qa);\n+  mol.replaceAtom(idx, qa, false, true);\n   if (symbol != \"\") {\n     mol.getAtomWithIdx(idx)->setProp(RDKit::common_properties::atomLabel,\n                                      symbol);\n   }\n   delete qa;\n"
         ],
         "kwargs": {},
-        "timestamp": 441789.26225824,
+        "timestamp": 1879880.661464316,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -286,7 +307,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 442930.101824638,
+        "timestamp": 1881435.028747641,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

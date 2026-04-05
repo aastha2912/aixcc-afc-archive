@@ -1,5 +1,5 @@
 {
-  "vuln_id": 164,
+  "vuln_id": 481,
   "crash_result": {
     "output": "==5395==ERROR: AddressSanitizer: global-buffer-overflow on address 0x0000008fe25f at pc 0x0000005865cb bp 0x7ffe1b7530e0 sp 0x7ffe1b7530d8\nREAD of size 1 at 0x0000008fe25f thread T0\nSCARINESS: 12 (1-byte-read-global-buffer-overflow)\n    #0 0x5865ca in xmlSkipBlankChars /src/libxml2/parser.c:2122:9\n    #1 0x5d7257 in xmlParseMisc /src/libxml2/parser.c:10766:9\n    #2 0x5d8999 in xmlParseDocument /src/libxml2/parser.c:10932:2\n    #3 0x5edf37 in xmlDoRead /src/libxml2/parser.c:14983:5\n    #4 0x5ee17",
     "stack": "#0 0x5865ca in xmlSkipBlankChars libxml2/parser.c:2122:9\n#1 0x5d7257 in xmlParseMisc libxml2/parser.c:10766:9\n#2 0x5d8999 in xmlParseDocument libxml2/parser.c:10932:2\n#3 0x5edf37 in xmlDoRead libxml2/parser.c:14983:5\n#4 0x5ee172 in xmlReadMemory libxml2/parser.c:15069:13\n#5 0x56c64d in LLVMFuzzerTestOneInput libxml2/fuzz/xinclude.c:52:11\n#6 0x43dee3 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:611:15\n#7 0x429642 in fuz",
@@ -24,83 +24,120 @@
   "analyzed_vuln": {
     "function": "xmlSkipBlankChars",
     "file": "libxml2/parser.c",
-    "description": "In xmlSkipBlankChars, the fast path dereferences `*cur` without validating that `ctxt->input->cur` is within the current input buffer. With malformed/fuzzed parser state reached during prolog/Misc parsing, `ctxt->input->cur` can point before valid buffer data, so `while (IS_BLANK_CH(*cur))` performs a 1-byte out-of-bounds read (global-buffer-overflow). Crash is observed from xmlParseMisc/xmlParseDocument, but the missing bounds/state check is in xmlSkipBlankChars.",
-    "conditions": "Via the xinclude harness, attacker-controlled bytes are passed to `xmlReadMemory(..., opts|XML_PARSE_XINCLUDE)`. A highly malformed document can drive parser state into xmlParseDocument -> xmlParseMisc -> SKIP_BLANKS -> xmlSkipBlankChars with an invalid `ctxt->input->cur` pointer. When xmlSkipBlankChars enters its fast path (`inputNr==1` and not DTD, or START state), it reads `*cur` immediately and loops on blanks, triggering OOB read if `cur` is outside buffer bounds."
+    "description": "In the fast-path branch of xmlSkipBlankChars (used when inputNr==1 and not in DTD, or parser start state), the code sets `cur = ctxt->input->cur` and immediately evaluates `IS_BLANK_CH(*cur)` without first ensuring `cur` is within the current input buffer (`cur < end`) or forcing a refill/grow. With malformed/truncated input state, `ctxt->input->cur` can point outside valid buffer bounds, so the first dereference reads out-of-bounds (ASan global-buffer-overflow at parser.c:2122). The bug is missing boundary/EOF validation before raw pointer dereference in this optimized whitespace-skip loop.",
+    "conditions": "Triggered via xinclude harness calling xmlReadMemory on attacker-controlled bytes. The document reaches xmlParseDocument -> xmlParseMisc -> SKIP_BLANKS -> xmlSkipBlankChars in prolog/epilog parsing. A crafted input that drives parser state so `ctxt->input->cur` is invalid or at/behind boundary when entering xmlSkipBlankChars fast path causes the immediate `*cur` read in `while (IS_BLANK_CH(*cur))` to access memory outside the input buffer. No special harness-side constraints beyond supplying such malformed XML bytes are required."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 3,
-      "total_cost": 0.033181050000000004,
-      "total_input_tokens": 20655,
-      "total_output_tokens": 465,
-      "total_cached_tokens": 6016,
+      "total_llm_calls": 4,
+      "total_cost": 0.0374409,
+      "total_input_tokens": 25606,
+      "total_output_tokens": 712,
+      "total_cached_tokens": 11008,
       "llm_calls": [
         {
-          "timestamp": 1773465172.4692473,
+          "timestamp": 1774875151.6339233,
           "model": "gpt-5.3-codex",
-          "cost": 0.0096635,
-          "input_tokens": 4698,
-          "output_tokens": 103,
-          "total_tokens": 4801,
-          "cached_tokens": 0,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 3,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_cvX2cAHQkgFdvR6evfsJPnUW"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_JKHdvkaBeYKto81mJEASyxPJ"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_0tLIPr1oMGaByYCLMn97aoU7"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773465175.923867,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0081746,
-          "input_tokens": 4932,
-          "output_tokens": 97,
-          "total_tokens": 5029,
+          "cost": 0.0085351,
+          "input_tokens": 4786,
+          "output_tokens": 141,
+          "total_tokens": 4927,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_ytL81XNYYyPBwDxCcUN9Ukm3"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_gygYrjTPpDMUqyTxCFC7aSLN"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_1xs4ruydF3QzXPLj6uFyFFGi"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_yvHXq2o4tGmFNRSx8dhZwyK8"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_e0WNDtZ5M12hRtLzCLx6Mvay"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_5dHcc1uA03B4jO0gYO86IMT9"
+              "tool_call_id": "call_GKkCS10T4vPc253j2dZTQiJV"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773465180.6896174,
+          "timestamp": 1774875161.832645,
           "model": "gpt-5.3-codex",
-          "cost": 0.01534295,
-          "input_tokens": 11025,
-          "output_tokens": 265,
-          "total_tokens": 11290,
-          "cached_tokens": 4864,
+          "cost": 0.0035727999999999997,
+          "input_tokens": 5080,
+          "output_tokens": 153,
+          "total_tokens": 5233,
+          "cached_tokens": 4736,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_GdUkyaTpTpHm03xmekdan80z"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_SzoCbHe5POp8qzKLwnUDq4K2"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_gk1qs61UwAIzFVd4wkyjPm66"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_bgCaE6SjL6Hq2hCFfzDc8Y6R"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774875172.6983733,
+          "model": "gpt-5.3-codex",
+          "cost": 0.004443249999999999,
+          "input_tokens": 6139,
+          "output_tokens": 126,
+          "total_tokens": 6265,
+          "cached_tokens": 5120,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ct5JpkIcOepieS4m9j24k0XW"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_qeb4riTRU0ytxj9Acsb0em2m"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_V4kAD8UppVNIGMO9ULf3zeZk"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774875187.2579167,
+          "model": "gpt-5.3-codex",
+          "cost": 0.02088975,
+          "input_tokens": 9601,
+          "output_tokens": 292,
+          "total_tokens": 9893,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -109,7 +146,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Wt9JNL1Q19sux0pMjJP0YOJK"
+              "tool_call_id": "call_j77aObzmUyj2Uv5E1S5pKssN"
             }
           ],
           "finish_reason": "tool_calls"
@@ -118,18 +155,18 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.020576149999999998,
-      "total_input_tokens": 30041,
-      "total_output_tokens": 321,
-      "total_cached_tokens": 23168,
+      "total_cost": 0.03527055,
+      "total_input_tokens": 33545,
+      "total_output_tokens": 371,
+      "total_cached_tokens": 18176,
       "llm_calls": [
         {
-          "timestamp": 1773465184.883384,
+          "timestamp": 1774875189.0884626,
           "model": "gpt-5.3-codex",
-          "cost": 0.00721945,
-          "input_tokens": 5007,
+          "cost": 0.0087087,
+          "input_tokens": 5858,
           "output_tokens": 77,
-          "total_tokens": 5084,
+          "total_tokens": 5935,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -139,23 +176,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_dnPkcSiwd1irjensFyVQt1ul"
+              "tool_call_id": "call_E5SJ6ymkkSdFdIl0L7tjv5at"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_9sEuUWREe6uKnpuT3nENC5VW"
+              "tool_call_id": "call_H8aXj4OYCGXCtkULecqqQQ0W"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773465193.3004098,
+          "timestamp": 1774875198.5185628,
           "model": "gpt-5.3-codex",
-          "cost": 0.00923335,
-          "input_tokens": 8113,
-          "output_tokens": 207,
-          "total_tokens": 8320,
-          "cached_tokens": 4992,
+          "cost": 0.010213,
+          "input_tokens": 8964,
+          "output_tokens": 257,
+          "total_tokens": 9221,
+          "cached_tokens": 5760,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -164,19 +201,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_5zqFXFIoX1weHlzlbceFbYAM"
+              "tool_call_id": "call_M93ApJjbkQPAiROXFdMd54Zs"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773465194.4063442,
+          "timestamp": 1774875199.9033659,
           "model": "gpt-5.3-codex",
-          "cost": 0.0020076,
-          "input_tokens": 8408,
+          "cost": 0.00217315,
+          "input_tokens": 9309,
           "output_tokens": 14,
-          "total_tokens": 8422,
-          "cached_tokens": 8192,
+          "total_tokens": 9323,
+          "cached_tokens": 9088,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -185,19 +222,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_0lir83fGSfEnMKDQlflWg5It"
+              "tool_call_id": "call_RjHoSkjZTtAHhVkR8SOAO2Im"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773465225.1020744,
+          "timestamp": 1774875235.6403964,
           "model": "gpt-5.3-codex",
-          "cost": 0.0021157499999999996,
-          "input_tokens": 8513,
+          "cost": 0.0141757,
+          "input_tokens": 9414,
           "output_tokens": 23,
-          "total_tokens": 8536,
-          "cached_tokens": 8320,
+          "total_tokens": 9437,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -206,7 +243,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_fXTUmOQ8Z7FOhjTFEVWGKqQT"
+              "tool_call_id": "call_0YBNpLturDkp50UeNfl96Ztb"
             }
           ],
           "finish_reason": "tool_calls"
@@ -214,15 +251,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.053757200000000005,
-      "total_input_tokens": 50696,
-      "total_output_tokens": 786,
-      "total_llm_calls": 7
+      "total_cost": 0.07271145,
+      "total_input_tokens": 59151,
+      "total_output_tokens": 1083,
+      "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/parser.c\n+++ b/parser.c\n@@ -2118,6 +2118,13 @@\n \t/*\n \t * if we are in the document content, go really fast\n \t */\n+\tif ((ctxt->input->cur < ctxt->input->base) ||\n+\t    (ctxt->input->cur > ctxt->input->end)) {\n+\t    xmlFatalErr(ctxt, XML_ERR_INTERNAL_ERROR,\n+\t                \"input pointer out of bounds\\n\");\n+\t    ctxt->instate = XML_PARSER_EOF;\n+\t    return(0);\n+\t}\n \tcur = ctxt->input->cur;\n \twhile (IS_BLANK_CH(*cur)) {\n \t    if (*cur == '\\n') {\n",
+    "patch": "--- a/parser.c\n+++ b/parser.c\n@@ -2118,6 +2118,17 @@\n \t/*\n \t * if we are in the document content, go really fast\n \t */\n+\tif ((ctxt->input->cur < ctxt->input->base) ||\n+\t    (ctxt->input->cur > ctxt->input->end)) {\n+\t    xmlFatalErr(ctxt, XML_ERR_INTERNAL_ERROR,\n+\t                \"parser input buffer is corrupted\");\n+\t    ctxt->instate = XML_PARSER_EOF;\n+\t    return(0);\n+\t}\n+\tif (ctxt->input->cur == ctxt->input->end)\n+\t    xmlParserGrow(ctxt);\n+\tif (ctxt->instate == XML_PARSER_EOF)\n+\t    return(0);\n \tcur = ctxt->input->cur;\n \twhile (IS_BLANK_CH(*cur)) {\n \t    if (*cur == '\\n') {\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -245,7 +282,7 @@
           2122
         ],
         "kwargs": {},
-        "timestamp": 497473.46429695,
+        "timestamp": 1907477.668784009,
         "success": true,
         "result_summary": "Ok({'contents': '2023 #define NXT(val) ctxt->input->cur[(val)]\\n2024 #define CUR_PTR ctxt->input->cur\\n2025 #define BASE_PTR ctxt->input->base\\n2026 \\n2027 #define CMP4( s, c1, c2, c3, c4 ) \\\\\\n2028  ..."
       }
@@ -259,7 +296,7 @@
           false
         ],
         "kwargs": {},
-        "timestamp": 497478.767146938,
+        "timestamp": 1907482.600828046,
         "success": true,
         "result_summary": "Ok([FileReferences(file_name='libxml2/parser.c', refs=[FileReference(line=2072, content='#define SKIP_BLANKS xmlSkipBlankChars(ctxt)', enclosing_definition='SKIP_BLANKS')])])"
       }
@@ -269,10 +306,10 @@
         "tool_name": "apply_patch",
         "args": [
           "libxml2/parser.c",
-          "@@ -2118,6 +2118,13 @@ xmlSkipBlankChars(xmlParserCtxtPtr ctxt) {\n \t/*\n \t * if we are in the document content, go really fast\n \t */\n+\tif ((ctxt->input->cur < ctxt->input->base) ||\n+\t    (ctxt->input->cur > ctxt->input->end)) {\n+\t    xmlFatalErr(ctxt, XML_ERR_INTERNAL_ERROR,\n+\t                \"input pointer out of bounds\\n\");\n+\t    ctxt->instate = XML_PARSER_EOF;\n+\t    return(0);\n+\t}\n \tcur = ctxt->input->cur;\n \twhile (IS_BLANK_CH(*cur)) {\n \t    if (*cur == '\\n') {\n"
+          "@@ -2118,7 +2118,18 @@ xmlSkipBlankChars(xmlParserCtxtPtr ctxt) {\n \t/*\n \t * if we are in the document content, go really fast\n \t */\n+\tif ((ctxt->input->cur < ctxt->input->base) ||\n+\t    (ctxt->input->cur > ctxt->input->end)) {\n+\t    xmlFatalErr(ctxt, XML_ERR_INTERNAL_ERROR,\n+\t                \"parser input buffer is corrupted\");\n+\t    ctxt->instate = XML_PARSER_EOF;\n+\t    return(0);\n+\t}\n+\tif (ctxt->input->cur == ctxt->input->end)\n+\t    xmlParserGrow(ctxt);\n+\tif (ctxt->instate == XML_PARSER_EOF)\n+\t    return(0);\n \tcur = ctxt->input->cur;\n \twhile (IS_BLANK_CH(*cur)) {\n \t    if (*cur == '\\n') {"
         ],
         "kwargs": {},
-        "timestamp": 497481.995760915,
+        "timestamp": 1907487.229962204,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -282,7 +319,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 497512.5172215,
+        "timestamp": 1907522.785630687,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

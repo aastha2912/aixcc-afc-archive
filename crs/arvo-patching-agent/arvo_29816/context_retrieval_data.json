@@ -4,54 +4,15 @@
     {
       "tool_name": "read_definition",
       "args": [
-        "get_coffsets",
+        "get_coffset",
         "c-blosc2/blosc/frame.c",
-        0,
+        1566,
         true
       ],
       "kwargs": {},
-      "timestamp": 418813.760950538,
+      "timestamp": 1869405.725525612,
       "success": true,
-      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n909 uint8_t* get_coffsets(blosc2_frame *frame, int32_t header_len, int64_t cbytes, int32_t *off_cbytes) {, e..."
-    },
-    {
-      "tool_name": "read_definition",
-      "args": [
-        "blosc_getitem",
-        "c-blosc2/blosc/blosc2.c",
-        0,
-        true
-      ],
-      "kwargs": {},
-      "timestamp": 418816.775208391,
-      "success": true,
-      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n2632 int blosc_getitem(const void* src, int start, int nitems, void* dest) {, extra=None))"
-    },
-    {
-      "tool_name": "read_definition",
-      "args": [
-        "blosc_getitem",
-        "c-blosc2/blosc/blosc2.c",
-        2632,
-        true
-      ],
-      "kwargs": {},
-      "timestamp": 418822.365626396,
-      "success": true,
-      "result_summary": "Ok({'contents': '2632 int blosc_getitem(const void* src, int start, int nitems, void* dest) {\\n2633   uint8_t* _src = (uint8_t*)(src);\\n2634   blosc2_context context;\\n2635   int result;\\n2636 \\n2637 ..."
-    },
-    {
-      "tool_name": "read_definition",
-      "args": [
-        "get_coffsets",
-        "c-blosc2/blosc/frame.c",
-        909,
-        true
-      ],
-      "kwargs": {},
-      "timestamp": 418825.476272077,
-      "success": true,
-      "result_summary": "Ok({'contents': '909 uint8_t* get_coffsets(blosc2_frame *frame, int32_t header_len, int64_t cbytes, int32_t *off_cbytes) {\\n910   if (frame->coffsets != NULL) {\\n911     if (off_cbytes != NULL) {\\n912..."
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1556 int64_t get_coffset(blosc2_frame* frame, int32_t header_len, int64_t cbytes, int32_t nchunk) {, extra=N..."
     }
   ],
   "read_source": [
@@ -59,12 +20,12 @@
       "tool_name": "read_source",
       "args": [
         "c-blosc2/blosc/frame.c",
-        1566
+        1556
       ],
       "kwargs": {},
-      "timestamp": 418698.785142174,
+      "timestamp": 1869412.419181847,
       "success": true,
-      "result_summary": "Ok({'contents': '1467         data_chunk = realloc(data_chunk, (size_t)csize);\\n1468         prev_alloc = csize;\\n1469       }\\n1470       if (!frame->eframe) {\\n1471         fseek(fp, header_len + of..."
+      "result_summary": "Ok({'contents': '1457           fclose(fp);\\n1458         }\\n1459         free(offsets);\\n1460         blosc2_free_ctx(schunk->cctx);\\n1461         blosc2_free_ctx(schunk->dctx);\\n1462         free(sc..."
     }
   ],
   "find_references": [
@@ -76,21 +37,9 @@
         false
       ],
       "kwargs": {},
-      "timestamp": 418792.202201776,
+      "timestamp": 1869411.074104748,
       "success": true,
       "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/frame.c', refs=[FileReference(line=1643, content='  int64_t offset = get_coffset(frame, header_len, cbytes, nchunk);', enclosing_definition='frame_get_chun..."
-    },
-    {
-      "tool_name": "find_references",
-      "args": [
-        "get_coffsets",
-        "c-blosc2/blosc/frame.c",
-        false
-      ],
-      "kwargs": {},
-      "timestamp": 418806.876436436,
-      "success": true,
-      "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/frame.c', refs=[FileReference(line=1384, content='  uint8_t* coffsets = get_coffsets(frame, header_len, cbytes, &coffsets_cbytes);', enclosing_definition='..."
     }
   ],
   "apply_patch": [
@@ -98,10 +47,10 @@
       "tool_name": "apply_patch",
       "args": [
         "c-blosc2/blosc/frame.c",
-        "@@ -1556,16 +1556,26 @@\n int64_t get_coffset(blosc2_frame* frame, int32_t header_len, int64_t cbytes, int32_t nchunk) {\n   // Get the offset to nchunk\n   int64_t offset;\n-  uint8_t *coffsets = get_coffsets(frame, header_len, cbytes, NULL);\n+  int32_t coffsets_cbytes;\n+  uint8_t *coffsets = get_coffsets(frame, header_len, cbytes, &coffsets_cbytes);\n   if (coffsets == NULL) {\n     BLOSC_TRACE_ERROR(\"Cannot get the offset for chunk %d for the frame.\", nchunk);\n     return -3;\n   }\n+\n+  if (coffsets_cbytes < BLOSC_EXTENDED_HEADER_LENGTH) {\n+    BLOSC_TRACE_ERROR(\"Offsets chunk is too small.\");\n+    return -4;\n+  }\n+\n+  int32_t nitems = sw32_(coffsets + BLOSC2_CHUNK_NBYTES) / (int32_t)sizeof(int64_t);\n+  if (nchunk < 0 || nchunk >= nitems) {\n+    BLOSC_TRACE_ERROR(\"Chunk index out of bounds for offsets chunk.\");\n+    return -4;\n+  }\n \n   // Get the 64-bit offset\n-  int rc = blosc_getitem(coffsets, nchunk, 1, &offset);\n+  int rc = _blosc_getitem(NULL, coffsets, coffsets_cbytes, nchunk, 1, &offset);\n   if (rc < 0) {\n     BLOSC_TRACE_ERROR(\"Problems retrieving a chunk offset.\");\n     return -4;\n   }\n   return offset;\n }"
+        "@@ -1564,7 +1564,13 @@ int64_t get_coffset(blosc2_frame* frame, int32_t header_len, int64_t cbytes, in\n \n   // Get the 64-bit offset\n-  int rc = blosc_getitem(coffsets, nchunk, 1, &offset);\n+  int32_t coffsets_cbytes = sw32_(coffsets + BLOSC2_CHUNK_CBYTES);\n+  if (coffsets_cbytes <= 0) {\n+    BLOSC_TRACE_ERROR(\"Invalid compressed size for offsets chunk.\");\n+    return -4;\n+  }\n+\n+  int rc = blosc2_getitem_ctx(frame->dctx, coffsets, coffsets_cbytes, nchunk, 1, &offset, sizeof(offset));\n   if (rc < 0) {\n     BLOSC_TRACE_ERROR(\"Problems retrieving a chunk offset.\");\n     return -4;\n"
       ],
       "kwargs": {},
-      "timestamp": 418831.956828821,
+      "timestamp": 1869416.066579259,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
@@ -111,7 +60,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 418921.972670576,
+      "timestamp": 1869561.189701792,
       "success": true,
       "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
     }

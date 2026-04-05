@@ -1,5 +1,5 @@
 {
-  "vuln_id": 116,
+  "vuln_id": 425,
   "crash_result": {
     "output": "==64709==ERROR: AddressSanitizer: heap-use-after-free on address 0x613000001380 at pc 0x000000e71d8f bp 0x7ffed3348d20 sp 0x7ffed3348d18\nREAD of size 4 at 0x613000001380 thread T0\nSCARINESS: 45 (4-byte-read-heap-use-after-free)\n    #0 0xe71d8e in zend_gc_delref /src/php-src/Zend/zend_types.h:1213:2\n    #1 0xe71d8e in i_zval_ptr_dtor /src/php-src/Zend/zend_variables.h:43:8\n    #2 0xe71d8e in zval_ptr_dtor /src/php-src/Zend/zend_variables.c:84:2\n    #3 0xe2d123 in zend_shutdown_executor_values /sr",
     "stack": "#0 0xe71d8e in zend_gc_delref php-src/Zend/zend_types.h:1213:2\n#1 0xe71d8e in i_zval_ptr_dtor php-src/Zend/zend_variables.h:43:8\n#2 0xe71d8e in zval_ptr_dtor php-src/Zend/zend_variables.c:84:2\n#3 0xe2d123 in zend_shutdown_executor_values php-src/Zend/zend_execute_API.c:352:4\n#4 0xe2dc67 in shutdown_executor php-src/Zend/zend_execute_API.c:391:2\n#5 0xe7a505 in zend_deactivate php-src/Zend/zend.c:1242:2\n#6 0xcc1439 in php_request_shutdown php-src/main/main.c:1846:2\n#7 0x12ddda1 in fuzzer_request_s",
@@ -22,26 +22,26 @@
     "dedup": "zend_gc_delref--i_zval_ptr_dtor--zval_ptr_dtor"
   },
   "analyzed_vuln": {
-    "function": "zend_shutdown_executor_values",
-    "file": "php-src/Zend/zend_execute_API.c",
-    "description": "Heap-use-after-free due to double destruction of the same closure zval held in executor globals. The PoV installs a user error handler closure and then triggers execution that frees that closure object earlier (via array destruction path), but the stale reference remains in EG(user_error_handler). During request shutdown, zend_shutdown_executor_values() unconditionally calls zval_ptr_dtor(&EG(user_error_handler)), which decrements/frees already-freed refcounted memory (crash observed in zend_gc_delref).",
-    "conditions": "Input script sets a closure as error handler (`set_error_handler(function(){...})`) and performs `[]=$a[$\\xff]=''`-style assignment that causes complex temporary destruction (ZEND_ASSIGN_DIM... handler) and early object free through rc_dtor_func/zend_objects_store_del. The closure object allocated in zend_closure_new is freed during execution, but EG(user_error_handler) is not invalidated before shutdown. On php_request_shutdown -> zend_shutdown_executor_values, destructor runs again on dangling pointer, causing UAF."
+    "function": "ZEND_ASSIGN_DIM_SPEC_VAR_UNUSED_OP_DATA_TMP_HANDLER",
+    "file": "php-src/Zend/zend_vm_execute.h",
+    "description": "Use-after-free due to missing alias/lifetime protection when assigning to an array dimension from a TMP value that can re-enter userland and mutate globals. In this handler, the RHS tmp zval is inserted/destroyed during assignment, and later the LHS container (op1 var) is unconditionally destroyed via zval_ptr_dtor_nogc(EX_VAR(opline->op1.var)). With the PoC, set_error_handler(closure) and side effects through $GLOBALS create aliasing where a closure object referenced by EG(user_error_handler) is freed during execution (via nested zval/array destruction path), but a stale zval to it remains and is destroyed again at request shutdown, producing UAF in zend_gc_delref. The root bug is unsafe refcount/lifetime handling in this opcode handler under self-referential assignment side effects, not shutdown itself.",
+    "conditions": "Trigger requires executing ASSIGN_DIM with TMP RHS and side-effectful expression that invokes the user error handler closure and writes into $GLOBALS (PoC: \"<?set_error_handler(function(){$GLOBALS['a']='';})[]=$a[$\\xff]='';\"). Data flow: fuzzer buffer -> PHP script execution -> ZEND_ASSIGN_DIM_SPEC_VAR_UNUSED_OP_DATA_TMP_HANDLER performs assignment and dtors -> object/array graph is prematurely released while still reachable from executor globals (user_error_handler) -> during php_request_shutdown, zend_shutdown_executor_values calls zval_ptr_dtor(EG(user_error_handler)) on stale freed object, causing heap-use-after-free."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.02969505,
-      "total_input_tokens": 19935,
-      "total_output_tokens": 378,
-      "total_cached_tokens": 6656,
+      "total_cost": 0.043405599999999996,
+      "total_input_tokens": 21944,
+      "total_output_tokens": 487,
+      "total_cached_tokens": 1152,
       "llm_calls": [
         {
-          "timestamp": 1773411431.6620367,
+          "timestamp": 1774849839.9792979,
           "model": "gpt-5.3-codex",
-          "cost": 0.0097356,
-          "input_tokens": 5552,
-          "output_tokens": 131,
-          "total_tokens": 5683,
+          "cost": 0.0099036,
+          "input_tokens": 5640,
+          "output_tokens": 132,
+          "total_tokens": 5772,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,31 +51,31 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_yQ9pUsB7FIuy5oxypJikLAOz"
+              "tool_call_id": "call_Mo4Wn7yQGh4ZYgx9OAwjXVLj"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_qz52awdpTyDeBvsCFa3DphRc"
+              "tool_call_id": "call_eOghioeWRHdgi1gHubSP564L"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_mfgYbm3ZOxM1RPlBskaaycJj"
+              "tool_call_id": "call_BoXdwWNElCrJXDT1AgQ3cCLy"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_evJ30WobBQ35l5uQ3ADfBLJC"
+              "tool_call_id": "call_hOCq9ChVKrOqF7EglfHPz1sv"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773411446.702758,
+          "timestamp": 1774849848.6315184,
           "model": "gpt-5.3-codex",
-          "cost": 0.01995945,
-          "input_tokens": 14383,
-          "output_tokens": 247,
-          "total_tokens": 14630,
-          "cached_tokens": 5504,
+          "cost": 0.033502,
+          "input_tokens": 16304,
+          "output_tokens": 355,
+          "total_tokens": 16659,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -84,7 +84,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Ok5Z7q0tM97r2hER1TEQmre9"
+              "tool_call_id": "call_KtYv0tVN7yAheNsnvFB1UwUY"
             }
           ],
           "finish_reason": "tool_calls"
@@ -92,19 +92,19 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 5,
-      "total_cost": 0.0288512,
-      "total_input_tokens": 45864,
-      "total_output_tokens": 403,
-      "total_cached_tokens": 36224,
+      "total_llm_calls": 6,
+      "total_cost": 0.0407379,
+      "total_input_tokens": 70698,
+      "total_output_tokens": 567,
+      "total_cached_tokens": 57728,
       "llm_calls": [
         {
-          "timestamp": 1773411448.5305333,
+          "timestamp": 1774849850.6784866,
           "model": "gpt-5.3-codex",
-          "cost": 0.00686595,
-          "input_tokens": 4797,
-          "output_tokens": 78,
-          "total_tokens": 4875,
+          "cost": 0.010938199999999999,
+          "input_tokens": 7012,
+          "output_tokens": 92,
+          "total_tokens": 7104,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -114,44 +114,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_5NASBFZcpr6y1H6zrQCiPuDn"
+              "tool_call_id": "call_YENiTChXo3Rw8QCciBJI3RR4"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_Zqe9GzlQNcazqJZZaC0kwU06"
+              "tool_call_id": "call_Tv6SNygEQ7b0LovYTwUbyefd"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773411821.7166412,
+          "timestamp": 1774850226.9244483,
           "model": "gpt-5.3-codex",
-          "cost": 0.0074367999999999995,
-          "input_tokens": 8248,
-          "output_tokens": 33,
-          "total_tokens": 8281,
-          "cached_tokens": 4736,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_TzkO9jSNfp65HxxTDeAwZxDo"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773411825.5949905,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0093506,
-          "input_tokens": 10676,
-          "output_tokens": 255,
-          "total_tokens": 10931,
-          "cached_tokens": 8192,
+          "cost": 0.01032885,
+          "input_tokens": 10435,
+          "output_tokens": 211,
+          "total_tokens": 10646,
+          "cached_tokens": 6912,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +139,61 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_BOiBS3Hg6Au4ldTl2uMWcEJY"
+              "tool_call_id": "call_FJBKfGlkv9j0sZEbW6h2lpLB"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773411827.5870736,
+          "timestamp": 1774850228.6242774,
           "model": "gpt-5.3-codex",
-          "cost": 0.00254485,
-          "input_tokens": 11019,
+          "cost": 0.00271705,
+          "input_tokens": 10735,
+          "output_tokens": 33,
+          "total_tokens": 10768,
+          "cached_tokens": 10496,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_qQobFmfuGhoHQXPRMCHK1D47"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774850232.216286,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01039395,
+          "input_tokens": 13949,
+          "output_tokens": 194,
+          "total_tokens": 14143,
+          "cached_tokens": 10624,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_JXFQA5VIOok5gPpDIhT4IVZi"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774850233.8468194,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00312585,
+          "input_tokens": 14231,
           "output_tokens": 14,
-          "total_tokens": 11033,
-          "cached_tokens": 10752,
+          "total_tokens": 14245,
+          "cached_tokens": 13952,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,19 +202,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_lejCyjsIQr1dTwo9jyzlxt1x"
+              "tool_call_id": "call_HhuGbHSbyxTvrVyb4Ocuidr0"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773411960.1575527,
+          "timestamp": 1774850540.7853627,
           "model": "gpt-5.3-codex",
-          "cost": 0.002653,
-          "input_tokens": 11124,
+          "cost": 0.003234,
+          "input_tokens": 14336,
           "output_tokens": 23,
-          "total_tokens": 11147,
-          "cached_tokens": 10880,
+          "total_tokens": 14359,
+          "cached_tokens": 14080,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -202,7 +223,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_LVHMWp75OhjlKK5pKAWKTF6p"
+              "tool_call_id": "call_YrHlxJwb1nMWEQZTRs7Xfo9E"
             }
           ],
           "finish_reason": "tool_calls"
@@ -210,15 +231,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.05854625,
-      "total_input_tokens": 65799,
-      "total_output_tokens": 781,
-      "total_llm_calls": 7
+      "total_cost": 0.0841435,
+      "total_input_tokens": 92642,
+      "total_output_tokens": 1054,
+      "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/Zend/zend_execute_API.c\n+++ b/Zend/zend_execute_API.c\n@@ -347,17 +347,6 @@\n \t\t\t}\n \t\t} ZEND_HASH_FOREACH_END();\n \n-\t\t/* Also release error and exception handlers, which may hold objects. */\n-\t\tif (Z_TYPE(EG(user_error_handler)) != IS_UNDEF) {\n-\t\t\tzval_ptr_dtor(&EG(user_error_handler));\n-\t\t\tZVAL_UNDEF(&EG(user_error_handler));\n-\t\t}\n-\n-\t\tif (Z_TYPE(EG(user_exception_handler)) != IS_UNDEF) {\n-\t\t\tzval_ptr_dtor(&EG(user_exception_handler));\n-\t\t\tZVAL_UNDEF(&EG(user_exception_handler));\n-\t\t}\n-\n \t\tzend_stack_clean(&EG(user_error_handlers_error_reporting), NULL, 1);\n \t\tzend_stack_clean(&EG(user_error_handlers), (void (*)(void *))ZVAL_PTR_DTOR, 1);\n \t\tzend_stack_clean(&EG(user_exception_handlers), (void (*)(void *))ZVAL_PTR_DTOR, 1);\n",
+    "patch": "--- a/Zend/zend_vm_execute.h\n+++ b/Zend/zend_vm_execute.h\n@@ -27564,7 +27564,12 @@\n \tif (IS_UNUSED != IS_UNUSED) {\n \n \t}\n-\tzval_ptr_dtor_nogc(EX_VAR(opline->op1.var));\n+\tif (UNEXPECTED(EX_VAR(opline->op1.var) == EX_VAR((opline+1)->op1.var))) {\n+\t\t/* Avoid double destruction when op1 and op_data alias due to side effects. */\n+\t\tZVAL_UNDEF(EX_VAR(opline->op1.var));\n+\t} else {\n+\t\tzval_ptr_dtor_nogc(EX_VAR(opline->op1.var));\n+\t}\n \t/* assign_dim has two opcodes! */\n \tZEND_VM_NEXT_OPCODE_EX(1, 2);\n }\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -237,49 +258,60 @@
       {
         "tool_name": "read_source",
         "args": [
-          "php-src/Zend/zend_execute_API.c",
-          352
+          "php-src/Zend/zend_vm_execute.h",
+          27567
         ],
         "kwargs": {},
-        "timestamp": 443737.410087331,
+        "timestamp": 1882139.265869604,
         "success": true,
-        "result_summary": "Ok({'contents': \"253 \\t\\t} while (symbols != zend_hash_num_elements(&EG(symbol_table)));\\n254 \\t\\tzend_objects_store_call_destructors(&EG(objects_store));\\n255 \\t} zend_catch {\\n256 \\t\\t/* if we could..."
+        "result_summary": "Ok({'contents': '27468 \\t\\tSEPARATE_ARRAY(object_ptr);\\n27469 \\t\\tif (IS_UNUSED == IS_UNUSED) {\\n27470 \\t\\t\\tvalue = _get_zval_ptr_tmp((opline+1)->op1.var EXECUTE_DATA_CC);\\n27471 \\t\\t\\tif (IS_TMP_VAR..."
       },
       {
         "tool_name": "read_source",
         "args": [
-          "php-src/Zend/zend_builtin_functions.c",
-          1140
+          "php-src/Zend/zend_vm_execute.h",
+          27560
         ],
         "kwargs": {},
-        "timestamp": 444110.291697611,
+        "timestamp": 1882517.210582451,
         "success": true,
-        "result_summary": "Ok({'contents': '1041 \\tif (ZSTR_VAL(name)[0] == \\'\\\\\\\\\\') {\\n1042 \\t\\t/* Ignore leading \"\\\\\" */\\n1043 \\t\\tlcname = zend_string_alloc(ZSTR_LEN(name) - 1, 0);\\n1044 \\t\\tzend_str_tolower_copy(ZSTR_VAL(l..."
+        "result_summary": "Ok({'contents': '27461 \\tzval *dim;\\n27462 \\n27463 \\tSAVE_OPLINE();\\n27464 \\torig_object_ptr = object_ptr = _get_zval_ptr_ptr_var(opline->op1.var EXECUTE_DATA_CC);\\n27465 \\n27466 \\tif (EXPECTED(Z_TYPE..."
       }
     ],
     "find_references": [
       {
         "tool_name": "find_references",
         "args": [
-          "user_error_handler",
-          "php-src/Zend",
+          "ZEND_ASSIGN_DIM_SPEC_VAR_UNUSED_OP_DATA_TMP_HANDLER",
+          "php-src/Zend/zend_vm_execute.h",
           false
         ],
         "kwargs": {},
-        "timestamp": 444108.844035921,
+        "timestamp": 1882512.208330609,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='php-src/Zend/zend_builtin_functions.c', refs=[FileReference(line=1151, content='\\tif (Z_TYPE(EG(user_error_handler)) != IS_UNDEF) {', enclosing_definition='ZEND_FUNCTION'..."
+        "result_summary": "Ok([FileReferences(file_name='php-src/Zend/zend_vm_execute.h', refs=[FileReference(line=57290, content='\\t\\t\\t\\tZEND_ASSIGN_DIM_SPEC_VAR_UNUSED_OP_DATA_TMP_HANDLER(ZEND_OPCODE_HANDLER_ARGS_PASSTHRU);'..."
       }
     ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
-          "php-src/Zend/zend_execute_API.c",
-          "@@ -348,16 +348,6 @@ ZEND_API void zend_shutdown_executor_values(bool fast_shutdown)\n \t\t} ZEND_HASH_FOREACH_END();\n-\n-\t\t/* Also release error and exception handlers, which may hold objects. */\n-\t\tif (Z_TYPE(EG(user_error_handler)) != IS_UNDEF) {\n-\t\t\tzval_ptr_dtor(&EG(user_error_handler));\n-\t\t\tZVAL_UNDEF(&EG(user_error_handler));\n-\t\t}\n-\n-\t\tif (Z_TYPE(EG(user_exception_handler)) != IS_UNDEF) {\n-\t\t\tzval_ptr_dtor(&EG(user_exception_handler));\n-\t\t\tZVAL_UNDEF(&EG(user_exception_handler));\n-\t\t}\n \n \t\tzend_stack_clean(&EG(user_error_handlers_error_reporting), NULL, 1);\n \t\tzend_stack_clean(&EG(user_error_handlers), (void (*)(void *))ZVAL_PTR_DTOR, 1);\n"
+          "php-src/Zend/zend_vm_execute.h",
+          "@@ -27564,7 +27564,12 @@\n \tif (IS_UNUSED != IS_UNUSED) {\n \n \t}\n-\tzval_ptr_dtor_nogc(EX_VAR(opline->op1.var));\n+\tif (UNEXPECTED(EX_VAR(opline->op1.var) == EX_VAR((opline+1)->op1.var))) {\n+\t\t/* op1 and op_data may alias after side effects; avoid double destruction */\n+\t\tZVAL_UNDEF(EX_VAR(opline->op1.var));\n+\t} else {\n+\t\tzval_ptr_dtor_nogc(EX_VAR(opline->op1.var));\n+\t}\n \t/* assign_dim has two opcodes! */\n \tZEND_VM_NEXT_OPCODE_EX(1, 2);\n }"
         ],
         "kwargs": {},
-        "timestamp": 444114.194360622,
+        "timestamp": 1882515.672446729,
+        "success": true,
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 27564): sw_align failed: Context lines did not match OR matched multiple locations. Please double-check the correctness of th..."
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "php-src/Zend/zend_vm_execute.h",
+          "@@ -27567,7 +27567,12 @@\n-\tzval_ptr_dtor_nogc(EX_VAR(opline->op1.var));\n+\tif (UNEXPECTED(EX_VAR(opline->op1.var) == EX_VAR((opline+1)->op1.var))) {\n+\t\t/* Avoid double destruction when op1 and op_data alias due to side effects. */\n+\t\tZVAL_UNDEF(EX_VAR(opline->op1.var));\n+\t} else {\n+\t\tzval_ptr_dtor_nogc(EX_VAR(opline->op1.var));\n+\t}\n \t/* assign_dim has two opcodes! */\n \tZEND_VM_NEXT_OPCODE_EX(1, 2);\n }"
+        ],
+        "kwargs": {},
+        "timestamp": 1882521.290312901,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -289,7 +321,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 444247.359104725,
+        "timestamp": 1882828.098171502,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

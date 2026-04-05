@@ -1,5 +1,5 @@
 {
-  "vuln_id": 178,
+  "vuln_id": 498,
   "crash_result": {
     "output": "==2968==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x603000001de3 at pc 0x0000006655a2 bp 0x7ffef0153f60 sp 0x7ffef0153f58\nREAD of size 1 at 0x603000001de3 thread T0\nSCARINESS: 22 (1-byte-read-heap-buffer-overflow-far-from-bounds)\n    #0 0x6655a1 in pcpp::IPv6Extension::getExtensionLen() const /src/PcapPlusPlus/Packet++/header/IPv6Extensions.h:51:73\n    #1 0x66156c in pcpp::IPv6Layer::parseExtensions() /src/PcapPlusPlus/Packet++/src/IPv6Layer.cpp:139:21\n    #2 0x660e63 in pcpp::IPv",
     "stack": "#0 0x6655a1 in pcpp::IPv6Extension::getExtensionLen() const PcapPlusPlus/Packet++/header/IPv6Extensions.h:51:73\n#1 0x66156c in pcpp::IPv6Layer::parseExtensions() PcapPlusPlus/Packet++/src/IPv6Layer.cpp:139:21\n#2 0x660e63 in pcpp::IPv6Layer::IPv6Layer(unsigned char*, unsigned long, pcpp::Layer*, pcpp::Packet*) PcapPlusPlus/Packet++/src/IPv6Layer.cpp:37:2\n#3 0x7c495d in pcpp::NflogLayer::parseNextLayer() PcapPlusPlus/Packet++/src/NflogLayer.cpp:70:30\n#4 0x67045b in pcpp::Packet::setRawPacket(pcpp:",
@@ -24,83 +24,91 @@
   "analyzed_vuln": {
     "function": "parseExtensions",
     "file": "PcapPlusPlus/Packet++/src/IPv6Layer.cpp",
-    "description": "Heap out-of-bounds read due to missing bounds validation when parsing IPv6 extension headers. In IPv6Layer::parseExtensions(), a new IPv6Extension object is created at the current offset and newExt->getExtensionLen() / newExt->getBaseHeader()->nextHeader are read immediately, but there is no check that the full extension base header (and declared extension length) is within m_DataLen at that offset. As a result, getBaseHeader()->headerLen in IPv6Extension::getExtensionLen() reads past the packet buffer.",
-    "conditions": "FuzzTarget feeds a malformed/truncated packet through PcapFileReaderDevice into Packet::setRawPacket(), which reaches NflogLayer::parseNextLayer() and constructs IPv6Layer for NFLOG payload marked as IPv6. If IPv6Layer::isDataValid passes but payload is too short/inconsistent for the extension chain, parseExtensions() enters its loop (offset starts at sizeof(ip6_hdr) and only checks a generic loop condition) and attempts to parse an extension at/near buffer end. Accessing extension headerLen/nextHeader then causes OOB read (crash in IPv6Extension::getExtensionLen at IPv6Extensions.h:51)."
+    "description": "IPv6Layer::parseExtensions() constructs extension objects based only on `offset <= m_DataLen - 2` and then unconditionally reads extension header fields via `newExt->getExtensionLen()` / `getBaseHeader()->nextHeader` without verifying that the extension header bytes are actually within bounds. For malformed/truncated packets, `offset` can point near the end of the buffer; `IPv6Extension::getExtensionLen()` then dereferences `getBaseHeader()->headerLen` out of bounds, causing the ASan heap-buffer-overflow. Root cause is missing per-extension length/bounds validation in parseExtensions before accessing extension header bytes.",
+    "conditions": "FuzzTarget feeds a crafted pcap packet parsed through NflogLayer as IPv6 payload. Input must satisfy minimal IPv6 validity to reach `IPv6Layer::parseExtensions()`, with `nextHeader` indicating an extension type (e.g., fragment/hop-by-hop/etc.) while actual payload is truncated so extension base header is not fully present at computed `offset`. parseExtensions still instantiates an extension and calls getExtensionLen()/getBaseHeader(), leading to OOB read."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.0238952,
-      "total_input_tokens": 16904,
-      "total_output_tokens": 573,
-      "total_cached_tokens": 8704,
+      "total_cost": 0.025580799999999997,
+      "total_input_tokens": 17768,
+      "total_output_tokens": 643,
+      "total_cached_tokens": 9216,
       "llm_calls": [
         {
-          "timestamp": 1773516072.809274,
+          "timestamp": 1774878078.5461671,
           "model": "gpt-5.3-codex",
-          "cost": 0.009535749999999999,
-          "input_tokens": 4265,
-          "output_tokens": 148,
-          "total_tokens": 4413,
+          "cost": 0.010291749999999999,
+          "input_tokens": 4353,
+          "output_tokens": 191,
+          "total_tokens": 4544,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_VAcvXMwMdcUQslByRnbY44hJ"
+              "tool_call_id": "call_9EBuWKm7Vrt2F0S4e00EYSQ6"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_QyI7OoZoh0YmnMCTQVPhO4bQ"
+              "tool_call_id": "call_w9fGBip5qirgohErFK0E3XdP"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_CAZWr9QVbFjun3BY3McUO9yT"
+              "tool_call_id": "call_Sv1DYOYoUGhEfajL4LEGP2OP"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_UqxzS9yFRLJUZbpwtOiS9kdC"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516081.8951538,
+          "timestamp": 1774878098.5699615,
           "model": "gpt-5.3-codex",
-          "cost": 0.0031944499999999997,
-          "input_tokens": 4523,
-          "output_tokens": 138,
-          "total_tokens": 4661,
-          "cached_tokens": 4224,
+          "cost": 0.00406735,
+          "input_tokens": 4793,
+          "output_tokens": 181,
+          "total_tokens": 4974,
+          "cached_tokens": 4352,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_87NFBbBjYMChV3womIjRF3z8"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_JlgSkZPUCe2n9ICqh6SV2ArX"
-            },
-            {
               "tool_name": "read_source",
-              "tool_call_id": "call_S6onoXYPZ9wDpYH6Bba3i5Vm"
+              "tool_call_id": "call_MPhl2lGBOZyr37lQBHnHl5Xl"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ownhd5vtLu71QAUHajtAtE5k"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_qplw9yM67m5IrhPdJmqaOkEJ"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_q8y3ZMR0ClNi2TtwkWDO5xWA"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516090.6607463,
+          "timestamp": 1774878116.0126185,
           "model": "gpt-5.3-codex",
-          "cost": 0.011165,
-          "input_tokens": 8116,
-          "output_tokens": 287,
-          "total_tokens": 8403,
-          "cached_tokens": 4480,
+          "cost": 0.0112217,
+          "input_tokens": 8622,
+          "output_tokens": 271,
+          "total_tokens": 8893,
+          "cached_tokens": 4864,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -109,7 +117,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_jWdn9U6KXHQpSAaNGnV256MT"
+              "tool_call_id": "call_TIg829zhyWNuNYYnMerhYpzM"
             }
           ],
           "finish_reason": "tool_calls"
@@ -118,18 +126,18 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.0244083,
-      "total_input_tokens": 30722,
-      "total_output_tokens": 524,
-      "total_cached_tokens": 23296,
+      "total_cost": 0.027461,
+      "total_input_tokens": 36084,
+      "total_output_tokens": 547,
+      "total_cached_tokens": 27520,
       "llm_calls": [
         {
-          "timestamp": 1773516092.2184505,
+          "timestamp": 1774878117.9087458,
           "model": "gpt-5.3-codex",
-          "cost": 0.0058947,
-          "input_tokens": 4178,
+          "cost": 0.00822045,
+          "input_tokens": 5507,
           "output_tokens": 86,
-          "total_tokens": 4264,
+          "total_tokens": 5593,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -139,23 +147,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_HpXXI66Swxt8qhGVLCJTTRei"
+              "tool_call_id": "call_q7yvsqCANCogeellU0mqaTNY"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_IvhjLQtF40vAueZ8pUtmh22B"
+              "tool_call_id": "call_mN8K27GK6k7Bmv86eqLhj7Lx"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516098.1082513,
+          "timestamp": 1774878123.9245794,
           "model": "gpt-5.3-codex",
-          "cost": 0.014015050000000001,
-          "input_tokens": 8487,
-          "output_tokens": 401,
-          "total_tokens": 8888,
-          "cached_tokens": 4096,
+          "cost": 0.0144452,
+          "input_tokens": 9816,
+          "output_tokens": 424,
+          "total_tokens": 10240,
+          "cached_tokens": 5504,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -164,19 +172,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_Ggy7cm1lMccubkJzu1783DdA"
+              "tool_call_id": "call_gRgXbtsRDJ8voSedhQyXfgkU"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516102.5323792,
+          "timestamp": 1774878125.8823109,
           "model": "gpt-5.3-codex",
-          "cost": 0.0021952,
-          "input_tokens": 8976,
+          "cost": 0.0023436,
+          "input_tokens": 10328,
           "output_tokens": 14,
-          "total_tokens": 8990,
-          "cached_tokens": 8704,
+          "total_tokens": 10342,
+          "cached_tokens": 10112,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -185,19 +193,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_zrbKH46ol33Nz6anNmIVeJpf"
+              "tool_call_id": "call_HsCAqbKFXreGiajolJoty8X6"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516145.9302049,
+          "timestamp": 1774878174.2808805,
           "model": "gpt-5.3-codex",
-          "cost": 0.00230335,
-          "input_tokens": 9081,
+          "cost": 0.00245175,
+          "input_tokens": 10433,
           "output_tokens": 23,
-          "total_tokens": 9104,
-          "cached_tokens": 8832,
+          "total_tokens": 10456,
+          "cached_tokens": 10240,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -206,7 +214,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_GgbALJDmRv7sII0LQYrix5Sg"
+              "tool_call_id": "call_EdXzXIXkgV52CjqTIf20gha5"
             }
           ],
           "finish_reason": "tool_calls"
@@ -214,15 +222,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.0483035,
-      "total_input_tokens": 47626,
-      "total_output_tokens": 1097,
+      "total_cost": 0.0530418,
+      "total_input_tokens": 53852,
+      "total_output_tokens": 1190,
       "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/Packet++/src/IPv6Layer.cpp\n+++ b/Packet++/src/IPv6Layer.cpp\n@@ -87,6 +87,10 @@\n \n \twhile (offset <= m_DataLen - 2*sizeof(uint8_t)) // 2*sizeof(uint8_t) is the min len for IPv6 extensions\n \t{\n+\t\t// verify the fixed extension base header is within bounds before constructing/reading extension fields\n+\t\tif (offset + 2*sizeof(uint8_t) > m_DataLen)\n+\t\t\tbreak;\n+\n \t\tIPv6Extension* newExt = nullptr;\n \n \t\tswitch (nextHdr)\n@@ -136,9 +140,19 @@\n \t\t\tcurExt = curExt->getNextHeader();\n \t\t}\n \n-\t\toffset += newExt->getExtensionLen();\n+\t\tsize_t extLen = newExt->getExtensionLen();\n+\t\tif (extLen < 2*sizeof(uint8_t) || offset + extLen > m_DataLen)\n+\t\t{\n+\t\t\tif (curExt == m_FirstExtension)\n+\t\t\t\tm_FirstExtension = nullptr;\n+\t\t\telse\n+\t\t\t\tcurExt->setNextHeader(nullptr);\n+\t\t\tdelete newExt;\n+\t\t\tbreak;\n+\t\t}\n+\t\toffset += extLen;\n \t\tnextHdr = newExt->getBaseHeader()->nextHeader;\n-\t\tm_ExtensionsLen += newExt->getExtensionLen();\n+\t\tm_ExtensionsLen += extLen;\n \t}\n \n \tm_LastExtension = curExt;\n",
+    "patch": "--- a/Packet++/src/IPv6Layer.cpp\n+++ b/Packet++/src/IPv6Layer.cpp\n@@ -85,7 +85,7 @@\n \n \tsize_t offset = sizeof(ip6_hdr);\n \n-\twhile (offset <= m_DataLen - 2*sizeof(uint8_t)) // 2*sizeof(uint8_t) is the min len for IPv6 extensions\n+\twhile (offset + 2*sizeof(uint8_t) <= m_DataLen) // 2*sizeof(uint8_t) is the min len for IPv6 extensions\n \t{\n \t\tIPv6Extension* newExt = nullptr;\n \n@@ -125,6 +125,13 @@\n \t\tif (newExt == nullptr)\n \t\t\tbreak;\n \n+\t\tsize_t extLen = newExt->getExtensionLen();\n+\t\tif (extLen < 2*sizeof(uint8_t) || offset + extLen > m_DataLen)\n+\t\t{\n+\t\t\tdelete newExt;\n+\t\t\tbreak;\n+\t\t}\n+\n \t\tif (m_FirstExtension == nullptr)\n \t\t{\n \t\t\tm_FirstExtension = newExt;\n@@ -136,9 +143,9 @@\n \t\t\tcurExt = curExt->getNextHeader();\n \t\t}\n \n-\t\toffset += newExt->getExtensionLen();\n+\t\toffset += extLen;\n \t\tnextHdr = newExt->getBaseHeader()->nextHeader;\n-\t\tm_ExtensionsLen += newExt->getExtensionLen();\n+\t\tm_ExtensionsLen += extLen;\n \t}\n \n \tm_LastExtension = curExt;\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -241,24 +249,24 @@
       {
         "tool_name": "read_source",
         "args": [
-          "PcapPlusPlus/Packet++/src/IPv6Layer.cpp",
-          120
-        ],
-        "kwargs": {},
-        "timestamp": 548380.794038174,
-        "success": true,
-        "result_summary": "Ok({'contents': ' 21 \\tm_DataLen = sizeof(ip6_hdr);\\n 22 \\tm_Data = new uint8_t[m_DataLen];\\n 23 \\tm_Protocol = IPv6;\\n 24 \\tm_FirstExtension = nullptr;\\n 25 \\tm_LastExtension = nullptr;\\n 26 \\tm_Exte..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
           "PcapPlusPlus/Packet++/header/IPv6Extensions.h",
           40
         ],
         "kwargs": {},
-        "timestamp": 548380.79493104,
+        "timestamp": 1910406.485466665,
         "success": true,
         "result_summary": "Ok({'contents': '  1 #ifndef PACKETPP_IPV6_EXTENSION\\n  2 #define PACKETPP_IPV6_EXTENSION\\n  3 \\n  4 #include <vector>\\n  5 #include \"IpAddress.h\"\\n  6 #include \"Layer.h\"\\n  7 #include \"TLVData.h\"\\n  ..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "PcapPlusPlus/Packet++/src/IPv6Layer.cpp",
+          120
+        ],
+        "kwargs": {},
+        "timestamp": 1910406.486597228,
+        "success": true,
+        "result_summary": "Ok({'contents': ' 21 \\tm_DataLen = sizeof(ip6_hdr);\\n 22 \\tm_Data = new uint8_t[m_DataLen];\\n 23 \\tm_Protocol = IPv6;\\n 24 \\tm_FirstExtension = nullptr;\\n 25 \\tm_LastExtension = nullptr;\\n 26 \\tm_Exte..."
       }
     ],
     "find_references": [],
@@ -267,10 +275,10 @@
         "tool_name": "apply_patch",
         "args": [
           "PcapPlusPlus/Packet++/src/IPv6Layer.cpp",
-          "@@ -86,6 +86,12 @@ void IPv6Layer::parseExtensions()\n \tsize_t offset = sizeof(ip6_hdr);\n \n \twhile (offset <= m_DataLen - 2*sizeof(uint8_t)) // 2*sizeof(uint8_t) is the min len for IPv6 extensions\n \t{\n+\t\t// verify the fixed extension base header is within bounds before constructing/reading extension fields\n+\t\tif (offset + 2*sizeof(uint8_t) > m_DataLen)\n+\t\t\tbreak;\n+\n \t\tIPv6Extension* newExt = nullptr;\n@@ -137,9 +143,18 @@ void IPv6Layer::parseExtensions()\n \t\t\tcurExt = curExt->getNextHeader();\n \t\t}\n \n-\t\toffset += newExt->getExtensionLen();\n+\t\tsize_t extLen = newExt->getExtensionLen();\n+\t\tif (extLen < 2*sizeof(uint8_t) || offset + extLen > m_DataLen)\n+\t\t{\n+\t\t\tif (curExt == m_FirstExtension)\n+\t\t\t\tm_FirstExtension = nullptr;\n+\t\t\telse\n+\t\t\t\tcurExt->setNextHeader(nullptr);\n+\t\t\tdelete newExt;\n+\t\t\tbreak;\n+\t\t}\n+\t\toffset += extLen;\n \t\tnextHdr = newExt->getBaseHeader()->nextHeader;\n-\t\tm_ExtensionsLen += newExt->getExtensionLen();\n+\t\tm_ExtensionsLen += extLen;\n \t}\n"
+          "@@ -86,7 +86,7 @@ void IPv6Layer::parseExtensions()\n \n \tsize_t offset = sizeof(ip6_hdr);\n \n-\twhile (offset <= m_DataLen - 2*sizeof(uint8_t)) // 2*sizeof(uint8_t) is the min len for IPv6 extensions\n+\twhile (offset + 2*sizeof(uint8_t) <= m_DataLen) // 2*sizeof(uint8_t) is the min len for IPv6 extensions\n \t{\n \t\tIPv6Extension* newExt = nullptr;\n@@ -125,6 +125,14 @@ void IPv6Layer::parseExtensions()\n \t\tif (newExt == nullptr)\n \t\t\tbreak;\n \n+\t\tsize_t extLen = newExt->getExtensionLen();\n+\t\tif (extLen < 2*sizeof(uint8_t) || offset + extLen > m_DataLen)\n+\t\t{\n+\t\t\tdelete newExt;\n+\t\t\tbreak;\n+\t\t}\n+\n \t\tif (m_FirstExtension == nullptr)\n \t\t{\n \t\t\tm_FirstExtension = newExt;\n@@ -136,9 +144,9 @@ void IPv6Layer::parseExtensions()\n \t\t\tcurExt = curExt->getNextHeader();\n \t\t}\n \n-\t\toffset += newExt->getExtensionLen();\n+\t\toffset += extLen;\n \t\tnextHdr = newExt->getBaseHeader()->nextHeader;\n-\t\tm_ExtensionsLen += newExt->getExtensionLen();\n+\t\tm_ExtensionsLen += extLen;\n \t}\n \n \tm_LastExtension = curExt;\n"
         ],
         "kwargs": {},
-        "timestamp": 548386.702457949,
+        "timestamp": 1910412.526685665,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -280,7 +288,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 548433.368953382,
+        "timestamp": 1910461.461390549,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

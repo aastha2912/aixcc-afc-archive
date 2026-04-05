@@ -1,5 +1,5 @@
 {
-  "vuln_id": 76,
+  "vuln_id": 375,
   "crash_result": {
     "output": "==6654==ERROR: AddressSanitizer: use-after-poison on address 0x631000014b80 at pc 0x00000085de89 bp 0x7fffa55737b0 sp 0x7fffa55737a8\nREAD of size 4 at 0x631000014b80 thread T0\nSCARINESS: 27 (4-byte-read-use-after-poison)\n    #0 0x85de88 in SkSL::Type::isScalar() const /src/skia/out/Fuzz/../../src/sksl/ir/SkSLType.h:352:16\n    #1 0x85a91d in SkSL::Compiler::simplifyExpression(SkTHashMap<SkSL::Variable const*, std::__1::unique_ptr<SkSL::Expression, std::__1::default_delete<SkSL::Expression> >*, Sk",
     "stack": "#0 0x85de88 in SkSL::Type::isScalar() const skia/out/Fuzz/../../src/sksl/ir/SkSLType.h:352:16\n#1 0x85a91d in SkSL::Compiler::simplifyExpression(SkTHashMap<SkSL::Variable const*, std::__1::unique_ptr<SkSL::Expression, std::__1::default_delete<SkSL::Expression> >*, SkGoodHash>&, SkSL::BasicBlock&, std::__1::__wrap_iter<SkSL::BasicBlock::Node*>*, SkSL::Compiler::OptimizationContext*) skia/out/Fuzz/../../src/sksl/SkSLCompiler.cpp:908:28\n#2 0x862bce in SkSL::Compiler::scanCFG(SkSL::FunctionDefinition",
@@ -24,90 +24,82 @@
   "analyzed_vuln": {
     "function": "simplifyExpression",
     "file": "skia/src/sksl/SkSLCompiler.cpp",
-    "description": "Use-after-poison occurs because Compiler::simplifyExpression caches references to BinaryExpression children (`Expression& left = *bin->left(); Expression& right = *bin->right();`), then performs rewrite helpers like `delete_left`, `delete_right`, `vectorize_left/right` that can replace/move/destroy those child expressions, but the function continues to use the stale `leftType/rightType` (and potentially `left/right`) afterward. This leaves dangling Type/Expression references and eventually reads poisoned memory in `Type::isScalar()` during optimization. Crash is observed in `Type::isScalar` (SkSLType.h:352), but root cause is invalid lifetime handling in `simplifyExpression`.",
-    "conditions": "Triggered via `SkRuntimeEffect::Make` on crafted SkSL that drives optimizer rewrites in `scanCFG`/`simplifyExpression` for binary expressions (e.g., expressions like `an(), float[](), float[]()` in the PoC). During optimization (`convertProgram` -> `optimize` -> `scanCFG`), binary simplification performs a transformation that mutates/replaces one operand, then later logic still consults previously-captured operand/type references, causing a read from freed/poisoned pool memory."
+    "description": "In Compiler::simplifyExpression, the code caches references to `left`, `right`, `leftType`, and `rightType` from a BinaryExpression, then performs rewrite helpers (e.g. delete_left/delete_right/vectorize_left/vectorize_right) that can replace/move subexpressions and invalidate those previously-cached references. Subsequent checks in the same optimization pass can then call methods like Type::isScalar() on stale Type references backed by pool memory that has been poisoned, causing the ASan use-after-poison read seen in Type::isScalar(). Root cause is unsafe reuse of references across mutating IR rewrites in simplifyExpression.",
+    "conditions": "Triggered during SkRuntimeEffect shader compilation/optimization (Compiler::scanCFG -> simplifyExpression) with crafted SkSL that produces binary expressions eligible for algebraic simplification and vectorization/deletion rewrites (as in the provided PoC using comma expressions and temporary float arrays). The optimizer mutates a BinaryExpression node while still relying on pre-mutation `left/right` type references, leading to stale reference dereference in later scalar/vector checks and crash."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.032668649999999994,
-      "total_input_tokens": 23423,
-      "total_output_tokens": 572,
-      "total_cached_tokens": 10368,
+      "total_cost": 0.0268856,
+      "total_input_tokens": 21200,
+      "total_output_tokens": 480,
+      "total_cached_tokens": 10752,
       "llm_calls": [
         {
-          "timestamp": 1773384030.4408932,
+          "timestamp": 1774836657.0041368,
           "model": "gpt-5.3-codex",
-          "cost": 0.00785085,
-          "input_tokens": 4435,
-          "output_tokens": 136,
-          "total_tokens": 4571,
-          "cached_tokens": 1152,
+          "cost": 0.00699405,
+          "input_tokens": 4523,
+          "output_tokens": 107,
+          "total_tokens": 4630,
+          "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_wUDmkSSqo8HSsjVimOVyKOcv"
+              "tool_call_id": "call_SymYKEk8PI2giEUgRNoKhmiI"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_mKcjgO6BfrmgOTEg8Fl0iAR5"
+              "tool_call_id": "call_paECyp9iyVh7reQcuxV5pAt0"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_auTMTuqME1HJMqUW4Ln6aX55"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_DCjttxky36i0xYEaUpu3Btbl"
+              "tool_call_id": "call_qPPpBWdf2idPWcdeNcZH7PEG"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773384064.7878048,
+          "timestamp": 1774836659.4792926,
           "model": "gpt-5.3-codex",
-          "cost": 0.00331975,
-          "input_tokens": 4777,
-          "output_tokens": 144,
-          "total_tokens": 4921,
+          "cost": 0.0029015,
+          "input_tokens": 4786,
+          "output_tokens": 113,
+          "total_tokens": 4899,
           "cached_tokens": 4480,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_oMo178hpSWH8xjeSws3axXI8"
+              "tool_call_id": "call_cVqtzJ8nbdFFYoMVB6TqlGfB"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ip9y5Sb7biTnVFoLPqB5Z1VO"
+              "tool_call_id": "call_Uis4eoGrYia7PA0LoJ8bBdxp"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_TXWOJAkXze8LEM88XJw3VJob"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_1uaqiCQ04ITaEaGrjFLX65vr"
+              "tool_call_id": "call_4LaEt3eP0MojeKqFWJCHlm2C"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773384071.9243798,
+          "timestamp": 1774836666.4734645,
           "model": "gpt-5.3-codex",
-          "cost": 0.021498049999999998,
-          "input_tokens": 14211,
-          "output_tokens": 292,
-          "total_tokens": 14503,
+          "cost": 0.01699005,
+          "input_tokens": 11891,
+          "output_tokens": 260,
+          "total_tokens": 12151,
           "cached_tokens": 4736,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -117,7 +109,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_T7DXvs6cThCOTiBiNYVvSaqC"
+              "tool_call_id": "call_Mda8JcFgIu594w31ffwLy7jG"
             }
           ],
           "finish_reason": "tool_calls"
@@ -126,19 +118,19 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.06329645,
-      "total_input_tokens": 36067,
-      "total_output_tokens": 1928,
-      "total_cached_tokens": 17024,
+      "total_cost": 0.03497655,
+      "total_input_tokens": 39953,
+      "total_output_tokens": 989,
+      "total_cached_tokens": 30976,
       "llm_calls": [
         {
-          "timestamp": 1773384074.559895,
+          "timestamp": 1774836668.5956569,
           "model": "gpt-5.3-codex",
-          "cost": 0.00594545,
-          "input_tokens": 4255,
+          "cost": 0.0075222,
+          "input_tokens": 5732,
           "output_tokens": 80,
-          "total_tokens": 4335,
-          "cached_tokens": 1664,
+          "total_tokens": 5812,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -147,23 +139,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_JWUUeuCMnpLlED1ZV08lWhLq"
+              "tool_call_id": "call_6wQfwRy8zYbOpbtRn3ZlV8jO"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_bX4jns9ACqp9DvyWVOC8smFP"
+              "tool_call_id": "call_2eRERze98xbFN6NjZw5Ag4Fy"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773384095.7786314,
+          "timestamp": 1774836677.7062767,
           "model": "gpt-5.3-codex",
-          "cost": 0.04163425,
-          "input_tokens": 9303,
-          "output_tokens": 1811,
-          "total_tokens": 11114,
-          "cached_tokens": 0,
+          "cost": 0.022118600000000002,
+          "input_tokens": 10732,
+          "output_tokens": 872,
+          "total_tokens": 11604,
+          "cached_tokens": 5632,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -172,19 +164,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_OIgyEqpQzrPFFjM18jxqj6o0"
+              "tool_call_id": "call_jXAzay4tuWkFOKieudl2PanX"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773384097.8843038,
+          "timestamp": 1774836679.2012703,
           "model": "gpt-5.3-codex",
-          "cost": 0.0131467,
-          "input_tokens": 11202,
+          "cost": 0.002513,
+          "input_tokens": 11692,
           "output_tokens": 14,
-          "total_tokens": 11216,
-          "cached_tokens": 4224,
+          "total_tokens": 11706,
+          "cached_tokens": 11520,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -193,19 +185,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_3roccLVHBbWw8IcZGKtOcQK7"
+              "tool_call_id": "call_MZMbRH7FENH4Elcs4npJUi7B"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773384603.7247994,
+          "timestamp": 1774837218.7029507,
           "model": "gpt-5.3-codex",
-          "cost": 0.00257005,
-          "input_tokens": 11307,
+          "cost": 0.0028227499999999997,
+          "input_tokens": 11797,
           "output_tokens": 23,
-          "total_tokens": 11330,
-          "cached_tokens": 11136,
+          "total_tokens": 11820,
+          "cached_tokens": 11520,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -214,7 +206,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_gbiph96HFYfUzlxdLgc1TY0R"
+              "tool_call_id": "call_IJQ72Mmu9q9UyN2G8LTyZtJf"
             }
           ],
           "finish_reason": "tool_calls"
@@ -222,15 +214,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.0959651,
-      "total_input_tokens": 59490,
-      "total_output_tokens": 2500,
+      "total_cost": 0.061862150000000005,
+      "total_input_tokens": 61153,
+      "total_output_tokens": 1469,
       "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/sksl/SkSLCompiler.cpp\n+++ b/src/sksl/SkSLCompiler.cpp\n@@ -900,19 +900,19 @@\n                 delete_left(&b, iter, optimizationContext);\n                 break;\n             }\n-            Expression& left = *bin->left();\n-            Expression& right = *bin->right();\n-            const Type& leftType = left.type();\n-            const Type& rightType = right.type();\n+            Expression* left = bin->left().get();\n+            Expression* right = bin->right().get();\n+            const Type* leftType = &left->type();\n+            const Type* rightType = &right->type();\n             // collapse useless expressions like x * 1 or x + 0\n-            if ((!leftType.isScalar() && !leftType.isVector()) ||\n-                (!rightType.isScalar() && !rightType.isVector())) {\n+            if ((!leftType->isScalar() && !leftType->isVector()) ||\n+                (!rightType->isScalar() && !rightType->isVector())) {\n                 break;\n             }\n             switch (bin->getOperator()) {\n                 case Token::Kind::TK_STAR:\n-                    if (is_constant(left, 1)) {\n-                        if (leftType.isVector() && rightType.isScalar()) {\n+                    if (is_constant(*left, 1)) {\n+                        if (leftType->isVector() && rightType->isScalar()) {\n                             // float4(1) * x -> float4(x)\n                             vectorize_right(&b, iter, optimizationContext);\n                         } else {\n@@ -922,22 +922,22 @@\n                             delete_left(&b, iter, optimizationContext);\n                         }\n                     }\n-                    else if (is_constant(left, 0)) {\n-                        if (leftType.isScalar() && rightType.isVector() &&\n-                            !right.hasSideEffects()) {\n+                    else if (is_constant(*left, 0)) {\n+                        if (leftType->isScalar() && rightType->isVector() &&\n+                            !right->hasSideEffects()) {\n                             // 0 * float4(x) -> float4(0)\n                             vectorize_left(&b, iter, optimizationContext);\n                         } else {\n                             // 0 * x -> 0\n                             // float4(0) * x -> float4(0)\n                             // float4(0) * float4(x) -> float4(0)\n-                            if (!right.hasSideEffects()) {\n+                            if (!right->hasSideEffects()) {\n                                 delete_right(&b, iter, optimizationContext);\n                             }\n                         }\n                     }\n-                    else if (is_constant(right, 1)) {\n-                        if (leftType.isScalar() && rightType.isVector()) {\n+                    else if (is_constant(*right, 1)) {\n+                        if (leftType->isScalar() && rightType->isVector()) {\n                             // x * float4(1) -> float4(x)\n                             vectorize_left(&b, iter, optimizationContext);\n                         } else {\n@@ -947,23 +947,23 @@\n                             delete_right(&b, iter, optimizationContext);\n                         }\n                     }\n-                    else if (is_constant(right, 0)) {\n-                        if (leftType.isVector() && rightType.isScalar() && !left.hasSideEffects()) {\n+                    else if (is_constant(*right, 0)) {\n+                        if (leftType->isVector() && rightType->isScalar() && !left->hasSideEffects()) {\n                             // float4(x) * 0 -> float4(0)\n                             vectorize_right(&b, iter, optimizationContext);\n                         } else {\n                             // x * 0 -> 0\n                             // x * float4(0) -> float4(0)\n                             // float4(x) * float4(0) -> float4(0)\n-                            if (!left.hasSideEffects()) {\n+                            if (!left->hasSideEffects()) {\n                                 delete_left(&b, iter, optimizationContext);\n                             }\n                         }\n                     }\n                     break;\n                 case Token::Kind::TK_PLUS:\n-                    if (is_constant(left, 0)) {\n-                        if (leftType.isVector() && rightType.isScalar()) {\n+                    if (is_constant(*left, 0)) {\n+                        if (leftType->isVector() && rightType->isScalar()) {\n                             // float4(0) + x -> float4(x)\n                             vectorize_right(&b, iter, optimizationContext);\n                         } else {\n@@ -972,8 +972,8 @@\n                             // float4(0) + float4(x) -> float4(x)\n                             delete_left(&b, iter, optimizationContext);\n                         }\n-                    } else if (is_constant(right, 0)) {\n-                        if (leftType.isScalar() && rightType.isVector()) {\n+                    } else if (is_constant(*right, 0)) {\n+                        if (leftType->isScalar() && rightType->isVector()) {\n                             // x + float4(0) -> float4(x)\n                             vectorize_left(&b, iter, optimizationContext);\n                         } else {\n@@ -985,8 +985,8 @@\n                     }\n                     break;\n                 case Token::Kind::TK_MINUS:\n-                    if (is_constant(right, 0)) {\n-                        if (leftType.isScalar() && rightType.isVector()) {\n+                    if (is_constant(*right, 0)) {\n+                        if (leftType->isScalar() && rightType->isVector()) {\n                             // x - float4(0) -> float4(x)\n                             vectorize_left(&b, iter, optimizationContext);\n                         } else {\n@@ -998,8 +998,8 @@\n                     }\n                     break;\n                 case Token::Kind::TK_SLASH:\n-                    if (is_constant(right, 1)) {\n-                        if (leftType.isScalar() && rightType.isVector()) {\n+                    if (is_constant(*right, 1)) {\n+                        if (leftType->isScalar() && rightType->isVector()) {\n                             // x / float4(1) -> float4(x)\n                             vectorize_left(&b, iter, optimizationContext);\n                         } else {\n@@ -1008,24 +1008,24 @@\n                             // float4(x) / float4(1) -> float4(x)\n                             delete_right(&b, iter, optimizationContext);\n                         }\n-                    } else if (is_constant(left, 0)) {\n-                        if (leftType.isScalar() && rightType.isVector() &&\n-                            !right.hasSideEffects()) {\n+                    } else if (is_constant(*left, 0)) {\n+                        if (leftType->isScalar() && rightType->isVector() &&\n+                            !right->hasSideEffects()) {\n                             // 0 / float4(x) -> float4(0)\n                             vectorize_left(&b, iter, optimizationContext);\n                         } else {\n                             // 0 / x -> 0\n                             // float4(0) / x -> float4(0)\n                             // float4(0) / float4(x) -> float4(0)\n-                            if (!right.hasSideEffects()) {\n+                            if (!right->hasSideEffects()) {\n                                 delete_right(&b, iter, optimizationContext);\n                             }\n                         }\n                     }\n                     break;\n                 case Token::Kind::TK_PLUSEQ:\n-                    if (is_constant(right, 0)) {\n-                        clear_write(left);\n+                    if (is_constant(*right, 0)) {\n+                        clear_write(*left);\n                         delete_right(&b, iter, optimizationContext);\n                     }\n                     break;\n",
+    "patch": "--- a/src/sksl/SkSLCompiler.cpp\n+++ b/src/sksl/SkSLCompiler.cpp\n@@ -900,11 +900,11 @@\n                 delete_left(&b, iter, optimizationContext);\n                 break;\n             }\n+            // collapse useless expressions like x * 1 or x + 0\n             Expression& left = *bin->left();\n             Expression& right = *bin->right();\n             const Type& leftType = left.type();\n             const Type& rightType = right.type();\n-            // collapse useless expressions like x * 1 or x + 0\n             if ((!leftType.isScalar() && !leftType.isVector()) ||\n                 (!rightType.isScalar() && !rightType.isVector())) {\n                 break;\n@@ -921,6 +921,7 @@\n                             // float4(1) * float4(x) -> float4(x)\n                             delete_left(&b, iter, optimizationContext);\n                         }\n+                        break;\n                     }\n                     else if (is_constant(left, 0)) {\n                         if (leftType.isScalar() && rightType.isVector() &&\n@@ -935,6 +936,7 @@\n                                 delete_right(&b, iter, optimizationContext);\n                             }\n                         }\n+                        break;\n                     }\n                     else if (is_constant(right, 1)) {\n                         if (leftType.isScalar() && rightType.isVector()) {\n@@ -946,6 +948,7 @@\n                             // float4(x) * float4(1) -> float4(x)\n                             delete_right(&b, iter, optimizationContext);\n                         }\n+                        break;\n                     }\n                     else if (is_constant(right, 0)) {\n                         if (leftType.isVector() && rightType.isScalar() && !left.hasSideEffects()) {\n@@ -959,6 +962,7 @@\n                                 delete_left(&b, iter, optimizationContext);\n                             }\n                         }\n+                        break;\n                     }\n                     break;\n                 case Token::Kind::TK_PLUS:\n@@ -972,6 +976,7 @@\n                             // float4(0) + float4(x) -> float4(x)\n                             delete_left(&b, iter, optimizationContext);\n                         }\n+                        break;\n                     } else if (is_constant(right, 0)) {\n                         if (leftType.isScalar() && rightType.isVector()) {\n                             // x + float4(0) -> float4(x)\n@@ -982,6 +987,7 @@\n                             // float4(x) + float4(0) -> float4(x)\n                             delete_right(&b, iter, optimizationContext);\n                         }\n+                        break;\n                     }\n                     break;\n                 case Token::Kind::TK_MINUS:\n@@ -995,6 +1001,7 @@\n                             // float4(x) - float4(0) -> float4(x)\n                             delete_right(&b, iter, optimizationContext);\n                         }\n+                        break;\n                     }\n                     break;\n                 case Token::Kind::TK_SLASH:\n@@ -1008,6 +1015,7 @@\n                             // float4(x) / float4(1) -> float4(x)\n                             delete_right(&b, iter, optimizationContext);\n                         }\n+                        break;\n                     } else if (is_constant(left, 0)) {\n                         if (leftType.isScalar() && rightType.isVector() &&\n                             !right.hasSideEffects()) {\n@@ -1021,6 +1029,7 @@\n                                 delete_right(&b, iter, optimizationContext);\n                             }\n                         }\n+                        break;\n                     }\n                     break;\n                 case Token::Kind::TK_PLUSEQ:\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -250,23 +242,23 @@
         "tool_name": "read_source",
         "args": [
           "skia/src/sksl/SkSLCompiler.cpp",
-          860
+          930
         ],
         "kwargs": {},
-        "timestamp": 416363.138075731,
+        "timestamp": 1868957.172719123,
         "success": true,
-        "result_summary": "Ok({'contents': '761 /**\\n762  * Constructs the specified type using a single argument.\\n763  */\\n764 static std::unique_ptr<Expression> construct(const Type* type, std::unique_ptr<Expression> v) {\\n7..."
+        "result_summary": "Ok({'contents': ' 831             break;\\n 832         case Expression::Kind::kSwizzle:\\n 833             clear_write(*expr.as<Swizzle>().base());\\n 834             break;\\n 835         case Expressio..."
       },
       {
         "tool_name": "read_source",
         "args": [
           "skia/src/sksl/SkSLCompiler.cpp",
-          930
+          850
         ],
         "kwargs": {},
-        "timestamp": 416363.14002386,
+        "timestamp": 1868957.174488615,
         "success": true,
-        "result_summary": "Ok({'contents': ' 831             break;\\n 832         case Expression::Kind::kSwizzle:\\n 833             clear_write(*expr.as<Swizzle>().base());\\n 834             break;\\n 835         case Expressio..."
+        "result_summary": "Ok({'contents': '751     }\\n752     --(*iter);\\n753     if ((!(*iter)->isExpression() || (*iter)->expression() != &leftPointer)) {\\n754         optimizationContext->fNeedsRescan = true;\\n755         r..."
       }
     ],
     "find_references": [],
@@ -275,10 +267,10 @@
         "tool_name": "apply_patch",
         "args": [
           "skia/src/sksl/SkSLCompiler.cpp",
-          "@@ -900,10 +900,10 @@\n                 delete_left(&b, iter, optimizationContext);\n                 break;\n             }\n-            Expression& left = *bin->left();\n-            Expression& right = *bin->right();\n-            const Type& leftType = left.type();\n-            const Type& rightType = right.type();\n+            Expression* left = bin->left().get();\n+            Expression* right = bin->right().get();\n+            const Type* leftType = &left->type();\n+            const Type* rightType = &right->type();\n             // collapse useless expressions like x * 1 or x + 0\n-            if ((!leftType.isScalar() && !leftType.isVector()) ||\n-                (!rightType.isScalar() && !rightType.isVector())) {\n+            if ((!leftType->isScalar() && !leftType->isVector()) ||\n+                (!rightType->isScalar() && !rightType->isVector())) {\n                 break;\n             }\n             switch (bin->getOperator()) {\n@@ -912,9 +912,9 @@\n                 case Token::Kind::TK_STAR:\n-                    if (is_constant(left, 1)) {\n-                        if (leftType.isVector() && rightType.isScalar()) {\n+                    if (is_constant(*left, 1)) {\n+                        if (leftType->isVector() && rightType->isScalar()) {\n                             // float4(1) * x -> float4(x)\n                             vectorize_right(&b, iter, optimizationContext);\n                         } else {\n@@ -923,9 +923,9 @@\n                             delete_left(&b, iter, optimizationContext);\n                         }\n                     }\n-                    else if (is_constant(left, 0)) {\n-                        if (leftType.isScalar() && rightType.isVector() &&\n-                            !right.hasSideEffects()) {\n+                    else if (is_constant(*left, 0)) {\n+                        if (leftType->isScalar() && rightType->isVector() &&\n+                            !right->hasSideEffects()) {\n                             // 0 * float4(x) -> float4(0)\n                             vectorize_left(&b, iter, optimizationContext);\n                         } else {\n@@ -931,31 +931,31 @@\n                             // 0 * x -> 0\n                             // float4(0) * x -> float4(0)\n                             // float4(0) * float4(x) -> float4(0)\n-                            if (!right.hasSideEffects()) {\n+                            if (!right->hasSideEffects()) {\n                                 delete_right(&b, iter, optimizationContext);\n                             }\n                         }\n                     }\n-                    else if (is_constant(right, 1)) {\n-                        if (leftType.isScalar() && rightType.isVector()) {\n+                    else if (is_constant(*right, 1)) {\n+                        if (leftType->isScalar() && rightType->isVector()) {\n                             // x * float4(1) -> float4(x)\n                             vectorize_left(&b, iter, optimizationContext);\n                         } else {\n@@ -947,9 +947,9 @@\n                             delete_right(&b, iter, optimizationContext);\n                         }\n                     }\n-                    else if (is_constant(right, 0)) {\n-                        if (leftType.isVector() && rightType.isScalar() && !left.hasSideEffects()) {\n+                    else if (is_constant(*right, 0)) {\n+                        if (leftType->isVector() && rightType->isScalar() && !left->hasSideEffects()) {\n                             // float4(x) * 0 -> float4(0)\n                             vectorize_right(&b, iter, optimizationContext);\n                         } else {\n@@ -957,7 +957,7 @@\n                             // x * float4(0) -> float4(0)\n                             // float4(x) * float4(0) -> float4(0)\n-                            if (!left.hasSideEffects()) {\n+                            if (!left->hasSideEffects()) {\n                                 delete_left(&b, iter, optimizationContext);\n                             }\n                         }\n@@ -965,13 +965,13 @@\n                     break;\n                 case Token::Kind::TK_PLUS:\n-                    if (is_constant(left, 0)) {\n-                        if (leftType.isVector() && rightType.isScalar()) {\n+                    if (is_constant(*left, 0)) {\n+                        if (leftType->isVector() && rightType->isScalar()) {\n                             // float4(0) + x -> float4(x)\n                             vectorize_right(&b, iter, optimizationContext);\n                         } else {\n@@ -973,8 +973,8 @@\n                             delete_left(&b, iter, optimizationContext);\n                         }\n-                    } else if (is_constant(right, 0)) {\n-                        if (leftType.isScalar() && rightType.isVector()) {\n+                    } else if (is_constant(*right, 0)) {\n+                        if (leftType->isScalar() && rightType->isVector()) {\n                             // x + float4(0) -> float4(x)\n                             vectorize_left(&b, iter, optimizationContext);\n                         } else {\n@@ -986,8 +986,8 @@\n                     }\n                     break;\n                 case Token::Kind::TK_MINUS:\n-                    if (is_constant(right, 0)) {\n-                        if (leftType.isScalar() && rightType.isVector()) {\n+                    if (is_constant(*right, 0)) {\n+                        if (leftType->isScalar() && rightType->isVector()) {\n                             // x - float4(0) -> float4(x)\n                             vectorize_left(&b, iter, optimizationContext);\n                         } else {\n@@ -999,17 +999,17 @@\n                     }\n                     break;\n                 case Token::Kind::TK_SLASH:\n-                    if (is_constant(right, 1)) {\n-                        if (leftType.isScalar() && rightType.isVector()) {\n+                    if (is_constant(*right, 1)) {\n+                        if (leftType->isScalar() && rightType->isVector()) {\n                             // x / float4(1) -> float4(x)\n                             vectorize_left(&b, iter, optimizationContext);\n                         } else {\n@@ -1009,9 +1009,9 @@\n                             delete_right(&b, iter, optimizationContext);\n                         }\n-                    } else if (is_constant(left, 0)) {\n-                        if (leftType.isScalar() && rightType.isVector() &&\n-                            !right.hasSideEffects()) {\n+                    } else if (is_constant(*left, 0)) {\n+                        if (leftType->isScalar() && rightType->isVector() &&\n+                            !right->hasSideEffects()) {\n                             // 0 / float4(x) -> float4(0)\n                             vectorize_left(&b, iter, optimizationContext);\n                         } else {\n@@ -1019,14 +1019,14 @@\n                             // 0 / x -> 0\n                             // float4(0) / x -> float4(0)\n                             // float4(0) / float4(x) -> float4(0)\n-                            if (!right.hasSideEffects()) {\n+                            if (!right->hasSideEffects()) {\n                                 delete_right(&b, iter, optimizationContext);\n                             }\n                         }\n                     }\n                     break;\n                 case Token::Kind::TK_PLUSEQ:\n-                    if (is_constant(right, 0)) {\n-                        clear_write(left);\n+                    if (is_constant(*right, 0)) {\n+                        clear_write(*left);\n                         delete_right(&b, iter, optimizationContext);\n                     }\n"
+          "@@ -900,11 +900,11 @@\n                 delete_left(&b, iter, optimizationContext);\n                 break;\n             }\n-            Expression& left = *bin->left();\n-            Expression& right = *bin->right();\n-            const Type& leftType = left.type();\n-            const Type& rightType = right.type();\n             // collapse useless expressions like x * 1 or x + 0\n+            Expression& left = *bin->left();\n+            Expression& right = *bin->right();\n+            const Type& leftType = left.type();\n+            const Type& rightType = right.type();\n             if ((!leftType.isScalar() && !leftType.isVector()) ||\n                 (!rightType.isScalar() && !rightType.isVector())) {\n                 break;\n@@ -922,6 +922,7 @@\n                             delete_left(&b, iter, optimizationContext);\n                         }\n+                        break;\n                     }\n                     else if (is_constant(left, 0)) {\n                         if (leftType.isScalar() && rightType.isVector() &&\n@@ -937,6 +938,7 @@\n                                 delete_right(&b, iter, optimizationContext);\n                             }\n                         }\n+                        break;\n                     }\n                     else if (is_constant(right, 1)) {\n                         if (leftType.isScalar() && rightType.isVector()) {\n@@ -947,6 +949,7 @@\n                             // float4(x) * float4(1) -> float4(x)\n                             delete_right(&b, iter, optimizationContext);\n                         }\n+                        break;\n                     }\n                     else if (is_constant(right, 0)) {\n                         if (leftType.isVector() && rightType.isScalar() && !left.hasSideEffects()) {\n@@ -960,6 +963,7 @@\n                                 delete_left(&b, iter, optimizationContext);\n                             }\n                         }\n+                        break;\n                     }\n                     break;\n                 case Token::Kind::TK_PLUS:\n@@ -973,6 +977,7 @@\n                             // float4(0) + float4(x) -> float4(x)\n                             delete_left(&b, iter, optimizationContext);\n                         }\n+                        break;\n                     } else if (is_constant(right, 0)) {\n                         if (leftType.isScalar() && rightType.isVector()) {\n                             // x + float4(0) -> float4(x)\n@@ -983,6 +988,7 @@\n                             // float4(x) + float4(0) -> float4(x)\n                             delete_right(&b, iter, optimizationContext);\n                         }\n+                        break;\n                     }\n                     break;\n                 case Token::Kind::TK_MINUS:\n@@ -996,6 +1002,7 @@\n                             // float4(x) - float4(0) -> float4(x)\n                             delete_right(&b, iter, optimizationContext);\n                         }\n+                        break;\n                     }\n                     break;\n                 case Token::Kind::TK_SLASH:\n@@ -1009,6 +1016,7 @@\n                             // float4(x) / float4(1) -> float4(x)\n                             delete_right(&b, iter, optimizationContext);\n                         }\n+                        break;\n                     } else if (is_constant(left, 0)) {\n                         if (leftType.isScalar() && rightType.isVector() &&\n                             !right.hasSideEffects()) {\n@@ -1022,6 +1030,7 @@\n                                 delete_right(&b, iter, optimizationContext);\n                             }\n                         }\n+                        break;\n                     }\n                     break;\n                 case Token::Kind::TK_PLUSEQ:\n"
         ],
         "kwargs": {},
-        "timestamp": 416384.622716503,
+        "timestamp": 1868966.382602782,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -288,7 +280,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 416889.705667024,
+        "timestamp": 1869506.047917534,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

@@ -6,11 +6,11 @@
       "args": [
         "php_hash_unserialize",
         "php-src/ext/hash/hash.c",
-        0,
+        1,
         true
       ],
       "kwargs": {},
-      "timestamp": 417595.36852316,
+      "timestamp": 1869307.141702969,
       "success": true,
       "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n342 PHP_HASH_API int php_hash_unserialize(php_hashcontext_object *hash, zend_long magic, const zval *zv) /* ..."
     }
@@ -19,36 +19,61 @@
     {
       "tool_name": "read_source",
       "args": [
-        "php-src/ext/hash/hash_xxhash.c",
-        1
-      ],
-      "kwargs": {},
-      "timestamp": 417372.612454177,
-      "success": true,
-      "result_summary": "Ok({'contents': '  1 /*\\n  2    +----------------------------------------------------------------------+\\n  3    | Copyright (c) The PHP Group                                          |\\n  4    +-----..."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
         "php-src/ext/hash/hash.c",
         342
       ],
       "kwargs": {},
-      "timestamp": 417597.343986422,
+      "timestamp": 1869316.835205715,
       "success": true,
       "result_summary": "Ok({'contents': '243 \\t\\t}\\n244 \\t\\tif (isupper((unsigned char) spec_ch)) {\\n245 \\t\\t\\tpos += count * sz;\\n246 \\t\\t} else if (sz == 1 && count > 1) {\\n247 \\t\\t\\tZVAL_STRINGL(&tmp, (char *) buf + pos, ..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "php-src/ext/hash/hash_xxhash.c",
+        1
+      ],
+      "kwargs": {},
+      "timestamp": 1869318.542247866,
+      "success": true,
+      "result_summary": "Ok({'contents': '  1 /*\\n  2    +----------------------------------------------------------------------+\\n  3    | Copyright (c) The PHP Group                                          |\\n  4    +-----..."
     }
   ],
-  "find_references": [],
+  "find_references": [
+    {
+      "tool_name": "find_references",
+      "args": [
+        "xxh64",
+        "php-src/ext/hash/hash.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1869315.416965067,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/php-src/ext/hash/hash.c', refs=[FileReference(line=97, content='\\t{\"XXH64\", \"xxh64\", 39},', enclosing_definition='N/A'), FileReference(line=1606, content='\\tphp_hash..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "serialize_spec",
+        "php-src/ext/hash",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1869368.305403323,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='php-src/ext/hash/hash.c', refs=[FileReference(line=333, content='\\tif (hash->ops->serialize_spec) {', enclosing_definition='php_hash_serialize'), FileReference(line=335, ..."
+    }
+  ],
   "apply_patch": [
     {
       "tool_name": "apply_patch",
       "args": [
         "php-src/ext/hash/hash.c",
-        "@@ -342,10 +342,20 @@\n PHP_HASH_API int php_hash_unserialize(php_hashcontext_object *hash, zend_long magic, const zval *zv) /* {{{ */\n {\n \tif (hash->ops->serialize_spec\n \t\t&& magic == PHP_HASH_SERIALIZE_MAGIC_SPEC) {\n-\t\treturn php_hash_unserialize_spec(hash, zv, hash->ops->serialize_spec);\n+\t\tint rc = php_hash_unserialize_spec(hash, zv, hash->ops->serialize_spec);\n+\t\tif (rc != SUCCESS) {\n+\t\t\treturn rc;\n+\t\t}\n+\n+\t\t/* Reinitialize algorithm-specific invariants after state import.\n+\t\t * Some implementations (e.g. xxHash) can crash on malformed internal\n+\t\t * state even if the serialized layout matches the spec. */\n+\t\thash->ops->hash_init(hash->context, NULL);\n+\t\treturn SUCCESS;\n \t} else {\n \t\treturn FAILURE;\n \t}\n }\n /* }}} */"
+        "@@ -342,10 +342,35 @@ PHP_HASH_API int php_hash_unserialize(php_hashcontext_object *hash, zend_long m\n {\n+\tint ret;\n+\n \tif (hash->ops->serialize_spec\n \t\t&& magic == PHP_HASH_SERIALIZE_MAGIC_SPEC) {\n-\t\treturn php_hash_unserialize_spec(hash, zv, hash->ops->serialize_spec);\n+\t\tret = php_hash_unserialize_spec(hash, zv, hash->ops->serialize_spec);\n+\t\tif (ret != SUCCESS) {\n+\t\t\treturn ret;\n+\t\t}\n+\n+\t\t/* Restore-state invariants for xxHash contexts.\n+\t\t * XXH*_update() assumes memsize is bounded by the internal buffer size.\n+\t\t * Reject forged serialized states that violate these invariants. */\n+\t\tif (hash->ops == &php_hash_xxh32_ops) {\n+\t\t\tPHP_XXH32_CTX *ctx = (PHP_XXH32_CTX *) hash->context;\n+\t\t\tif (ctx->s.memsize > sizeof(ctx->s.mem32)) {\n+\t\t\t\treturn FAILURE;\n+\t\t\t}\n+\t\t} else if (hash->ops == &php_hash_xxh64_ops) {\n+\t\t\tPHP_XXH64_CTX *ctx = (PHP_XXH64_CTX *) hash->context;\n+\t\t\tif (ctx->s.memsize > sizeof(ctx->s.mem64)) {\n+\t\t\t\treturn FAILURE;\n+\t\t\t}\n+\t\t}\n+\n+\t\treturn SUCCESS;\n \t} else {\n \t\treturn FAILURE;\n \t}\n }\n /* }}} */\n"
       ],
       "kwargs": {},
-      "timestamp": 417603.934350367,
+      "timestamp": 1869373.533954279,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
@@ -58,7 +83,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 417738.535693102,
+      "timestamp": 1869523.201926779,
       "success": true,
       "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
     }

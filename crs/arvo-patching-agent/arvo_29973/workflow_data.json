@@ -1,5 +1,5 @@
 {
-  "vuln_id": 283,
+  "vuln_id": 384,
   "crash_result": {
     "output": "==2015==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x6080000000f9 at pc 0x000000529117 bp 0x7ffc32524cf0 sp 0x7ffc325244b8\nREAD of size 538976288 at 0x6080000000f9 thread T0\nSCARINESS: 26 (multi-byte-read-heap-buffer-overflow)\n    #0 0x529116 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n    #1 0x5e43c4 in frame_get_usermeta /src/c-blosc2/blosc/frame.c:1114:5\n    #2 0x5e5d53 in blosc2_frame_to_schunk /src/c-blosc2/blosc/frame.c:152",
     "stack": "#0 0x529116 in __asan_memcpy llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n#1 0x5e43c4 in frame_get_usermeta c-blosc2/blosc/frame.c:1114:5\n#2 0x5e5d53 in blosc2_frame_to_schunk c-blosc2/blosc/frame.c:1526:18\n#3 0x5d8ff6 in blosc2_schunk_open_sframe c-blosc2/blosc/schunk.c:290:27\n#4 0x55da78 in LLVMFuzzerTestOneInput c-blosc2/tests/fuzz/fuzz_decompress_frame.c:23:27\n#5 0x4612a1 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) llvm-project/compil",
@@ -24,58 +24,104 @@
   "analyzed_vuln": {
     "function": "frame_get_usermeta",
     "file": "c-blosc2/blosc/frame.c",
-    "description": "Heap OOB read in frame_get_usermeta due to trusting attacker-controlled trailer usermeta_len without validating that trailer_offset + FRAME_TRAILER_USERMETA_OFFSET + usermeta_len stays within frame_len (or sframe buffer length). The function allocates usermeta_len bytes and memcpy()s from frame->sdata past the end of the input buffer, causing the ASan crash at memcpy.",
-    "conditions": "Fuzzer passes arbitrary bytes to blosc2_schunk_open_sframe() -> blosc2_frame_to_schunk() -> frame_get_usermeta(). A crafted frame with plausible header/trailer offsets but a large forged usermeta_len in trailer triggers the bug. Even with small input (89 bytes), if usermeta_len decodes to a huge positive int32, frame_get_usermeta performs memcpy from frame->sdata+offset for that length without bounds check, reading beyond heap allocation."
+    "description": "`frame_get_usermeta` trusts the trailer-provided `usermeta_len` and copies that many bytes from `frame->sdata + trailer_offset + FRAME_TRAILER_USERMETA_OFFSET` without validating that the requested range is within `frame_len`/input buffer bounds. Only the 4-byte length field location is bounds-checked, not the subsequent payload. A forged frame can set a huge positive `usermeta_len`, causing out-of-bounds read in `memcpy` (crash seen at line 1114).",
+    "conditions": "In `decompress_frame_fuzzer`, attacker-controlled bytes are passed directly to `blosc2_schunk_open_sframe` -> `blosc2_frame_to_schunk` -> `frame_get_usermeta`. Trigger requires an in-memory frame (`frame->sdata != NULL`) with a parseable header/trailer so execution reaches usermeta parsing, and a trailer `usermeta_len` value > remaining bytes after `trailer_offset + FRAME_TRAILER_USERMETA_OFFSET`. Because no upper-bound check enforces `offset + usermeta_len <= frame_len`, memcpy reads past the heap buffer."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 2,
-      "total_cost": 0.028649599999999997,
-      "total_input_tokens": 14584,
-      "total_output_tokens": 353,
-      "total_cached_tokens": 1152,
+      "total_llm_calls": 4,
+      "total_cost": 0.02598015,
+      "total_input_tokens": 22145,
+      "total_output_tokens": 542,
+      "total_cached_tokens": 12928,
       "llm_calls": [
         {
-          "timestamp": 1773718872.4781408,
+          "timestamp": 1774837726.6150074,
           "model": "gpt-5.3-codex",
-          "cost": 0.006048349999999999,
-          "input_tokens": 3405,
-          "output_tokens": 136,
-          "total_tokens": 3541,
-          "cached_tokens": 1152,
+          "cost": 0.00520555,
+          "input_tokens": 3493,
+          "output_tokens": 108,
+          "total_tokens": 3601,
+          "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 3,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_v2d2PGflPJo9QTorSbCmpkW3"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_uDeVOnD8AmSiWQpDTENYADFf"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_SLRHvZhJ6cdUwpZOFjvUBRpT"
+              "tool_call_id": "call_BNigeMLBBEhEkwQ7ZBD2fiQP"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_pDeA6N8xo0sct4wzHajTXq7n"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_iQXg1Ll00WP1uPIC0xq3v5UE"
+              "tool_call_id": "call_uLh0E6xCTDcnOhi1m5lF7j1f"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773718890.667704,
+          "timestamp": 1774837854.9655237,
           "model": "gpt-5.3-codex",
-          "cost": 0.02260125,
-          "input_tokens": 11179,
-          "output_tokens": 217,
-          "total_tokens": 11396,
-          "cached_tokens": 0,
+          "cost": 0.0064036,
+          "input_tokens": 3736,
+          "output_tokens": 120,
+          "total_tokens": 3856,
+          "cached_tokens": 1152,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Kr9itR3f7FzrNiTX6LzVyCMR"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_pDQgatpd6IWFyEbiPFPkWrVa"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_LkRhDsB7MLRR9f0KFIElyaPd"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774837859.7725403,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0071585500000000005,
+          "input_tokens": 6849,
+          "output_tokens": 44,
+          "total_tokens": 6893,
+          "cached_tokens": 3456,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_qP7qtamzHOeHZVYHbV8xctrj"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774837868.9091344,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0072124500000000005,
+          "input_tokens": 8067,
+          "output_tokens": 270,
+          "total_tokens": 8337,
+          "cached_tokens": 6784,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -84,7 +130,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_wnpxgyLH6xAHU9rqwX9qldcJ"
+              "tool_call_id": "call_MgGnTkrZcsqNAngeqN12WjFP"
             }
           ],
           "finish_reason": "tool_calls"
@@ -93,19 +139,19 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.0220934,
-      "total_input_tokens": 29844,
-      "total_output_tokens": 382,
-      "total_cached_tokens": 22528,
+      "total_cost": 0.018440099999999997,
+      "total_input_tokens": 27142,
+      "total_output_tokens": 358,
+      "total_cached_tokens": 21632,
       "llm_calls": [
         {
-          "timestamp": 1773718892.9889297,
+          "timestamp": 1774837870.8967533,
           "model": "gpt-5.3-codex",
-          "cost": 0.0048377,
-          "input_tokens": 3654,
-          "output_tokens": 76,
-          "total_tokens": 3730,
-          "cached_tokens": 1664,
+          "cost": 0.0057722,
+          "input_tokens": 4676,
+          "output_tokens": 87,
+          "total_tokens": 4763,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -114,23 +160,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_l9F4W5pN3CMYIWDv5EnPgRJi"
+              "tool_call_id": "call_UWT8Ny72DvN1HUOLVTZzcuPe"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_p7Cmc340ezwGO41QLVqsdx89"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Zrqu80WMHw142z0qEuv9C2Aa"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773718896.9869156,
+          "timestamp": 1774837883.0281568,
           "model": "gpt-5.3-codex",
-          "cost": 0.01292095,
-          "input_tokens": 8457,
-          "output_tokens": 269,
-          "total_tokens": 8726,
-          "cached_tokens": 3584,
+          "cost": 0.008686649999999999,
+          "input_tokens": 7239,
+          "output_tokens": 234,
+          "total_tokens": 7473,
+          "cached_tokens": 4608,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +185,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_S57uuirAohhFX7UiSSf2cj87"
+              "tool_call_id": "call_GBD5YjI4RpwPOJFlgaD0v73A"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773718901.1085942,
+          "timestamp": 1774837884.360385,
           "model": "gpt-5.3-codex",
-          "cost": 0.0021133,
-          "input_tokens": 8814,
+          "cost": 0.00193655,
+          "input_tokens": 7561,
           "output_tokens": 14,
-          "total_tokens": 8828,
-          "cached_tokens": 8576,
+          "total_tokens": 7575,
+          "cached_tokens": 7296,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +206,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_qPbKn9nU1RFeJoGVsgMTRY6I"
+              "tool_call_id": "call_MCdGBKUnayHjp9osqHtcuhFb"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773719346.7325268,
+          "timestamp": 1774837975.12656,
           "model": "gpt-5.3-codex",
-          "cost": 0.00222145,
-          "input_tokens": 8919,
+          "cost": 0.0020447,
+          "input_tokens": 7666,
           "output_tokens": 23,
-          "total_tokens": 8942,
-          "cached_tokens": 8704,
+          "total_tokens": 7689,
+          "cached_tokens": 7424,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,7 +227,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_hBN1bwQCgak0PWRAcxW8k91X"
+              "tool_call_id": "call_THp7bBNwwXOeEiFAWX8GpdVi"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,15 +235,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.050742999999999996,
-      "total_input_tokens": 44428,
-      "total_output_tokens": 735,
-      "total_llm_calls": 6
+      "total_cost": 0.044420249999999994,
+      "total_input_tokens": 49287,
+      "total_output_tokens": 900,
+      "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/blosc/frame.c\n+++ b/blosc/frame.c\n@@ -1109,7 +1109,19 @@\n     return 0;\n   }\n \n+  int64_t usermeta_offset = trailer_offset + FRAME_TRAILER_USERMETA_OFFSET;\n+  if (usermeta_offset < 0 || usermeta_offset > frame_len ||\n+      usermeta_len > (frame_len - usermeta_offset)) {\n+    BLOSC_TRACE_ERROR(\"Invalid usermeta length exceeds frame boundaries.\");\n+    return -1;\n+  }\n+\n   *usermeta = malloc(usermeta_len);\n+  if (*usermeta == NULL) {\n+    BLOSC_TRACE_ERROR(\"Cannot allocate memory for usermeta.\");\n+    return -1;\n+  }\n+\n   if (frame->sdata != NULL) {\n     memcpy(*usermeta, frame->sdata + trailer_offset + FRAME_TRAILER_USERMETA_OFFSET, usermeta_len);\n   }\n",
+    "patch": "--- a/blosc/frame.c\n+++ b/blosc/frame.c\n@@ -1109,7 +1109,16 @@\n     return 0;\n   }\n \n+  if (trailer_offset + FRAME_TRAILER_USERMETA_OFFSET + usermeta_len > frame_len) {\n+    BLOSC_TRACE_ERROR(\"Invalid usermeta length exceeds frame length.\");\n+    return -1;\n+  }\n+\n   *usermeta = malloc(usermeta_len);\n+  if (*usermeta == NULL) {\n+    BLOSC_TRACE_ERROR(\"Cannot allocate memory for usermeta.\");\n+    return -1;\n+  }\n   if (frame->sdata != NULL) {\n     memcpy(*usermeta, frame->sdata + trailer_offset + FRAME_TRAILER_USERMETA_OFFSET, usermeta_len);\n   }\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -211,7 +257,21 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "frame_get_usermeta",
+          "c-blosc2/blosc/frame.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1870168.694976443,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1053 int32_t frame_get_usermeta(blosc2_frame* frame, uint8_t** usermeta) {, extra=None))"
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
@@ -220,20 +280,9 @@
           1114
         ],
         "kwargs": {},
-        "timestamp": 751181.622387086,
+        "timestamp": 1870159.473061353,
         "success": true,
         "result_summary": "Ok({'contents': '1015     frame->len = frame_len;\\n1016   }\\n1017 \\n1018   if (!new && prev_h2len != h2len) {\\n1019     BLOSC_TRACE_ERROR(\"The new metalayer sizes should be equal the existing ones.\");..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "c-blosc2/blosc/frame.c",
-          1526
-        ],
-        "kwargs": {},
-        "timestamp": 751181.623735643,
-        "success": true,
-        "result_summary": "Ok({'contents': '1427       }\\n1428     }\\n1429   }\\n1430   schunk->data = malloc(nchunks * sizeof(void*));\\n1431   for (int i = 0; i < nchunks; i++) {\\n1432     if (frame->sdata != NULL) {\\n1433     ..."
       }
     ],
     "find_references": [],
@@ -242,10 +291,10 @@
         "tool_name": "apply_patch",
         "args": [
           "c-blosc2/blosc/frame.c",
-          "@@ -1108,9 +1108,20 @@ int32_t frame_get_usermeta(blosc2_frame* frame, uint8_t** usermeta) {\n     *usermeta = NULL;\n     return 0;\n   }\n+\n+  int64_t usermeta_offset = trailer_offset + FRAME_TRAILER_USERMETA_OFFSET;\n+  if (usermeta_offset < 0 || usermeta_offset > frame_len ||\n+      usermeta_len > (frame_len - usermeta_offset)) {\n+    BLOSC_TRACE_ERROR(\"Invalid usermeta length exceeds frame boundaries.\");\n+    return -1;\n+  }\n \n   *usermeta = malloc(usermeta_len);\n+  if (*usermeta == NULL) {\n+    BLOSC_TRACE_ERROR(\"Cannot allocate memory for usermeta.\");\n+    return -1;\n+  }\n+\n   if (frame->sdata != NULL) {\n     memcpy(*usermeta, frame->sdata + trailer_offset + FRAME_TRAILER_USERMETA_OFFSET, usermeta_len);\n   }\n"
+          "@@ -1108,9 +1108,17 @@ int32_t frame_get_usermeta(blosc2_frame* frame, uint8_t** usermeta) {\n     *usermeta = NULL;\n     return 0;\n   }\n+\n+  if (trailer_offset + FRAME_TRAILER_USERMETA_OFFSET + usermeta_len > frame_len) {\n+    BLOSC_TRACE_ERROR(\"Invalid usermeta length exceeds frame length.\");\n+    return -1;\n+  }\n \n   *usermeta = malloc(usermeta_len);\n+  if (*usermeta == NULL) {\n+    BLOSC_TRACE_ERROR(\"Cannot allocate memory for usermeta.\");\n+    return -1;\n+  }\n   if (frame->sdata != NULL) {\n     memcpy(*usermeta, frame->sdata + trailer_offset + FRAME_TRAILER_USERMETA_OFFSET, usermeta_len);\n   }\n"
         ],
         "kwargs": {},
-        "timestamp": 751185.634752037,
+        "timestamp": 1870171.653065413,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -255,7 +304,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 751633.6347726,
+        "timestamp": 1870262.60968892,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

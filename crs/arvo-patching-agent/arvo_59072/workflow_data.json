@@ -1,5 +1,5 @@
 {
-  "vuln_id": 177,
+  "vuln_id": 497,
   "crash_result": {
     "output": "==66308==ERROR: AddressSanitizer: heap-use-after-free on address 0x60e000002ce0 at pc 0x000000e6b63a bp 0x7fff6e503340 sp 0x7fff6e503338\nREAD of size 4 at 0x60e000002ce0 thread T0\nSCARINESS: 45 (4-byte-read-heap-use-after-free)\n    #0 0xe6b639 in zend_gc_refcount /src/php-src/Zend/zend_types.h:1260:12\n    #1 0xe6b639 in zval_refcount_p /src/php-src/Zend/zend_types.h:1309:9\n    #2 0xe6b639 in zval_call_destructor /src/php-src/Zend/zend_execute_API.c:215:35\n    #3 0xf1c6f8 in zend_hash_reverse_app",
     "stack": "#0 0xe6b639 in zend_gc_refcount php-src/Zend/zend_types.h:1260:12\n#1 0xe6b639 in zval_refcount_p php-src/Zend/zend_types.h:1309:9\n#2 0xe6b639 in zval_call_destructor php-src/Zend/zend_execute_API.c:215:35\n#3 0xf1c6f8 in zend_hash_reverse_apply php-src/Zend/zend_hash.c:2169:13\n#4 0xe6b061 in shutdown_destructors php-src/Zend/zend_execute_API.c:260:4\n#5 0xeb9d2a in zend_call_destructors php-src/Zend/zend.c:1262:3\n#6 0xcf9048 in php_request_shutdown php-src/main/main.c:1826:3\n#7 0x13327bb in fuzzer",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "concat_function",
     "file": "php-src/Zend/zend_operators.c",
-    "description": "Heap-use-after-free caused by incorrect destruction order in concat_function when performing in-place concatenation (result == op1). In the branch at zend_operators.c:2059+, it calls i_zval_ptr_dtor(result) before replacing result with the new string. If result/orig_op1 holds the sole reference to an exception object (created in php_date_initialize via zend_throw_exception_ex on DateTime parse failure), this dtor frees that object. A stale zval to the freed object remains in EG(symbol_table), and during request shutdown zval_call_destructor reads its refcount (zend_gc_refcount), triggering UAF.",
-    "conditions": "PoV must create an exception object and then drop its last reference through a '.=' concat path that hits concat_function with result == op1 and free_op1_string true. In this input, malformed DateTime construction throws, catch(ExcEption $e) binds exception object, and crafted '.=' operations in loop drive concat_function/ASSIGN_OP behavior that destructs the caught variable incorrectly. Later php_request_shutdown -> shutdown_destructors iterates EG(symbol_table) and accesses the already-freed object zval, causing the ASan UAF."
+    "description": "In concat_function(), when `result == op1` and `free_op1_string` is true, the code calls `i_zval_ptr_dtor(result)` (line ~2062) before extending/reusing `op1_string`. In this PoV, `result/op1` can hold an exception object zval (from failed DateTime construction). Destroying `result` drops the last ref and frees the object, but the same freed zval remains reachable in EG(symbol_table). During request shutdown, `shutdown_destructors()` iterates the symbol table and `zval_call_destructor()` reads refcount from that dangling object, causing heap-use-after-free. Root cause is unsafe in-place concat destruction order/alias handling in concat_function, which can free a still-referenced symbol-table zval.",
+    "conditions": "Trigger requires an in-place concatenation path (`.=`) where VM passes `result == op1`, and conversion/exception paths set `free_op1_string` so concat_function executes the `i_zval_ptr_dtor(result)` branch. The PoV repeatedly performs `.=` operations and invokes `new DateTime(...)` with malformed input to create/catch exceptions, producing an object value that is prematurely destroyed during concat. The stale object zval persists in the symbol table until `php_request_shutdown -> shutdown_destructors -> zend_hash_reverse_apply(zval_call_destructor)`, where refcount access on freed memory triggers ASan UAF."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 2,
-      "total_cost": 0.04437125,
-      "total_input_tokens": 22091,
-      "total_output_tokens": 408,
-      "total_cached_tokens": 0,
+      "total_llm_calls": 3,
+      "total_cost": 0.028858549999999997,
+      "total_input_tokens": 23969,
+      "total_output_tokens": 678,
+      "total_cached_tokens": 14336,
       "llm_calls": [
         {
-          "timestamp": 1773515796.397738,
+          "timestamp": 1774877729.376455,
           "model": "gpt-5.3-codex",
-          "cost": 0.012692750000000001,
-          "input_tokens": 6205,
-          "output_tokens": 131,
-          "total_tokens": 6336,
-          "cached_tokens": 0,
+          "cost": 0.011634349999999998,
+          "input_tokens": 6293,
+          "output_tokens": 174,
+          "total_tokens": 6467,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -50,32 +50,65 @@
           "tool_call_count": 4,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_M8VfSzzRDIdvkBGMIH2KfIXW"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_rqWipOF6g21rXBvDguVGSLCC"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_Lxq03nArJSH7PmbVNqtb57Hy"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_4DvfS6FhN2lJVF4b2lN5KA1L"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_D0rz4VsVNvJmbTk8974Esmv2"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_MJBpxmP75if7W8W7qUp4P6mQ"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_yhOvj78Wpyh9tcgJbCtBFUme"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Vw0GCP84n2zYFvx5BVgQuVVx"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773515810.7996771,
+          "timestamp": 1774877745.490054,
           "model": "gpt-5.3-codex",
-          "cost": 0.0316785,
-          "input_tokens": 15886,
-          "output_tokens": 277,
-          "total_tokens": 16163,
-          "cached_tokens": 0,
+          "cost": 0.00410025,
+          "input_tokens": 6711,
+          "output_tokens": 174,
+          "total_tokens": 6885,
+          "cached_tokens": 6400,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_PiXb1YzIRPtGJZrypQNo4EZC"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_C1jABVd7uaDqxKsz59BdBVQH"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_sgJDh4LKU2ktmb1MIMCyaJ4v"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_k7xUEVlDufwsWs47V8BmYGeN"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774877772.4705796,
+          "model": "gpt-5.3-codex",
+          "cost": 0.013123949999999999,
+          "input_tokens": 10965,
+          "output_tokens": 330,
+          "total_tokens": 11295,
+          "cached_tokens": 6784,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -84,7 +117,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_5QmZXQCqIXjxU8AZ7uQFidAW"
+              "tool_call_id": "call_cicPTJ02WhlpTEsCz8kMTfJa"
             }
           ],
           "finish_reason": "tool_calls"
@@ -93,19 +126,19 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.0246029,
-      "total_input_tokens": 30910,
-      "total_output_tokens": 356,
-      "total_cached_tokens": 21888,
+      "total_cost": 0.02648695,
+      "total_input_tokens": 40617,
+      "total_output_tokens": 314,
+      "total_cached_tokens": 31104,
       "llm_calls": [
         {
-          "timestamp": 1773515815.8252614,
+          "timestamp": 1774877774.8697183,
           "model": "gpt-5.3-codex",
-          "cost": 0.010328500000000001,
-          "input_tokens": 5214,
-          "output_tokens": 86,
-          "total_tokens": 5300,
-          "cached_tokens": 0,
+          "cost": 0.0120197,
+          "input_tokens": 7670,
+          "output_tokens": 87,
+          "total_tokens": 7757,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -114,23 +147,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_WoQaDFaRWYdFbIwaAE2YwdCF"
+              "tool_call_id": "call_8JE20FUOAaFu1G9GpedYxEuZ"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_DDAx4xUFqIEasnzP9E0JyC7z"
+              "tool_call_id": "call_o0Lr23Rjk9LJvQcgQydlN92C"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773515829.8974972,
+          "timestamp": 1774877782.5360467,
           "model": "gpt-5.3-codex",
-          "cost": 0.009752750000000001,
-          "input_tokens": 8317,
-          "output_tokens": 233,
-          "total_tokens": 8550,
-          "cached_tokens": 5120,
+          "cost": 0.0093975,
+          "input_tokens": 10762,
+          "output_tokens": 190,
+          "total_tokens": 10952,
+          "cached_tokens": 7680,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +172,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_WwUzZKsXhHo5pbPymYIvPoHb"
+              "tool_call_id": "call_2P2EulQPFbPda6HjCJUgi0Aq"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773515831.363322,
+          "timestamp": 1774877783.9182062,
           "model": "gpt-5.3-codex",
-          "cost": 0.00240835,
-          "input_tokens": 8637,
+          "cost": 0.0023799999999999997,
+          "input_tokens": 11040,
           "output_tokens": 14,
-          "total_tokens": 8651,
-          "cached_tokens": 8192,
+          "total_tokens": 11054,
+          "cached_tokens": 10880,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +193,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_nKgeVdj1ejsYVpTNlv5FQn9R"
+              "tool_call_id": "call_SlmD4tyKxQHCh9cQgASes8yg"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516009.6516445,
+          "timestamp": 1774877980.4491565,
           "model": "gpt-5.3-codex",
-          "cost": 0.0021133,
-          "input_tokens": 8742,
+          "cost": 0.0026897500000000003,
+          "input_tokens": 11145,
           "output_tokens": 23,
-          "total_tokens": 8765,
-          "cached_tokens": 8576,
+          "total_tokens": 11168,
+          "cached_tokens": 10880,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,7 +214,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_LpG6PoKGAKI2sbdMjqnb5GbX"
+              "tool_call_id": "call_mMDbdxJnsWQ2zsSm1g08JB76"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,15 +222,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.06897415,
-      "total_input_tokens": 53001,
-      "total_output_tokens": 764,
-      "total_llm_calls": 6
+      "total_cost": 0.05534549999999999,
+      "total_input_tokens": 64586,
+      "total_output_tokens": 992,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/Zend/zend_operators.c\n+++ b/Zend/zend_operators.c\n@@ -2057,13 +2057,9 @@\n \t\t}\n \n \t\tif (result == op1) {\n-\t\t\tif (free_op1_string) {\n-\t\t\t\t/* op1_string will be used as the result, so we should not free it */\n-\t\t\t\ti_zval_ptr_dtor(result);\n-\t\t\t\tfree_op1_string = false;\n-\t\t\t}\n \t\t\t/* special case, perform operations on result */\n \t\t\tresult_str = zend_string_extend(op1_string, result_len, 0);\n+\t\t\tfree_op1_string = false;\n \t\t\t/* account for the case where result_str == op1_string == op2_string and the realloc is done */\n \t\t\tif (op1_string == op2_string) {\n \t\t\t\tif (free_op2_string) {\n",
+    "patch": "--- a/Zend/zend_operators.c\n+++ b/Zend/zend_operators.c\n@@ -2057,11 +2057,6 @@\n \t\t}\n \n \t\tif (result == op1) {\n-\t\t\tif (free_op1_string) {\n-\t\t\t\t/* op1_string will be used as the result, so we should not free it */\n-\t\t\t\ti_zval_ptr_dtor(result);\n-\t\t\t\tfree_op1_string = false;\n-\t\t\t}\n \t\t\t/* special case, perform operations on result */\n \t\t\tresult_str = zend_string_extend(op1_string, result_len, 0);\n \t\t\t/* account for the case where result_str == op1_string == op2_string and the realloc is done */\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -217,11 +250,11 @@
         "args": [
           "concat_function",
           "php-src/Zend/zend_operators.c",
-          0,
+          2000,
           true
         ],
         "kwargs": {},
-        "timestamp": 548114.059994802,
+        "timestamp": 1910068.07797338,
         "success": true,
         "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1949 ZEND_API zend_result ZEND_FASTCALL concat_function(zval *result, zval *op1, zval *op2) /* {{{ */, extra..."
       }
@@ -231,12 +264,12 @@
         "tool_name": "read_source",
         "args": [
           "php-src/Zend/zend_operators.c",
-          2059
+          2062
         ],
         "kwargs": {},
-        "timestamp": 548104.708424374,
+        "timestamp": 1910063.449308958,
         "success": true,
-        "result_summary": "Ok({'contents': '1960 \\t \\t\\tif (Z_ISREF_P(op1)) {\\n1961 \\t \\t\\t\\top1 = Z_REFVAL_P(op1);\\n1962 \\t\\t\\t\\tif (Z_TYPE_P(op1) == IS_STRING) {\\n1963 \\t\\t\\t\\t\\top1_string = Z_STR_P(op1);\\n1964 \\t\\t\\t\\t\\tbrea..."
+        "result_summary": "Ok({'contents': '1963 \\t\\t\\t\\t\\top1_string = Z_STR_P(op1);\\n1964 \\t\\t\\t\\t\\tbreak;\\n1965 \\t\\t\\t\\t}\\n1966 \\t \\t\\t}\\n1967 \\t\\t\\tZEND_TRY_BINARY_OBJECT_OPERATION(ZEND_CONCAT);\\n1968 \\t\\t\\top1_string = zva..."
       }
     ],
     "find_references": [],
@@ -245,10 +278,10 @@
         "tool_name": "apply_patch",
         "args": [
           "php-src/Zend/zend_operators.c",
-          "@@ -2059,12 +2059,8 @@\n \t\tif (result == op1) {\n-\t\t\tif (free_op1_string) {\n-\t\t\t\t/* op1_string will be used as the result, so we should not free it */\n-\t\t\t\ti_zval_ptr_dtor(result);\n-\t\t\t\tfree_op1_string = false;\n-\t\t\t}\n \t\t\t/* special case, perform operations on result */\n \t\t\tresult_str = zend_string_extend(op1_string, result_len, 0);\n+\t\t\tfree_op1_string = false;\n \t\t\t/* account for the case where result_str == op1_string == op2_string and the realloc is done */\n \t\t\tif (op1_string == op2_string) {\n \t\t\t\tif (free_op2_string) {\n"
+          "@@ -2057,11 +2057,6 @@\n \n \t\tif (result == op1) {\n-\t\t\tif (free_op1_string) {\n-\t\t\t\t/* op1_string will be used as the result, so we should not free it */\n-\t\t\t\ti_zval_ptr_dtor(result);\n-\t\t\t\tfree_op1_string = false;\n-\t\t\t}\n \t\t\t/* special case, perform operations on result */\n \t\t\tresult_str = zend_string_extend(op1_string, result_len, 0);\n \t\t\t/* account for the case where result_str == op1_string == op2_string and the realloc is done */"
         ],
         "kwargs": {},
-        "timestamp": 548118.526185913,
+        "timestamp": 1910071.160704072,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -258,7 +291,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 548295.854469858,
+        "timestamp": 1910267.88303652,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

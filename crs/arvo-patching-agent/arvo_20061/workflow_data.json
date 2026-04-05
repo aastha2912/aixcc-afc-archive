@@ -1,5 +1,5 @@
 {
-  "vuln_id": 48,
+  "vuln_id": 328,
   "crash_result": {
     "output": "==1136==ERROR: AddressSanitizer: heap-use-after-free on address 0x6030000000d8 at pc 0x000000573fe8 bp 0x7ffce5243c70 sp 0x7ffce5243c68\nREAD of size 8 at 0x6030000000d8 thread T0\nSCARINESS: 51 (8-byte-read-heap-use-after-free)\n    #0 0x573fe7 in String_clear /src/open62541/src/ua_types.c:160:24\n    #1 0x573fe7 in LocalizedText_clear /src/open62541/src/ua_types.c:924:5\n    #2 0x56f42d in UA_clear /src/open62541/src/ua_types.c:1241:5\n    #3 0x56f42d in UA_Array_delete /src/open62541/src/ua_types.c",
     "stack": "#0 0x573fe7 in String_clear open62541/src/ua_types.c:160:24\n#1 0x573fe7 in LocalizedText_clear open62541/src/ua_types.c:924:5\n#2 0x56f42d in UA_clear open62541/src/ua_types.c:1241:5\n#3 0x56f42d in UA_Array_delete open62541/src/ua_types.c:1308:13\n#4 0x56f42d in Variant_clear open62541/src/ua_types.c:544:9\n#5 0x572fa7 in UA_clear open62541/src/ua_types.c:1241:5\n#6 0x6a3dc6 in UA_decodeJson open62541/src/ua_types_encoding_json.c:3327:9\n#7 0x550e08 in LLVMFuzzerTestOneInput open62541/tests/fuzz/fuzz",
@@ -24,53 +24,57 @@
   "analyzed_vuln": {
     "function": "Variant_decodeJsonUnwrapExtensionObject",
     "file": "open62541/src/ua_types_encoding_json.c",
-    "description": "Heap use-after-free caused by freeing a partially decoded Variant payload without resetting ownership fields. In Variant_decodeJsonUnwrapExtensionObject, when unwrapping an ExtensionObject as a concrete body type, dst->data is allocated and dst->type is set, then decodeFields() is called. On decode failure, the code does UA_free(dst->data) (line ~2979) instead of UA_delete/UA_clear and does not null dst->data or dst->type. Later UA_decodeJson cleanup calls UA_clear -> Variant_clear -> UA_Array_delete using the stale dst->data pointer and dst->type metadata, causing a second free/read of freed nested members (observed in String_clear/LocalizedText_clear).",
-    "conditions": "Triggered in fuzz_json_decode by JSON that enters Variant_decodeJsonUnwrapExtensionObject (ExtensionObject-in-Variant path), selects a valid/unwrapped body type (TypeId resolves), allocates dst->data, then causes decodeFields of Body to fail after partial initialization. Error path frees raw memory with UA_free but leaves Variant owning pointer intact; subsequent top-level UA_clear on decode failure dereferences/frees the same memory again, producing UAF."
+    "description": "In Variant_decodeJsonUnwrapExtensionObject, when decoding an unwrapped ExtensionObject body, dst->data is allocated and assigned, then on decodeFields() failure it is freed with UA_free(dst->data) but not nulled and not fully cleared via UA_delete/UA_clear. The function returns an error with dst->type still set and dst->data still pointing to freed memory. Later cleanup (UA_decodeJson error path -> UA_clear -> Variant_clear -> UA_Array_delete -> LocalizedText_clear/String_clear) treats the variant as initialized and dereferences/frees the dangling pointer, causing heap-use-after-free/double-free-style cleanup on freed storage.",
+    "conditions": "Trigger requires JSON decoded as a Variant where Variant_decodeJsonUnwrapExtensionObject takes the structure-unwrapping path (TypeId present and resolves to a known datatype, e.g. Id 21 LocalizedText), allocates dst->data, and then body decoding fails (malformed/inconsistent Body such as the PoC). On this error path, dst->data is freed but left dangling; subsequent top-level UA_decodeJson cleanup of the partially decoded Variant accesses that freed object, producing the ASan UAF."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.03110135,
-      "total_input_tokens": 22345,
-      "total_output_tokens": 494,
-      "total_cached_tokens": 9472,
+      "total_cost": 0.030463999999999998,
+      "total_input_tokens": 22944,
+      "total_output_tokens": 532,
+      "total_cached_tokens": 10880,
       "llm_calls": [
         {
-          "timestamp": 1773369228.6931639,
+          "timestamp": 1774815547.474631,
           "model": "gpt-5.3-codex",
-          "cost": 0.00968625,
-          "input_tokens": 4655,
-          "output_tokens": 110,
-          "total_tokens": 4765,
-          "cached_tokens": 0,
+          "cost": 0.008529849999999999,
+          "input_tokens": 4743,
+          "output_tokens": 146,
+          "total_tokens": 4889,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_buNiFswgma3KDIypQsNcWFkO"
+              "tool_call_id": "call_XjTd8S1tynMQa6HodL3xb9pd"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_iAMaISfYHFNQEff3KdpSEufk"
+              "tool_call_id": "call_JCNgKXx5HixIohdUtSvKNwaN"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_0EtDqN2zwiMSxG318NVnfty2"
+              "tool_call_id": "call_1G8qeqKnipOxfzBWxUYSOyq5"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_7JxfiEj5jl48pHujxcBDz3hk"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773369289.436481,
+          "timestamp": 1774815609.5694952,
           "model": "gpt-5.3-codex",
-          "cost": 0.0028434000000000003,
-          "input_tokens": 4916,
-          "output_tokens": 107,
-          "total_tokens": 5023,
+          "cost": 0.0031636499999999996,
+          "input_tokens": 5091,
+          "output_tokens": 108,
+          "total_tokens": 5199,
           "cached_tokens": 4608,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -80,27 +84,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_2ghE2VXazohsYCybaUSpAy17"
+              "tool_call_id": "call_RMY0T1Dwm9gt6WjixTOoDPaP"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_5zjhuwjQfPoSOvJgukGUR79A"
+              "tool_call_id": "call_iHUMd98UC787H79nWf2RagCr"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_LQ52BJaYHT7nHMzSppfvfRJl"
+              "tool_call_id": "call_nGG0KsxyVJ57LYEWeZcZx5Kp"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773369299.571637,
+          "timestamp": 1774815614.4609392,
           "model": "gpt-5.3-codex",
-          "cost": 0.0185717,
-          "input_tokens": 12774,
-          "output_tokens": 277,
-          "total_tokens": 13051,
-          "cached_tokens": 4864,
+          "cost": 0.0187705,
+          "input_tokens": 13110,
+          "output_tokens": 278,
+          "total_tokens": 13388,
+          "cached_tokens": 5120,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -109,7 +113,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_mBmZ1JIPontMftE5PoBqlwuA"
+              "tool_call_id": "call_sU1kJc78rcG0YwZUZn4RIVIX"
             }
           ],
           "finish_reason": "tool_calls"
@@ -118,48 +122,44 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.0249739,
-      "total_input_tokens": 35282,
-      "total_output_tokens": 340,
-      "total_cached_tokens": 26368,
+      "total_cost": 0.0236943,
+      "total_input_tokens": 33666,
+      "total_output_tokens": 393,
+      "total_cached_tokens": 25856,
       "llm_calls": [
         {
-          "timestamp": 1773369302.3412144,
+          "timestamp": 1774815616.0727477,
           "model": "gpt-5.3-codex",
-          "cost": 0.006650700000000001,
-          "input_tokens": 4314,
-          "output_tokens": 123,
-          "total_tokens": 4437,
+          "cost": 0.0089922,
+          "input_tokens": 5916,
+          "output_tokens": 90,
+          "total_tokens": 6006,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 2,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_1RaP0U2ypmAvfaGTPwFYYWtL"
+              "tool_call_id": "call_QDNCZeeaxGfCty9dLa3ZliTP"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_Ph0OypKBndZmvTizwlJVpVJk"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_ibJg4egvU0rtl5sFQ0zUCfO8"
+              "tool_name": "find_references",
+              "tool_call_id": "call_h6gPC5IdurXXzZuj5ctg4r0y"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773369312.9917817,
+          "timestamp": 1774815628.3860607,
           "model": "gpt-5.3-codex",
-          "cost": 0.01335635,
-          "input_tokens": 10109,
-          "output_tokens": 180,
-          "total_tokens": 10289,
-          "cached_tokens": 4352,
+          "cost": 0.01016365,
+          "input_tokens": 8979,
+          "output_tokens": 266,
+          "total_tokens": 9245,
+          "cached_tokens": 5888,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -168,19 +168,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_EC8MT0bsF9imh5uGp1VPpYGI"
+              "tool_call_id": "call_f5TAO1acPHYAr1xfUnZBsj05"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773369314.428516,
+          "timestamp": 1774815629.556298,
           "model": "gpt-5.3-codex",
-          "cost": 0.00242935,
-          "input_tokens": 10377,
+          "cost": 0.00221515,
+          "input_tokens": 9333,
           "output_tokens": 14,
-          "total_tokens": 10391,
-          "cached_tokens": 10112,
+          "total_tokens": 9347,
+          "cached_tokens": 9088,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -189,19 +189,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_A0yVpST15IYnsd1n2H085AvN"
+              "tool_call_id": "call_VrM3OM5rQUAzqE2OKDvFYrPx"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773369377.0320065,
+          "timestamp": 1774815743.9843864,
           "model": "gpt-5.3-codex",
-          "cost": 0.0025375,
-          "input_tokens": 10482,
+          "cost": 0.0023233000000000004,
+          "input_tokens": 9438,
           "output_tokens": 23,
-          "total_tokens": 10505,
-          "cached_tokens": 10240,
+          "total_tokens": 9461,
+          "cached_tokens": 9216,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -210,7 +210,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_nZ5ypOkkrHDaFvOpK8ddmgtp"
+              "tool_call_id": "call_1StANemtrRy0YgMHWPsXdrgq"
             }
           ],
           "finish_reason": "tool_calls"
@@ -218,15 +218,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.05607525,
-      "total_input_tokens": 57627,
-      "total_output_tokens": 834,
+      "total_cost": 0.0541583,
+      "total_input_tokens": 56610,
+      "total_output_tokens": 925,
       "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/ua_types_encoding_json.c\n+++ b/src/ua_types_encoding_json.c\n@@ -2976,7 +2976,9 @@\n \n         ret = decodeFields(ctx, parseCtx, entries, encodingFound ? 3:2, typeOfBody);\n         if(ret != UA_STATUSCODE_GOOD) {\n-            UA_free(dst->data);\n+            UA_delete(dst->data, dst->type);\n+            dst->data = NULL;\n+            dst->type = NULL;\n         }\n     } else if(encoding == 1 || encoding == 2 || typeOfBody == NULL) {\n         UA_NodeId_deleteMembers(&typeId);\n",
+    "patch": "--- a/src/ua_types_encoding_json.c\n+++ b/src/ua_types_encoding_json.c\n@@ -2976,7 +2976,7 @@\n \n         ret = decodeFields(ctx, parseCtx, entries, encodingFound ? 3:2, typeOfBody);\n         if(ret != UA_STATUSCODE_GOOD) {\n-            UA_free(dst->data);\n+            UA_clear(dst, &UA_TYPES[UA_TYPES_VARIANT]);\n         }\n     } else if(encoding == 1 || encoding == 2 || typeOfBody == NULL) {\n         UA_NodeId_deleteMembers(&typeId);\n@@ -2992,7 +2992,7 @@\n         /* decode: Does not move tokenindex. */\n         ret = DECODE_DIRECT_JSON(dst->data, ExtensionObject);\n         if(ret != UA_STATUSCODE_GOOD)\n-            UA_free(dst->data);\n+            UA_clear(dst, &UA_TYPES[UA_TYPES_VARIANT]);\n     } else {\n         /*no recognized encoding type*/\n         return UA_STATUSCODE_BADDECODINGERROR;\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -240,55 +240,43 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "Variant_decodeJsonUnwrapExtensionObject",
-          "open62541/src/ua_types_encoding_json.c",
-          0,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 401598.595466032,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n2900 Variant_decodeJsonUnwrapExtensionObject(UA_Variant *dst, const UA_DataType *type, , extra=None))"
-      }
-    ],
+    "read_definition": [],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
           "open62541/src/ua_types_encoding_json.c",
-          2979
+          2965
         ],
         "kwargs": {},
-        "timestamp": 401591.08976325,
+        "timestamp": 1847904.651532151,
         "success": true,
-        "result_summary": "Ok({'contents': '2880 \\n2881             return decodeFields(ctx, parseCtx, entries, 3, type);\\n2882         } else if(encoding == 2) {\\n2883             /* XmlElement in Json Body */\\n2884           ..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "open62541/src/ua_types_encoding_json.c",
-          2962
-        ],
-        "kwargs": {},
-        "timestamp": 401591.091291258,
-        "success": true,
-        "result_summary": "Ok({'contents': '2863         }\\n2864     } else { /* UA_JSONKEY_ENCODING found */\\n2865         /*Parse the encoding*/\\n2866         UA_UInt64 encoding = 0;\\n2867         char *extObjEncoding = (char..."
+        "result_summary": "Ok({'contents': '2866         UA_UInt64 encoding = 0;\\n2867         char *extObjEncoding = (char*)(ctx->pos + parseCtx->tokenArray[searchEncodingResult].start);\\n2868         size_t size = (size_t)(pa..."
       }
     ],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "Variant_decodeJsonUnwrapExtensionObject",
+          "open62541/src/ua_types_encoding_json.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1847913.974129179,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='open62541/src/ua_types_encoding_json.c', refs=[FileReference(line=1597, content='Variant_decodeJsonUnwrapExtensionObject(UA_Variant *dst, const UA_DataType *type, ', encl..."
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "open62541/src/ua_types_encoding_json.c",
-          "@@ -2975,8 +2975,9 @@\n              {UA_JSONKEY_ENCODING, NULL, NULL, false, NULL}};\n \n         ret = decodeFields(ctx, parseCtx, entries, encodingFound ? 3:2, typeOfBody);\n         if(ret != UA_STATUSCODE_GOOD) {\n-            UA_free(dst->data);\n+            UA_delete(dst->data, dst->type);\n+            dst->data = NULL;\n+            dst->type = NULL;\n         }\n     } else if(encoding == 1 || encoding == 2 || typeOfBody == NULL) {\n         UA_NodeId_deleteMembers(&typeId);\n             \n"
+          "@@ -2976,8 +2976,8 @@\n \n         ret = decodeFields(ctx, parseCtx, entries, encodingFound ? 3:2, typeOfBody);\n         if(ret != UA_STATUSCODE_GOOD) {\n-            UA_free(dst->data);\n+            UA_clear(dst, &UA_TYPES[UA_TYPES_VARIANT]);\n         }\n     } else if(encoding == 1 || encoding == 2 || typeOfBody == NULL) {\n         UA_NodeId_deleteMembers(&typeId);\n@@ -2991,8 +2991,8 @@\n \n         /* decode: Does not move tokenindex. */\n         ret = DECODE_DIRECT_JSON(dst->data, ExtensionObject);\n-        if(ret != UA_STATUSCODE_GOOD)\n-            UA_free(dst->data);\n+        if(ret != UA_STATUSCODE_GOOD)\n+            UA_clear(dst, &UA_TYPES[UA_TYPES_VARIANT]);\n     } else {\n         /*no recognized encoding type*/\n         return UA_STATUSCODE_BADDECODINGERROR;\n"
         ],
         "kwargs": {},
-        "timestamp": 401601.61215077,
+        "timestamp": 1847917.004039871,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -298,7 +286,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 401664.45963097,
+        "timestamp": 1848031.202747434,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

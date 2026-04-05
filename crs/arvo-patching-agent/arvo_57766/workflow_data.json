@@ -1,5 +1,5 @@
 {
-  "vuln_id": 206,
+  "vuln_id": 490,
   "crash_result": {
     "output": "==4549==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x6040000000cc at pc 0x00000049dc51 bp 0x7ffdc596bf80 sp 0x7ffdc596b750\nREAD of size 4 at 0x6040000000cc thread T0\nSCARINESS: 17 (4-byte-read-heap-buffer-overflow)\n    #0 0x49dc50 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n    #1 0x593b88 in _dwarf_memcpy_noswap_bytes /src/libdwarf/src/lib/libdwarf/dwarf_memcpy_swap.c:49:5\n    #2 0x50bae9 in _dwarf_extract_string_offset_via_str_",
     "stack": "#0 0x49dc50 in __asan_memcpy llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n#1 0x593b88 in _dwarf_memcpy_noswap_bytes libdwarf/src/lib/libdwarf/dwarf_memcpy_swap.c:49:5\n#2 0x50bae9 in _dwarf_extract_string_offset_via_str_offsets libdwarf/src/lib/libdwarf/dwarf_form.c:1815:5\n#3 0x50c79c in dwarf_formstring libdwarf/src/lib/libdwarf/dwarf_form.c:2023:15\n#4 0x4e2107 in find_cu_die_base_fields libdwarf/src/lib/libdwarf/dwarf_die_deliv.c:1341:25\n#5 0x4e2107 in finish_cu_co",
@@ -24,25 +24,50 @@
   "analyzed_vuln": {
     "function": "_dwarf_extract_string_offset_via_str_offsets",
     "file": "libdwarf/src/lib/libdwarf/dwarf_form.c",
-    "description": "Heap-buffer-overflow is caused by incorrect bounds validation when reading a string-offset-table entry. In _dwarf_extract_string_offset_via_str_offsets(), end_offsetintable is checked against the section size, but the code then reads length_size bytes from sof_start via READ_UNALIGNED_CK/_dwarf_memcpy_noswap_bytes. For this PoV, sof_start ends up before the allocated .debug_str_offsets buffer (ASan shows read 4 bytes left of allocation), meaning the computed table entry location is invalid (underflow/invalid offset computation path) and not rejected before memcpy.",
-    "conditions": "The fuzz_die_cu_print harness parses attacker-controlled ELF/DWARF and reaches dwarf_formstring() on a strx/GNU_str_index attribute. That calls _dwarf_extract_string_offset_via_str_offsets(), which loads .debug_str_offsets and computes offsetintable from untrusted index plus CU-derived str-offset-table base/array offsets. With malformed CU/.debug_str_offsets metadata, the computed entry pointer (sof_start) points outside the section (in this PoV, just before the allocated buffer), and the subsequent fixed-size read (4 bytes) triggers the OOB read."
+    "description": "The root cause is an integer-overflow/underflow in bounds computation for .debug_str_offsets indexing. In _dwarf_extract_string_offset_via_str_offsets(), attacker-controlled index_to_offset_entry is multiplied and added into offsetintable/end_offsetintable using unsigned arithmetic (indexoffset = index*length_size; offsetintable = indexoffset + baseoffset + table_offset_to_array; end_offsetintable = offsetintable + length_size). The code only checks end_offsetintable > sectionlen, but does not detect wraparound of offsetintable/end_offsetintable. When overflow occurs, end_offsetintable can appear in-range while offsetintable points before/invalid relative to section start, leading READ_UNALIGNED_CK/_dwarf_memcpy_noswap_bytes to read out of bounds (ASan shows 4-byte read 4 bytes before allocated section buffer).",
+    "conditions": "Triggered via fuzz_die_cu_print when parsing a CU DIE that reaches dwarf_formstring() on a strx/str_index form, causing _dwarf_extract_string_offset_via_str_offsets() to consume attacker-controlled .debug_str_offsets index/base metadata from malformed DWARF. Required condition is crafted values such that unsigned arithmetic in offset table address calculation wraps (or otherwise produces inconsistent start/end), bypassing the single end>sectionlen check and causing an OOB read from de_debug_str_offsets section data loaded by _dwarf_load_section()."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.11104345,
-      "total_input_tokens": 141055,
-      "total_output_tokens": 567,
-      "total_cached_tokens": 91264,
+      "total_cost": 0.11192825,
+      "total_input_tokens": 140511,
+      "total_output_tokens": 583,
+      "total_cached_tokens": 90240,
       "llm_calls": [
         {
-          "timestamp": 1773524382.1030962,
+          "timestamp": 1774876294.2439196,
           "model": "gpt-5.3-codex",
-          "cost": 0.07911435,
-          "input_tokens": 44933,
-          "output_tokens": 164,
-          "total_tokens": 45097,
-          "cached_tokens": 1152,
+          "cost": 0.08038275,
+          "input_tokens": 45021,
+          "output_tokens": 114,
+          "total_tokens": 45135,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_LiIJkpGQmlEwobSr6MClDH9y"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_nEtxC8rwhENSb1Mcgt8SGXw9"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774876303.7985356,
+          "model": "gpt-5.3-codex",
+          "cost": 0.010039049999999997,
+          "input_tokens": 45223,
+          "output_tokens": 133,
+          "total_tokens": 45356,
+          "cached_tokens": 45056,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,55 +76,26 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_ZPdJICC4RcfD3f3bzVIzQdLT"
+              "tool_call_id": "call_FaC0vaytKtUaxvnZdkfcsxgg"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_gB5xQEoTxlicMZElCprOs2fw"
+              "tool_name": "read_source",
+              "tool_call_id": "call_JLboWcZyQkgUsGvoLmzeZE00"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_3tEdigFwJq6aFmnwt6Ge5Wl3"
+              "tool_name": "read_source",
+              "tool_call_id": "call_EqSpmH2khpVQUG7oWlKTW0OA"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773524397.6772103,
+          "timestamp": 1774876312.737309,
           "model": "gpt-5.3-codex",
-          "cost": 0.0100289,
-          "input_tokens": 45230,
-          "output_tokens": 117,
-          "total_tokens": 45347,
-          "cached_tokens": 44928,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 3,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_lGpUurZevceXgOz8o5vrBqR9"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_XXm8XcrQ1aHlUcXY4Zutv9V7"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_DMB0BDonUqY4HtYKXMtxeyAh"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773524405.2162824,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0219002,
-          "input_tokens": 50892,
-          "output_tokens": 286,
-          "total_tokens": 51178,
+          "cost": 0.02150645,
+          "input_tokens": 50267,
+          "output_tokens": 336,
+          "total_tokens": 50603,
           "cached_tokens": 45184,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -109,7 +105,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_GYf71JkY6QKZRrJKvl75rqkO"
+              "tool_call_id": "call_RUrwEsWN30YrzLZtzbgl9pjm"
             }
           ],
           "finish_reason": "tool_calls"
@@ -118,18 +114,18 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.11956805,
-      "total_input_tokens": 195115,
-      "total_output_tokens": 452,
-      "total_cached_tokens": 144896,
+      "total_cost": 0.12454994999999999,
+      "total_input_tokens": 201221,
+      "total_output_tokens": 563,
+      "total_cached_tokens": 149504,
       "llm_calls": [
         {
-          "timestamp": 1773524408.2097135,
+          "timestamp": 1774876315.958356,
           "model": "gpt-5.3-codex",
-          "cost": 0.0796215,
-          "input_tokens": 44826,
+          "cost": 0.08219575,
+          "input_tokens": 46297,
           "output_tokens": 84,
-          "total_tokens": 44910,
+          "total_tokens": 46381,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -139,23 +135,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_nwqPRQxZUQcqffRKDu0Jwaxh"
+              "tool_call_id": "call_ZULjpZgw70vfZ2YhTpKTsNtb"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_tJIvy6uCdXJfeeOnete0AK4a"
+              "tool_call_id": "call_cfKAiYs5xDxWP7bymnYv8Y09"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773524413.2012928,
+          "timestamp": 1774876321.8379683,
           "model": "gpt-5.3-codex",
-          "cost": 0.0211925,
-          "input_tokens": 49782,
-          "output_tokens": 331,
-          "total_tokens": 50113,
-          "cached_tokens": 44800,
+          "cost": 0.023103149999999996,
+          "input_tokens": 51253,
+          "output_tokens": 442,
+          "total_tokens": 51695,
+          "cached_tokens": 46208,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -164,19 +160,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_5ezWIuSI9X7e7K9BbHUcy8TI"
+              "tool_call_id": "call_BSwxWupZe1qiDj3bksOzuz09"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773524414.389103,
+          "timestamp": 1774876323.146115,
           "model": "gpt-5.3-codex",
-          "cost": 0.00922215,
-          "input_tokens": 50201,
+          "cost": 0.009571449999999999,
+          "input_tokens": 51783,
           "output_tokens": 14,
-          "total_tokens": 50215,
-          "cached_tokens": 50048,
+          "total_tokens": 51797,
+          "cached_tokens": 51584,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -185,19 +181,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_UiGbEmrNOvseqzGMh7am2c6U"
+              "tool_call_id": "call_aNGHLtwkDGsqWeEMg1zEn9Zg"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773524467.6226392,
+          "timestamp": 1774876374.698758,
           "model": "gpt-5.3-codex",
-          "cost": 0.0095319,
-          "input_tokens": 50306,
+          "cost": 0.009679599999999998,
+          "input_tokens": 51888,
           "output_tokens": 23,
-          "total_tokens": 50329,
-          "cached_tokens": 50048,
+          "total_tokens": 51911,
+          "cached_tokens": 51712,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -206,7 +202,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_4AsQK7Al2OIkk7fDTPIhtrqP"
+              "tool_call_id": "call_WKIYrlMC5WYY3H70CdzIApzl"
             }
           ],
           "finish_reason": "tool_calls"
@@ -214,15 +210,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.2306115,
-      "total_input_tokens": 336170,
-      "total_output_tokens": 1019,
+      "total_cost": 0.2364782,
+      "total_input_tokens": 341732,
+      "total_output_tokens": 1146,
       "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/lib/libdwarf/dwarf_form.c\n+++ b/src/lib/libdwarf/dwarf_form.c\n@@ -1782,9 +1782,18 @@\n             }\n         }\n     }\n-    indexoffset = index_to_offset_entry* length_size;\n-    offsetintable = indexoffset+ baseoffset\n-        + table_offset_to_array;\n+    if (index_to_offset_entry > (DW_DLV_BADADDR/length_size)) {\n+        _dwarf_error(dbg,error,DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n+    indexoffset = index_to_offset_entry * length_size;\n+    if (baseoffset > (DW_DLV_BADADDR - indexoffset) ||\n+        table_offset_to_array >\n+            (DW_DLV_BADADDR - (indexoffset + baseoffset))) {\n+        _dwarf_error(dbg,error,DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n+    offsetintable = indexoffset + baseoffset + table_offset_to_array;\n     end_offsetintable = offsetintable + length_size;\n     /*  The offsets table is a series of offset-size entries.\n         The == case in the test applies when we are at the last table\n",
+    "patch": "--- a/src/lib/libdwarf/dwarf_form.c\n+++ b/src/lib/libdwarf/dwarf_form.c\n@@ -1782,9 +1782,30 @@\n             }\n         }\n     }\n+    if (length_size == 0 || length_size > sectionlen) {\n+        _dwarf_error(dbg, error, DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n+    if (index_to_offset_entry >\n+        ((~(Dwarf_Unsigned)0)/length_size)) {\n+        _dwarf_error(dbg, error, DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n     indexoffset = index_to_offset_entry* length_size;\n-    offsetintable = indexoffset+ baseoffset\n-        + table_offset_to_array;\n+    if (baseoffset > ((~(Dwarf_Unsigned)0) - indexoffset)) {\n+        _dwarf_error(dbg, error, DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n+    offsetintable = indexoffset + baseoffset;\n+    if (table_offset_to_array > ((~(Dwarf_Unsigned)0) - offsetintable)) {\n+        _dwarf_error(dbg, error, DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n+    offsetintable += table_offset_to_array;\n+    if (length_size > ((~(Dwarf_Unsigned)0) - offsetintable)) {\n+        _dwarf_error(dbg, error, DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n     end_offsetintable = offsetintable + length_size;\n     /*  The offsets table is a series of offset-size entries.\n         The == case in the test applies when we are at the last table\n",
     "build_artifacts_count": 1,
     "tested_povs_count": 1,
     "last_validation": {
@@ -245,7 +241,7 @@
           1760
         ],
         "kwargs": {},
-        "timestamp": 556696.798303791,
+        "timestamp": 1908604.535367017,
         "success": true,
         "result_summary": "Ok({'contents': '1661     return_block->bl_from_loclist =  DW_LKIND_expression;\\n1662     return_block->bl_section_offset =  data - section_start;\\n1663     return DW_DLV_OK;\\n1664 }\\n1665 \\n1666 int\\..."
       },
@@ -256,7 +252,7 @@
           1815
         ],
         "kwargs": {},
-        "timestamp": 556696.800244119,
+        "timestamp": 1908604.53678117,
         "success": true,
         "result_summary": "Ok({'contents': '1716     Dwarf_Small   *sof_start = 0;\\n1717     Dwarf_Small   *sof_end = 0;\\n1718     Dwarf_Unsigned str_sect_offset = 0;\\n1719     Dwarf_Unsigned length_size  = 0;\\n1720 \\n1721     ..."
       }
@@ -267,10 +263,10 @@
         "tool_name": "apply_patch",
         "args": [
           "libdwarf/src/lib/libdwarf/dwarf_form.c",
-          "@@ -1782,10 +1782,18 @@\n             }\n         }\n     }\n-    indexoffset = index_to_offset_entry* length_size;\n-    offsetintable = indexoffset+ baseoffset\n-        + table_offset_to_array;\n-    end_offsetintable = offsetintable + length_size;\n+    if (index_to_offset_entry > (DW_DLV_BADADDR/length_size)) {\n+        _dwarf_error(dbg,error,DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n+    indexoffset = index_to_offset_entry * length_size;\n+    if (baseoffset > (DW_DLV_BADADDR - indexoffset) ||\n+        table_offset_to_array >\n+            (DW_DLV_BADADDR - (indexoffset + baseoffset))) {\n+        _dwarf_error(dbg,error,DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n+    offsetintable = indexoffset + baseoffset + table_offset_to_array;\n+    end_offsetintable = offsetintable + length_size;\n     /*  The offsets table is a series of offset-size entries.\n         The == case in the test applies when we are at the last table\n         entry, so == is not an error, hence only test >\n"
+          "@@ -1782,10 +1782,29 @@\n             }\n         }\n     }\n+    if (length_size == 0 || length_size > sectionlen) {\n+        _dwarf_error(dbg, error, DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n+    if (index_to_offset_entry >\n+        ((~(Dwarf_Unsigned)0)/length_size)) {\n+        _dwarf_error(dbg, error, DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n     indexoffset = index_to_offset_entry* length_size;\n+    if (baseoffset > ((~(Dwarf_Unsigned)0) - indexoffset)) {\n+        _dwarf_error(dbg, error, DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n+    offsetintable = indexoffset + baseoffset;\n+    if (table_offset_to_array > ((~(Dwarf_Unsigned)0) - offsetintable)) {\n+        _dwarf_error(dbg, error, DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n+    offsetintable += table_offset_to_array;\n+    if (length_size > ((~(Dwarf_Unsigned)0) - offsetintable)) {\n+        _dwarf_error(dbg, error, DW_DLE_ATTR_FORM_SIZE_BAD);\n+        return DW_DLV_ERROR;\n+    }\n-    offsetintable = indexoffset+ baseoffset\n-        + table_offset_to_array;\n     end_offsetintable = offsetintable + length_size;\n     /*  The offsets table is a series of offset-size entries.\n         The == case in the test applies when we are at the last table"
         ],
         "kwargs": {},
-        "timestamp": 556701.80141292,
+        "timestamp": 1908610.442295748,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -280,7 +276,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 556749.876705502,
+        "timestamp": 1908661.440954963,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

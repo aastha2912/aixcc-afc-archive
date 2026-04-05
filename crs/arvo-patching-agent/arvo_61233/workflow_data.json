@@ -1,5 +1,5 @@
 {
-  "vuln_id": 189,
+  "vuln_id": 508,
   "crash_result": {
     "output": "==2968==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x603000001dcc at pc 0x00000065b4e0 bp 0x7ffcbac606f0 sp 0x7ffcbac606e8\nREAD of size 4 at 0x603000001dcc thread T0\nSCARINESS: 17 (4-byte-read-heap-buffer-overflow)\n    #0 0x65b4df in getDstIPv4Address /src/PcapPlusPlus/Packet++/header/IPv4Layer.h:522:67\n    #1 0x65b4df in pcpp::IPv4Layer::toString() const /src/PcapPlusPlus/Packet++/src/IPv4Layer.cpp:431:92\n    #2 0x678eaf in pcpp::Packet::toStringList(std::__1::vector<std::__1::bas",
     "stack": "#0 0x65b4df in getDstIPv4Address PcapPlusPlus/Packet++/header/IPv4Layer.h:522:67\n#1 0x65b4df in pcpp::IPv4Layer::toString() const PcapPlusPlus/Packet++/src/IPv4Layer.cpp:431:92\n#2 0x678eaf in pcpp::Packet::toStringList(std::__1::vector<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >, std::__1::allocator<std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > > >&, bool) const PcapPlusPlus/Packet++/src/Packet.cpp:826:30\n#3 0x6780",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "IPv4Layer::toString",
     "file": "PcapPlusPlus/Packet++/src/IPv4Layer.cpp",
-    "description": "Heap out-of-bounds read occurs because IPv4Layer::toString() unconditionally calls getSrcIPv4Address()/getDstIPv4Address(), which directly dereference fields in iphdr (ipSrc/ipDst) without validating that the layer actually contains a full IPv4 header (>= sizeof(iphdr), 20 bytes). For truncated/fuzzed packets, an IPv4 layer object can exist with dataLen shorter than required for these fields, so getDstIPv4Address() reads past the packet buffer.",
-    "conditions": "In FuzzTarget, attacker-controlled bytes are written to a pcap file and parsed into Packet layers. A malformed packet is parsed as IPv4 with insufficient captured bytes (ASan shows 28-byte packet buffer ending exactly where ipDst read occurs). Then parsedPacket.toString() / layer->toString() is invoked, reaching IPv4Layer::toString(). Because no length guard is performed before reading ipSrc/ipDst, a 4-byte read past allocation is triggered."
+    "description": "`IPv4Layer::toString()` unconditionally calls `getSrcIPv4Address()`/`getDstIPv4Address()`, which directly read 4-byte fields from `iphdr` via `getIPv4Header()` without verifying that `m_DataLen >= sizeof(iphdr)` (or at least large enough for those fields). For truncated IPv4 layers, this causes an out-of-bounds read (ASan at `getDstIPv4Address` in IPv4Layer.h). The crash site is the inline accessor, but the root cause is missing length validation in the caller (`toString`) on potentially malformed packet data.",
+    "conditions": "FuzzTarget writes attacker-controlled bytes to a temp pcap, reads first packet via `PcapFileReaderDevice::getNextPacket`, builds `pcpp::Packet`, then calls `parsedPacket.toString()`. If parsing classifies a layer as IPv4 but captured packet data is truncated (e.g., ~28-byte total frame where IPv4 header does not fully fit after lower-layer bytes), `IPv4Layer::toString()` is reached and reads `ipDst` past the allocated raw packet buffer, triggering heap-buffer-overflow."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.02802555,
-      "total_input_tokens": 18837,
-      "total_output_tokens": 396,
+      "total_cost": 0.028879549999999997,
+      "total_input_tokens": 19013,
+      "total_output_tokens": 435,
       "total_cached_tokens": 6656,
       "llm_calls": [
         {
-          "timestamp": 1773517506.642622,
+          "timestamp": 1774879967.4433534,
           "model": "gpt-5.3-codex",
-          "cost": 0.0085708,
-          "input_tokens": 5072,
+          "cost": 0.0087248,
+          "input_tokens": 5160,
           "output_tokens": 151,
-          "total_tokens": 5223,
+          "total_tokens": 5311,
           "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,30 +51,30 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_xfJwm7TYSgJB2ieabqhGl6dI"
+              "tool_call_id": "call_oOEbsvEW7OTuODPhnBED6gFi"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_m3oV0kU5SXREbjjpkqLaQUnc"
+              "tool_call_id": "call_qWyleRwbfJl3jjBzZH8D6881"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_fuekscIkWI2N32b65purlO8f"
+              "tool_call_id": "call_rUW2QQNP8W04BeRQy2qvS37w"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_SvtxnCXeEqAX5eWNBUzjyO4V"
+              "tool_call_id": "call_eVac0CEboEJLxni1Hjs7mkzc"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773517514.661462,
+          "timestamp": 1774879973.0298264,
           "model": "gpt-5.3-codex",
-          "cost": 0.01945475,
-          "input_tokens": 13765,
-          "output_tokens": 245,
-          "total_tokens": 14010,
+          "cost": 0.02015475,
+          "input_tokens": 13853,
+          "output_tokens": 284,
+          "total_tokens": 14137,
           "cached_tokens": 5120,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -84,7 +84,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_RY9i025tfoHo6x9JIeEdulTI"
+              "tool_call_id": "call_T0gLret6ozFt4hxrdgG4xPIg"
             }
           ],
           "finish_reason": "tool_calls"
@@ -92,20 +92,49 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.0359821,
-      "total_input_tokens": 36326,
-      "total_output_tokens": 247,
-      "total_cached_tokens": 19712,
+      "total_llm_calls": 5,
+      "total_cost": 0.03167325,
+      "total_input_tokens": 50051,
+      "total_output_tokens": 398,
+      "total_cached_tokens": 39040,
       "llm_calls": [
         {
-          "timestamp": 1773517516.3442907,
+          "timestamp": 1774879975.750843,
           "model": "gpt-5.3-codex",
-          "cost": 0.006255200000000001,
-          "input_tokens": 4960,
+          "cost": 0.01062145,
+          "input_tokens": 6351,
+          "output_tokens": 152,
+          "total_tokens": 6503,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Rh5YcgQDF2wG4dSq6XaL8d3Y"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_2IJRa06vJuOvHXq7iuI9vMwE"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_2bz3DqkvE5AHzPyAF3AeLlkm"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774879990.8721218,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00265825,
+          "input_tokens": 6591,
           "output_tokens": 86,
-          "total_tokens": 5046,
-          "cached_tokens": 2304,
+          "total_tokens": 6677,
+          "cached_tokens": 6400,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -114,23 +143,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_SadgET2Pq1QfaVeNrJycyR9C"
+              "tool_call_id": "call_vglEQAtJpEDLNmCis2Ze1gR2"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_y35oBklwmXfqhjgObQeU8uBL"
+              "tool_call_id": "call_m1nZ9Xb5FKZ9pNKrjhgRX8yi"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773517518.5917752,
+          "timestamp": 1774879993.2994194,
           "model": "gpt-5.3-codex",
-          "cost": 0.01609545,
-          "input_tokens": 10279,
-          "output_tokens": 124,
-          "total_tokens": 10403,
-          "cached_tokens": 2304,
+          "cost": 0.0127799,
+          "input_tokens": 12194,
+          "output_tokens": 123,
+          "total_tokens": 12317,
+          "cached_tokens": 6528,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +168,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_5LYzkdtPegWhoEGwyc06QSky"
+              "tool_call_id": "call_K7kgYx7nEqAAjBJrhyxm7fjq"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773517519.7401698,
+          "timestamp": 1774879994.5887382,
           "model": "gpt-5.3-codex",
-          "cost": 0.0024272499999999997,
-          "input_tokens": 10491,
+          "cost": 0.00275275,
+          "input_tokens": 12405,
           "output_tokens": 14,
-          "total_tokens": 10505,
-          "cached_tokens": 10240,
+          "total_tokens": 12419,
+          "cached_tokens": 12160,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +189,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_Lz8nki70xCltEEIqTA1JsFyp"
+              "tool_call_id": "call_fRGxZuZ5WUKwvM7E1z5qaOS9"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773517572.4583058,
+          "timestamp": 1774880057.3872185,
           "model": "gpt-5.3-codex",
-          "cost": 0.0112042,
-          "input_tokens": 10596,
+          "cost": 0.0028608999999999996,
+          "input_tokens": 12510,
           "output_tokens": 23,
-          "total_tokens": 10619,
-          "cached_tokens": 4864,
+          "total_tokens": 12533,
+          "cached_tokens": 12288,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,7 +210,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_gurUSF55u3sDD1tcCnL6h9wM"
+              "tool_call_id": "call_yB43xcflexA2EwcCUpfansb7"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,15 +218,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.06400765,
-      "total_input_tokens": 55163,
-      "total_output_tokens": 643,
-      "total_llm_calls": 6
+      "total_cost": 0.0605528,
+      "total_input_tokens": 69064,
+      "total_output_tokens": 833,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/Packet++/src/IPv4Layer.cpp\n+++ b/Packet++/src/IPv4Layer.cpp\n@@ -413,6 +413,11 @@\n \n std::string IPv4Layer::toString() const\n {\n+\tif (m_DataLen < sizeof(iphdr))\n+\t{\n+\t\treturn \"IPv4 Layer, Malformed packet\";\n+\t}\n+\n \tstd::string fragment = \"\";\n \tif (isFragment())\n \t{\n",
+    "patch": "--- a/Packet++/src/IPv4Layer.cpp\n+++ b/Packet++/src/IPv4Layer.cpp\n@@ -413,6 +413,11 @@\n \n std::string IPv4Layer::toString() const\n {\n+\tif (m_DataLen < sizeof(iphdr))\n+\t{\n+\t\treturn \"IPv4 Layer (truncated)\";\n+\t}\n+\n \tstd::string fragment = \"\";\n \tif (isFragment())\n \t{\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -211,29 +240,69 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "getSrcIPv4Address",
+          "PcapPlusPlus/Packet++/header/IPv4Layer.h",
+          510,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1912276.939563532,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "getDstIPv4Address",
+          "PcapPlusPlus/Packet++/header/IPv4Layer.h",
+          522,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1912277.192471979,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "toString",
+          "PcapPlusPlus/Packet++/src/IPv4Layer.cpp",
+          431,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1912277.629184202,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n414 std::string IPv4Layer::toString() const, extra=None))"
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
           "PcapPlusPlus/Packet++/src/IPv4Layer.cpp",
-          431
+          414
         ],
         "kwargs": {},
-        "timestamp": 549804.957478782,
+        "timestamp": 1912279.447650774,
         "success": true,
-        "result_summary": "Ok({'contents': '332 \\t{\\n333 \\t\\tauto vrrpVer = VrrpLayer::getVersionFromData(payload, payloadLen);\\n334 \\t\\tif (vrrpVer == VRRPv2)\\n335 \\t\\t\\tm_NextLayer = new VrrpV2Layer(payload, payloadLen, this,..."
+        "result_summary": "Ok({'contents': '315 \\t\\tbreak;\\n316 \\tcase PACKETPP_IPPROTO_AH:\\n317 \\t\\tm_NextLayer = AuthenticationHeaderLayer::isDataValid(payload, payloadLen)\\n318 \\t\\t\\t? static_cast<Layer*>(new AuthenticationH..."
       },
       {
         "tool_name": "read_source",
         "args": [
           "PcapPlusPlus/Packet++/header/IPv4Layer.h",
-          522
+          510
         ],
         "kwargs": {},
-        "timestamp": 549804.95938294,
+        "timestamp": 1912279.449653342,
         "success": true,
-        "result_summary": "Ok({'contents': '423 \\t\\t */\\n424 \\t\\texplicit IPv4OptionBuilder(const IPv4TimestampOptionValue& timestampValue);\\n425 \\n426 \\t\\t/**\\n427 \\t\\t * Build the IPv4Option object out of the parameters defin..."
+        "result_summary": "Ok({'contents': '411 \\t\\t/**\\n412 \\t\\t * A c\\'tor for building IPv4 options which their value is a list of IPv4 addresses, for example:\\n413 \\t\\t * ::IPV4OPT_RecordRoute, ::IPV4OPT_StrictSourceRoute, ..."
       }
     ],
     "find_references": [],
@@ -242,10 +311,10 @@
         "tool_name": "apply_patch",
         "args": [
           "PcapPlusPlus/Packet++/src/IPv4Layer.cpp",
-          "@@ -414,6 +414,11 @@\n std::string IPv4Layer::toString() const\n {\n+\tif (m_DataLen < sizeof(iphdr))\n+\t{\n+\t\treturn \"IPv4 Layer, Malformed packet\";\n+\t}\n+\n \tstd::string fragment = \"\";\n \tif (isFragment())\n \t{\n"
+          "@@ -414,6 +414,11 @@\n std::string IPv4Layer::toString() const\n {\n+\tif (m_DataLen < sizeof(iphdr))\n+\t{\n+\t\treturn \"IPv4 Layer (truncated)\";\n+\t}\n+\n \tstd::string fragment = \"\";\n \tif (isFragment())\n \t{"
         ],
         "kwargs": {},
-        "timestamp": 549807.187862246,
+        "timestamp": 1912281.893662917,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -255,7 +324,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 549859.785191897,
+        "timestamp": 1912344.638420673,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

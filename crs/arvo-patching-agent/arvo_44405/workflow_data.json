@@ -1,5 +1,5 @@
 {
-  "vuln_id": 124,
+  "vuln_id": 438,
   "crash_result": {
     "output": "==9301==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x6070000000d9 at pc 0x000000592616 bp 0x7ffccc2ff970 sp 0x7ffccc2ff968\nREAD of size 1 at 0x6070000000d9 thread T0\nSCARINESS: 12 (1-byte-read-heap-buffer-overflow)\n    #0 0x592615 in ndpi_strncasestr /src/ndpi/src/lib/ndpi_main.c:7143:8\n    #1 0x5e1306 in check_content_type_and_change_protocol /src/ndpi/src/lib/protocols/http.c:728:8\n    #2 0x5de4f8 in ndpi_check_http_tcp /src/ndpi/src/lib/protocols/http.c\n    #3 0x5de4f8 in ndpi_s",
     "stack": "#0 0x592615 in ndpi_strncasestr ndpi/src/lib/ndpi_main.c:7143:8\n#1 0x5e1306 in check_content_type_and_change_protocol ndpi/src/lib/protocols/http.c:728:8\n#2 0x5de4f8 in ndpi_check_http_tcp ndpi/src/lib/protocols/http.c\n#3 0x5de4f8 in ndpi_search_http_tcp ndpi/src/lib/protocols/http.c:1290:3\n#4 0x57bf20 in check_ndpi_detection_func ndpi/src/lib/ndpi_main.c:4825:6\n#5 0x57cc06 in ndpi_check_flow_func ndpi/src/lib/ndpi_main.c\n#6 0x585c20 in ndpi_detection_process_packet ndpi/src/lib/ndpi_main.c:5736",
@@ -22,27 +22,27 @@
     "dedup": "ndpi_strncasestr--check_content_type_and_change_protocol--ndpi_check_http_tcp"
   },
   "analyzed_vuln": {
-    "function": "ndpi_strncasestr",
-    "file": "ndpi/src/lib/ndpi_main.c",
-    "description": "Heap out-of-bounds read in ndpi_strncasestr due to unsigned length underflow. The loop bound uses `i < (str1_len - str2_len + 1)` with `size_t`; when the searched buffer is shorter than the needle (e.g., Authorization header value length < 5 for \"Basic\" or < 6 for \"Digest\"), `str1_len - str2_len` underflows to a huge value. The function then keeps incrementing `str1` and reading past the end (`str1[0]` / `strncasecmp`), causing the ASan crash at line 7143. Crash is reached via check_content_type_and_change_protocol() calling ndpi_strncasestr() on `packet->authorization_line.ptr`.",
-    "conditions": "In fuzz_process_packet, attacker-controlled packet bytes are parsed as HTTP headers. If an `Authorization:` header is present, check_content_type_and_change_protocol() (http.c:728+) calls ndpi_strncasestr(authorization_value, \"Basic\", authorization_len) and again with \"Digest\". A short/malformed authorization value (as in the PoC) makes `authorization_len` smaller than the needle length, triggering size_t underflow in ndpi_strncasestr loop bound and an out-of-bounds read past the heap buffer."
+    "function": "check_content_type_and_change_protocol",
+    "file": "ndpi/src/lib/protocols/http.c",
+    "description": "The root cause is an unsafe call site that passes a non-NUL-terminated, length-delimited header buffer to ndpi_strncasestr(). In check_content_type_and_change_protocol(), packet->authorization_line.ptr is searched for \"Basic\"/\"Digest\" with ndpi_strncasestr(..., packet->authorization_line.len). ndpi_strncasestr() computes str1_len via strnlen but then iterates with `for(i = 0; i < (str1_len - str2_len + 1); i++)` without handling `str1_len < str2_len`, causing size_t underflow and an over-read via str1[0]/strncasecmp past the provided buffer.",
+    "conditions": "Triggered during HTTP parsing in fuzz_process_packet when an Authorization header is present with short/empty value (or otherwise shorter than the needle \"Basic\"/\"Digest\") and not guaranteed NUL-terminated. Flow: input packet -> ndpi_detection_process_packet -> ndpi_search_http_tcp/ndpi_check_http_tcp -> check_content_type_and_change_protocol -> ndpi_strncasestr on authorization_line. If authorization_line.len < strlen(\"Basic\") (or < strlen(\"Digest\")), ndpi_strncasestr loop bound underflows and reads beyond heap buffer end."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.0215922,
-      "total_input_tokens": 19812,
-      "total_output_tokens": 477,
-      "total_cached_tokens": 12544,
+      "total_cost": 0.0271418,
+      "total_input_tokens": 20076,
+      "total_output_tokens": 466,
+      "total_cached_tokens": 9216,
       "llm_calls": [
         {
-          "timestamp": 1773414656.4944067,
+          "timestamp": 1774855318.1164508,
           "model": "gpt-5.3-codex",
-          "cost": 0.00593285,
-          "input_tokens": 3475,
+          "cost": 0.007901249999999999,
+          "input_tokens": 3563,
           "output_tokens": 119,
-          "total_tokens": 3594,
-          "cached_tokens": 1152,
+          "total_tokens": 3682,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_VMweu2nrGbYYMfUea3BooOU6"
+              "tool_call_id": "call_1LS8s72e0GQgyNu5pn5lMpaR"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_MQDh8YCzTIFNZzYY6n4lkIcL"
+              "tool_call_id": "call_NEhLDJ3cfqDETkQQjBE7uzXD"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_2M1RMKwehAogqCyVAb5H5dbx"
+              "tool_call_id": "call_7XgOgj5PGU6lyRoAyOMomOpf"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414745.96225,
+          "timestamp": 1774855475.8588507,
           "model": "gpt-5.3-codex",
-          "cost": 0.009258549999999999,
-          "input_tokens": 8033,
+          "cost": 0.01304135,
+          "input_tokens": 8121,
           "output_tokens": 46,
-          "total_tokens": 8079,
-          "cached_tokens": 3456,
+          "total_tokens": 8167,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,19 +80,19 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_BYaQRWwiycNL65zQnklynDuw"
+              "tool_call_id": "call_W2p9GgBDkkbN8qdNLyjOnsPP"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414760.1714942,
+          "timestamp": 1774855511.130104,
           "model": "gpt-5.3-codex",
-          "cost": 0.0064008,
-          "input_tokens": 8304,
-          "output_tokens": 312,
-          "total_tokens": 8616,
-          "cached_tokens": 7936,
+          "cost": 0.0061992,
+          "input_tokens": 8392,
+          "output_tokens": 301,
+          "total_tokens": 8693,
+          "cached_tokens": 8064,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -101,7 +101,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_4p1XWiX3rBF6G5estPLvNJ8e"
+              "tool_call_id": "call_ZRiZdbk7PycewZ2VfosPvA9l"
             }
           ],
           "finish_reason": "tool_calls"
@@ -109,20 +109,20 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.02240035,
-      "total_input_tokens": 30309,
-      "total_output_tokens": 389,
-      "total_cached_tokens": 22912,
+      "total_llm_calls": 5,
+      "total_cost": 0.0326648,
+      "total_input_tokens": 42800,
+      "total_output_tokens": 540,
+      "total_cached_tokens": 31616,
       "llm_calls": [
         {
-          "timestamp": 1773414761.9349356,
+          "timestamp": 1774855514.1759233,
           "model": "gpt-5.3-codex",
-          "cost": 0.0050582,
-          "input_tokens": 3772,
-          "output_tokens": 77,
-          "total_tokens": 3849,
-          "cached_tokens": 1664,
+          "cost": 0.0057617,
+          "input_tokens": 4782,
+          "output_tokens": 73,
+          "total_tokens": 4855,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -131,23 +131,48 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_XE0YrYXKMNTnOF4vkuQ9kHJP"
+              "tool_call_id": "call_355aeByGC3rPVXqimsq28qQ9"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_5xNqzYqXCkfVxtsVBHKj5HvT"
+              "tool_call_id": "call_W3qR7H1iM3uTz3Dh2ZeDrcGB"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414764.7850986,
+          "timestamp": 1774855519.5735552,
           "model": "gpt-5.3-codex",
-          "cost": 0.0120526,
-          "input_tokens": 8660,
-          "output_tokens": 196,
-          "total_tokens": 8856,
-          "cached_tokens": 3712,
+          "cost": 0.00227955,
+          "input_tokens": 4949,
+          "output_tokens": 77,
+          "total_tokens": 5026,
+          "cached_tokens": 4736,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Qdq8Wpb8LukQsffzIR2QoAee"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_YBILP7d1wCvAtBDwyDOGI2x4"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774855523.0511107,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01274595,
+          "input_tokens": 9837,
+          "output_tokens": 228,
+          "total_tokens": 10065,
+          "cached_tokens": 4864,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,19 +181,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_NgSHCB1WUWLXuJ50dPxJglt0"
+              "tool_call_id": "call_qdPal57ag39e2MxhFNOM0vmD"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414766.0961847,
+          "timestamp": 1774855524.4514802,
           "model": "gpt-5.3-codex",
-          "cost": 0.00229845,
-          "input_tokens": 8899,
-          "output_tokens": 31,
-          "total_tokens": 8930,
-          "cached_tokens": 8704,
+          "cost": 0.00281365,
+          "input_tokens": 10107,
+          "output_tokens": 32,
+          "total_tokens": 10139,
+          "cached_tokens": 9728,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,19 +202,19 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_xD9KDgC1ONqeI42EmfkuquIA"
+              "tool_call_id": "call_zn6Uzdfccgy8XGu2L9wPJmmi"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414769.2793434,
+          "timestamp": 1774855529.958634,
           "model": "gpt-5.3-codex",
-          "cost": 0.0029911,
-          "input_tokens": 8978,
-          "output_tokens": 85,
-          "total_tokens": 9063,
-          "cached_tokens": 8832,
+          "cost": 0.00906395,
+          "input_tokens": 13125,
+          "output_tokens": 130,
+          "total_tokens": 13255,
+          "cached_tokens": 9984,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -198,7 +223,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_gISOId9YOWCxFH32Y3LR7LCv"
+              "tool_call_id": "call_6hjOX0of5n3A8lHr4UbcjoiO"
             }
           ],
           "finish_reason": "tool_calls"
@@ -206,10 +231,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.04399255,
-      "total_input_tokens": 50121,
-      "total_output_tokens": 866,
-      "total_llm_calls": 7
+      "total_cost": 0.0598066,
+      "total_input_tokens": 62876,
+      "total_output_tokens": 1006,
+      "total_llm_calls": 8
     }
   },
   "patch_result": {
@@ -223,11 +248,33 @@
       {
         "tool_name": "read_source",
         "args": [
+          "src/lib/ndpi_main.c",
+          7143
+        ],
+        "kwargs": {},
+        "timestamp": 1887803.409443017,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'src/lib/ndpi_main.c' does not exist in directory tree. Similar paths: ndpi/src/lib/ndpi_main.c, extra=None))"
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "src/lib/protocols/http.c",
+          728
+        ],
+        "kwargs": {},
+        "timestamp": 1887803.409829192,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'src/lib/protocols/http.c' does not exist in directory tree. Similar paths: ndpi/src/lib/protocols/http.c, extra=None))"
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
           "ndpi/src/lib/protocols/http.c",
           728
         ],
         "kwargs": {},
-        "timestamp": 447050.551628519,
+        "timestamp": 1887808.15245758,
         "success": true,
         "result_summary": "Ok({'contents': '629     ret = http_process_user_agent(ndpi_struct, flow, packet->user_agent_line.ptr, packet->user_agent_line.len);\\n630     /* TODO: Is it correct to avoid setting ua, host_name,... ..."
       },
@@ -238,20 +285,20 @@
           7143
         ],
         "kwargs": {},
-        "timestamp": 447050.556314445,
+        "timestamp": 1887808.159656666,
         "success": true,
         "result_summary": "Ok({'contents': '7044       }\\n7045     }\\n7046     break;\\n7047 \\n7048   case 1: /* List known categories */\\n7049     {\\n7050       for(i = 1 /* Skip Unknown */; i < NDPI_PROTOCOL_NUM_CATEGORIES; i+..."
       },
       {
         "tool_name": "read_source",
         "args": [
-          "src/lib/ndpi_main.c",
-          7137
+          "ndpi/src/lib/ndpi_main.c",
+          1
         ],
         "kwargs": {},
-        "timestamp": 447055.339814475,
+        "timestamp": 1887813.029200468,
         "success": true,
-        "result_summary": "Err(CRSError(path 'src/lib/ndpi_main.c' does not exist in directory tree. Similar paths: ndpi/src/lib/ndpi_main.c, extra=None))"
+        "result_summary": "Ok({'contents': '  1 /*\\n  2  * ndpi_main.c\\n  3  *\\n  4  * Copyright (C) 2011-22 - ntop.org\\n  5  *\\n  6  * This file is part of nDPI, an open source deep packet inspection\\n  7  * library based on t..."
       }
     ],
     "find_references": [],

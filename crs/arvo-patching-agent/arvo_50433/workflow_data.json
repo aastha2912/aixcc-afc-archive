@@ -1,5 +1,5 @@
 {
-  "vuln_id": 147,
+  "vuln_id": 457,
   "crash_result": {
     "output": "==4778==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x6040000000b3 at pc 0x00000050bc86 bp 0x7ffce6ba47b0 sp 0x7ffce6ba47a8\nWRITE of size 4 at 0x6040000000b3 thread T0\nSCARINESS: 36 (4-byte-write-heap-buffer-overflow)\n    #0 0x50bc85 in _sw32 /src/c-blosc2/blosc/blosc-private.h:119:5\n    #1 0x50bc85 in serial_blosc /src/c-blosc2/blosc/blosc2.c:1991:7\n    #2 0x50bc85 in do_job /src/c-blosc2/blosc/blosc2.c:2189:15\n    #3 0x4e80e8 in blosc_compress_context /src/c-blosc2/blosc/blosc2.c:",
     "stack": "#0 0x50bc85 in _sw32 c-blosc2/blosc/blosc-private.h:119:5\n#1 0x50bc85 in serial_blosc c-blosc2/blosc/blosc2.c:1991:7\n#2 0x50bc85 in do_job c-blosc2/blosc/blosc2.c:2189:15\n#3 0x4e80e8 in blosc_compress_context c-blosc2/blosc/blosc2.c:2509:15\n#4 0x4e377a in blosc2_compress_ctx c-blosc2/blosc/blosc2.c:2631:12\n#5 0x526749 in blosc2_schunk_append_buffer c-blosc2/blosc/schunk.c:1056:16\n#6 0x4d7a18 in LLVMFuzzerTestOneInput c-blosc2/tests/fuzz/fuzz_compress_frame.c:66:15\n#7 0x4d85ea in ExecuteFilesOnyB",
@@ -24,57 +24,53 @@
   "analyzed_vuln": {
     "function": "blosc2_schunk_append_buffer",
     "file": "c-blosc2/blosc/schunk.c",
-    "description": "Heap buffer overflow is caused by allocating the output chunk buffer using unvalidated signed `nbytes` (`malloc(nbytes + BLOSC2_MAX_OVERHEAD)`) and then passing the same computed size as destination capacity to `blosc2_compress_ctx`. In this PoV, the fuzzer makes `max_chunksize` overflow to a negative int32 (via `max_chunksize *= data[0]` with data[0]='['), so `chunksize`/`nbytes` is negative. This yields a tiny allocation (34 bytes in ASan report) while compression code (`serial_blosc` writing block starts via `_sw32`) assumes more space and writes past the heap buffer.",
-    "conditions": "Data flow: `LLVMFuzzerTestOneInput` sets `max_chunksize` from first byte and stores in int32; with input `[!` (0x5b,0x21), `max_chunksize=512*91` overflows int32 to a negative value. Loop then calls `blosc2_schunk_append_buffer(schunk, data+i, chunksize)` with negative `chunksize`. `blosc2_schunk_append_buffer` does not reject negative `nbytes`, allocates `nbytes + BLOSC2_MAX_OVERHEAD` bytes and calls `blosc2_compress_ctx` with that invalid size, leading to OOB write in `_sw32` during `serial_blosc`."
+    "description": "Heap overflow is caused by allocating the destination compression buffer with `malloc(nbytes + BLOSC2_MAX_OVERHEAD)` using signed `int32_t nbytes` without validating non-negativity. For negative `nbytes` (from fuzzed input), this signed arithmetic yields a too-small allocation (e.g. 34 bytes), but `blosc2_compress_ctx`/`serial_blosc` still writes block start metadata via `_sw32(bstarts + j, ntbytes)` into the assumed output area, causing out-of-bounds write.",
+    "conditions": "In `compress_frame_fuzzer`, `chunksize` is derived from `max_chunksize *= data[0]` and can overflow signed 32-bit to negative when first byte is large (PoC `[!` gives 33*512=16896 then overflow behavior along loop/chunksize adjustments leads negative path into append). This negative `chunksize` is passed as `nbytes` to `blosc2_schunk_append_buffer`, which allocates with unchecked `nbytes + BLOSC2_MAX_OVERHEAD` and calls compression with that invalid size, leading to overwrite during `serial_blosc` header/block-start writes."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.025405449999999996,
-      "total_input_tokens": 14535,
-      "total_output_tokens": 473,
+      "total_cost": 0.021032199999999997,
+      "total_input_tokens": 12676,
+      "total_output_tokens": 393,
       "total_cached_tokens": 4224,
       "llm_calls": [
         {
-          "timestamp": 1773430295.199695,
+          "timestamp": 1774864820.781691,
           "model": "gpt-5.3-codex",
-          "cost": 0.0054970999999999996,
-          "input_tokens": 3058,
-          "output_tokens": 140,
-          "total_tokens": 3198,
+          "cost": 0.0052451,
+          "input_tokens": 3146,
+          "output_tokens": 111,
+          "total_tokens": 3257,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_0EeztOy2DluOZLCXG9UyV2u2"
+              "tool_call_id": "call_0L3gYIXwAXHJqypWclzm4EP5"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_dx4H1V2QuT8oznINJyZ7x4uV"
+              "tool_call_id": "call_saAZtl3GLWmVV0kubCRKrvZh"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_gY3bU5l9C47gtgm5TxjzTNvV"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_sQAHR0jBxYzfS0qoh9gIDdAU"
+              "tool_call_id": "call_soabX8NZsTz3aRfbHuEFHvM1"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773430302.5914378,
+          "timestamp": 1774864826.5836074,
           "model": "gpt-5.3-codex",
-          "cost": 0.01990835,
-          "input_tokens": 11477,
-          "output_tokens": 333,
-          "total_tokens": 11810,
+          "cost": 0.0157871,
+          "input_tokens": 9530,
+          "output_tokens": 282,
+          "total_tokens": 9812,
           "cached_tokens": 3072,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -84,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Cx2vWjvZAKLnXDGVCfflH5wg"
+              "tool_call_id": "call_9M9kHS16N5wHv5znoBvbqM8S"
             }
           ],
           "finish_reason": "tool_calls"
@@ -93,18 +89,18 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.02424135,
-      "total_input_tokens": 23153,
-      "total_output_tokens": 479,
-      "total_cached_tokens": 14592,
+      "total_cost": 0.02451435,
+      "total_input_tokens": 26205,
+      "total_output_tokens": 477,
+      "total_cached_tokens": 17792,
       "llm_calls": [
         {
-          "timestamp": 1773430304.4269514,
+          "timestamp": 1774864828.197947,
           "model": "gpt-5.3-codex",
-          "cost": 0.0047047,
-          "input_tokens": 3562,
+          "cost": 0.0060417000000000005,
+          "input_tokens": 4326,
           "output_tokens": 78,
-          "total_tokens": 3640,
+          "total_tokens": 4404,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -114,23 +110,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_jn1BUj54oYECEmj27cluwsBp"
+              "tool_call_id": "call_WZgem3uzVCZLCVht6e0Txhmm"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_ONR2TiJIfMP5AFf6nZ9XUQ5D"
+              "tool_call_id": "call_74YJBKHr0nNuNHuPRVkMn6q5"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773431531.9584558,
+          "timestamp": 1774867027.2543976,
           "model": "gpt-5.3-codex",
-          "cost": 0.0159355,
-          "input_tokens": 6194,
-          "output_tokens": 364,
-          "total_tokens": 6558,
-          "cached_tokens": 0,
+          "cost": 0.0146237,
+          "input_tokens": 6958,
+          "output_tokens": 362,
+          "total_tokens": 7320,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +135,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_OgK3qle6Y4edPOjPOWJ657UP"
+              "tool_call_id": "call_UaoX3qicHhI0XYbmEiExS85Y"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773431533.159505,
+          "timestamp": 1774867028.4917133,
           "model": "gpt-5.3-codex",
-          "cost": 0.0017464999999999998,
-          "input_tokens": 6646,
+          "cost": 0.0018704,
+          "input_tokens": 7408,
           "output_tokens": 14,
-          "total_tokens": 6660,
-          "cached_tokens": 6400,
+          "total_tokens": 7422,
+          "cached_tokens": 7168,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +156,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_sCSNZuCF1tr7Cjwj1amF6xhD"
+              "tool_call_id": "call_IxzHjrhWzTeShT985hYjV6DT"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773431623.194398,
+          "timestamp": 1774867161.3415437,
           "model": "gpt-5.3-codex",
-          "cost": 0.00185465,
-          "input_tokens": 6751,
+          "cost": 0.00197855,
+          "input_tokens": 7513,
           "output_tokens": 23,
-          "total_tokens": 6774,
-          "cached_tokens": 6528,
+          "total_tokens": 7536,
+          "cached_tokens": 7296,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,7 +177,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_pGdGBxWUrP2AHJa7sPIIviiu"
+              "tool_call_id": "call_dG66eYLZDGN5oQXueuhrssr1"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,9 +185,9 @@
       ]
     },
     "total": {
-      "total_cost": 0.04964679999999999,
-      "total_input_tokens": 37688,
-      "total_output_tokens": 952,
+      "total_cost": 0.04554655,
+      "total_input_tokens": 38881,
+      "total_output_tokens": 870,
       "total_llm_calls": 6
     }
   },
@@ -220,7 +216,7 @@
           1056
         ],
         "kwargs": {},
-        "timestamp": 462593.045199173,
+        "timestamp": 1897116.775299011,
         "success": true,
         "result_summary": "Ok({'contents': ' 957         }\\n 958     }\\n 959   }\\n 960 \\n 961   // Update super-chunk or frame\\n 962   if (schunk->frame == NULL) {\\n 963     if (!copy && (chunk_cbytes < chunk_nbytes)) {\\n 964  ..."
       }
@@ -234,7 +230,7 @@
           false
         ],
         "kwargs": {},
-        "timestamp": 463814.45821069,
+        "timestamp": 1899310.717264118,
         "success": true,
         "result_summary": "Err(CRSError(Found too many(more than 50) references to that symbol. Please include a path to limit results or consider another approach., extra=None))"
       }
@@ -244,10 +240,10 @@
         "tool_name": "apply_patch",
         "args": [
           "c-blosc2/blosc/schunk.c",
-          "@@ -1050,8 +1050,18 @@\n \n /* Append a data buffer to a super-chunk. */\n int64_t blosc2_schunk_append_buffer(blosc2_schunk *schunk, const void *src, int32_t nbytes) {\n-  uint8_t* chunk = malloc(nbytes + BLOSC2_MAX_OVERHEAD);\n+  if (nbytes < 0) {\n+    BLOSC_TRACE_ERROR(\"nbytes cannot be negative (%d)\", nbytes);\n+    return BLOSC2_ERROR_INVALID_PARAM;\n+  }\n+\n+  int32_t destsize = nbytes + BLOSC2_MAX_OVERHEAD;\n+  if (destsize < nbytes) {\n+    BLOSC_TRACE_ERROR(\"Destination size overflow for nbytes=%d\", nbytes);\n+    return BLOSC2_ERROR_INVALID_PARAM;\n+  }\n+\n+  uint8_t* chunk = malloc((size_t)destsize);\n   schunk->current_nchunk = schunk->nchunks;\n   /* Compress the src buffer using super-chunk context */\n-  int cbytes = blosc2_compress_ctx(schunk->cctx, src, nbytes, chunk,\n-                                   nbytes + BLOSC2_MAX_OVERHEAD);\n+  int cbytes = blosc2_compress_ctx(schunk->cctx, src, nbytes, chunk, destsize);\n   if (cbytes < 0) {\n     free(chunk);\n     return cbytes;\n"
+          "@@ -1051,9 +1051,19 @@\n /* Append a data buffer to a super-chunk. */\n int64_t blosc2_schunk_append_buffer(blosc2_schunk *schunk, const void *src, int32_t nbytes) {\n-  uint8_t* chunk = malloc(nbytes + BLOSC2_MAX_OVERHEAD);\n+  if (nbytes < 0) {\n+    BLOSC_TRACE_ERROR(\"nbytes cannot be negative (%d)\", nbytes);\n+    return BLOSC2_ERROR_INVALID_PARAM;\n+  }\n+\n+  int32_t destsize = nbytes + BLOSC2_MAX_OVERHEAD;\n+  if (destsize < nbytes) {\n+    BLOSC_TRACE_ERROR(\"Destination size overflow for nbytes=%d\", nbytes);\n+    return BLOSC2_ERROR_INVALID_PARAM;\n+  }\n+\n+  uint8_t* chunk = malloc((size_t)destsize);\n   schunk->current_nchunk = schunk->nchunks;\n   /* Compress the src buffer using super-chunk context */\n-  int cbytes = blosc2_compress_ctx(schunk->cctx, src, nbytes, chunk,\n-                                   nbytes + BLOSC2_MAX_OVERHEAD);\n+  int cbytes = blosc2_compress_ctx(schunk->cctx, src, nbytes, chunk, destsize);\n   if (cbytes < 0) {\n     free(chunk);\n     return cbytes;\n"
         ],
         "kwargs": {},
-        "timestamp": 463820.580616146,
+        "timestamp": 1899315.876618927,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -257,7 +253,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 463910.486880384,
+        "timestamp": 1899448.564903651,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

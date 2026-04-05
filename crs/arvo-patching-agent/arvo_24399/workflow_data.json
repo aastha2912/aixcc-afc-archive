@@ -1,5 +1,5 @@
 {
-  "vuln_id": 293,
+  "vuln_id": 358,
   "crash_result": {
     "output": "/src/rdkit/Code/GraphMol/QueryOps.cpp:963:21: runtime error: downcast of address 0x0000340e8580 which does not point to an object of type 'RDKit::ATOM_EQUALS_QUERY' (aka 'EqualityQuery<int, const RDKit::Atom *, true>')\n0x0000340e8580: note: object is of type 'Queries::AndQuery<int, RDKit::Atom const*, true>'\n 00 00 00 00  70 9a a3 00 00 00 00 00  00 00 00 00 00 00 00 00  0e 41 74 6f 6d 41 6e 64  00 00 00 00\n              ^~~~~~~~~~~~~~~~~~~~~~~\n              vptr for 'Queries::AndQuery<int, RDKi",
     "stack": "#0 0x716080 in RDKit::QueryOps::completeMolQueries(RDKit::RWMol*, unsigned int) rdkit/Code/GraphMol/QueryOps.cpp:963:21\n#1 0x4ef6e0 in RDKit::FileParserUtils::finishMolProcessing(RDKit::RWMol*, bool, bool, bool) rdkit/Code/GraphMol/FileParsers/MolFileParser.cpp:3189:5\n#2 0x4f2887 in RDKit::MolDataStreamToMol(std::__1::basic_istream<char, std::__1::char_traits<char> >*, unsigned int&, bool, bool, bool) rdkit/Code/GraphMol/FileParsers/MolFileParser.cpp:3417:5\n#3 0x4d2531 in LLVMFuzzerTestOneInput ",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "completeMolQueries",
     "file": "rdkit/Code/GraphMol/QueryOps.cpp",
-    "description": "`QueryOps::completeMolQueries()` assumes every atom query is an `ATOM_EQUALS_QUERY` and does an unchecked `static_cast` (`atom->getQuery()` -> `ATOM_EQUALS_QUERY*`). For the PoV, parsing `M  RBC ... -2` in `ParseRingBondCountLine()` creates a composite `AtomAnd` query (via `replaceAtomWithQueryAtom()` + `expandQuery(..., COMPOSITE_AND)`) and sets `_NeedsQueryScan`. During `finishMolProcessing()`, `completeMolQueries()` is called and downcasts that `AtomAnd` root to `ATOM_EQUALS_QUERY`, triggering UB (invalid downcast).",
-    "conditions": "Input must be a mol block that sets `_NeedsQueryScan` through ring-bond-count parsing with value `-2` (e.g. `M  RBC  1   1  -2`) on an atom that becomes/query-is represented as a composite `AtomAnd`. Data flow: `MolDataStreamToMol()` -> `ParseMolBlockProperties()` -> `ParseRingBondCountLine()` (marks `_NeedsQueryScan`, builds composite query) -> `finishMolProcessing()` -> `QueryOps::completeMolQueries()` invalid cast and UBSan crash."
+    "description": "completeMolQueries() incorrectly assumes every atom query is an ATOM_EQUALS_QUERY and force-casts atom->getQuery() (and children in completeQueryAndChildren) with static_cast. For molecules where parsing builds a composite query tree (e.g., AtomAnd from expandQuery in property-line parsing), this downcast is invalid and triggers UB when completeMolQueries traverses it.",
+    "conditions": "In MolDataStreamToMol(), an M  RBC line with count -2 causes ParseRingBondCountLine() to set a sentinel value (0xDEADBEEF) and mark _NeedsQueryScan, while also attaching the ring-bond query via expandQuery (creating an AtomAnd/composite query on the atom). During finishMolProcessing(), presence of _NeedsQueryScan unconditionally calls QueryOps::completeMolQueries(), which then static_casts the top-level query to ATOM_EQUALS_QUERY despite it being AtomAnd, causing the UBSan invalid downcast. The provided PoC uses a single-atom mol block with 'M  RBC  1   1  -2' to trigger this path."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.04242035,
-      "total_input_tokens": 27301,
-      "total_output_tokens": 539,
-      "total_cached_tokens": 8192,
+      "total_cost": 0.03409665,
+      "total_input_tokens": 25279,
+      "total_output_tokens": 514,
+      "total_cached_tokens": 11008,
       "llm_calls": [
         {
-          "timestamp": 1773760529.9814875,
+          "timestamp": 1774822818.8182015,
           "model": "gpt-5.3-codex",
-          "cost": 0.00707175,
-          "input_tokens": 3041,
+          "cost": 0.00480655,
+          "input_tokens": 3129,
           "output_tokens": 125,
-          "total_tokens": 3166,
-          "cached_tokens": 0,
+          "total_tokens": 3254,
+          "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_lBWrQESaWMqZHg5dwO7UKZI9"
+              "tool_call_id": "call_cDSqdi7NgzIzDF2e19SPAkrI"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_2C2RPc7FT5njOtnikYOy6dpe"
+              "tool_call_id": "call_R2tXNUygoJlUVLfYDA9Cr8SA"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_nnaySywVb44DwaL4hdovHkZy"
+              "tool_call_id": "call_3gl3PvdkXaAZaTYgaWoPHPyY"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773760836.1659784,
+          "timestamp": 1774823193.2150402,
           "model": "gpt-5.3-codex",
-          "cost": 0.0160685,
-          "input_tokens": 8190,
-          "output_tokens": 124,
-          "total_tokens": 8314,
-          "cached_tokens": 0,
+          "cost": 0.014478099999999999,
+          "input_tokens": 8278,
+          "output_tokens": 129,
+          "total_tokens": 8407,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,27 +80,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ePfcfSvy9tAA06XxVN6wVkaj"
+              "tool_call_id": "call_PbrpKZlOwtKT4nkSzbigWw6y"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_XmOf3AeEAcZjWYEZy6G2U8Xe"
+              "tool_call_id": "call_g6BuMo88udd3hhJwG4DAr8Bh"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_Li3dhYR6vdzkbiQbGA1a1UcO"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_tAeNhpNKA5KDmhhAlxenzb9u"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773760842.7172375,
+          "timestamp": 1774823259.2796633,
           "model": "gpt-5.3-codex",
-          "cost": 0.0192801,
-          "input_tokens": 16070,
-          "output_tokens": 290,
-          "total_tokens": 16360,
-          "cached_tokens": 8192,
+          "cost": 0.014812000000000002,
+          "input_tokens": 13872,
+          "output_tokens": 260,
+          "total_tokens": 14132,
+          "cached_tokens": 8320,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -109,7 +109,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_LHUh4qwgRXoWJm0681flc7UD"
+              "tool_call_id": "call_3HN6828cOA4IFMEEPW7J5lCu"
             }
           ],
           "finish_reason": "tool_calls"
@@ -118,44 +118,48 @@
     },
     "patching": {
       "total_llm_calls": 5,
-      "total_cost": 0.034906549999999995,
-      "total_input_tokens": 40321,
-      "total_output_tokens": 1010,
-      "total_cached_tokens": 31616,
+      "total_cost": 0.03695475,
+      "total_input_tokens": 46589,
+      "total_output_tokens": 1064,
+      "total_cached_tokens": 37760,
       "llm_calls": [
         {
-          "timestamp": 1773760844.6837106,
+          "timestamp": 1774823261.4843545,
           "model": "gpt-5.3-codex",
-          "cost": 0.0048027,
-          "input_tokens": 3562,
-          "output_tokens": 85,
-          "total_tokens": 3647,
+          "cost": 0.00674695,
+          "input_tokens": 4353,
+          "output_tokens": 125,
+          "total_tokens": 4478,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_4pBnRZEBhCznLf9Gl4C71Avi"
+              "tool_call_id": "call_6xDzfXmIuHiWyjTHT2Y8miN4"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_yTMMAYisLudHvzDpffZxISX7"
+              "tool_name": "find_references",
+              "tool_call_id": "call_iNZzBrpTPg1fYQsRs1wi6MTu"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_y0f6yQLhHaq1hMKOLeyzIzLn"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773760852.0884795,
+          "timestamp": 1774825474.1662247,
           "model": "gpt-5.3-codex",
-          "cost": 0.01573005,
-          "input_tokens": 8531,
-          "output_tokens": 446,
-          "total_tokens": 8977,
-          "cached_tokens": 3456,
+          "cost": 0.01710835,
+          "input_tokens": 9885,
+          "output_tokens": 476,
+          "total_tokens": 10361,
+          "cached_tokens": 4352,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -164,19 +168,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_SpIJNE4TqqUVsVZR4UyMoqkD"
+              "tool_call_id": "call_fmz5P0rySW8IsghXqlRLIu9I"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773760860.520082,
+          "timestamp": 1774825478.2099047,
           "model": "gpt-5.3-codex",
-          "cost": 0.009878749999999999,
-          "input_tokens": 9021,
-          "output_tokens": 442,
-          "total_tokens": 9463,
-          "cached_tokens": 7680,
+          "cost": 0.0080465,
+          "input_tokens": 10406,
+          "output_tokens": 426,
+          "total_tokens": 10832,
+          "cached_tokens": 10240,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -185,19 +189,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_jXC0QzVzWxT10Q3gMt87BVrL"
+              "tool_call_id": "call_Ted1yIaSONHIeliBpmmrZrCV"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773760866.8681116,
+          "timestamp": 1774825479.1738849,
           "model": "gpt-5.3-codex",
-          "cost": 0.00219345,
-          "input_tokens": 9551,
+          "cost": 0.0023715999999999997,
+          "input_tokens": 10920,
           "output_tokens": 14,
-          "total_tokens": 9565,
-          "cached_tokens": 9344,
+          "total_tokens": 10934,
+          "cached_tokens": 10752,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -206,19 +210,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_B2LjsdT1Wu3PSUICvXDAHrHT"
+              "tool_call_id": "call_qiZ9xZq4S5J81Yf9WvTj4z2W"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773761246.1156287,
+          "timestamp": 1774825875.3846557,
           "model": "gpt-5.3-codex",
-          "cost": 0.0023016,
-          "input_tokens": 9656,
+          "cost": 0.00268135,
+          "input_tokens": 11025,
           "output_tokens": 23,
-          "total_tokens": 9679,
-          "cached_tokens": 9472,
+          "total_tokens": 11048,
+          "cached_tokens": 10752,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -227,7 +231,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_ctK1aXvHfsrBQZ8CAH9rzbWP"
+              "tool_call_id": "call_Mj4mrDHdE0mpLQ0bSV2pDNW2"
             }
           ],
           "finish_reason": "tool_calls"
@@ -235,15 +239,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.0773269,
-      "total_input_tokens": 67622,
-      "total_output_tokens": 1549,
+      "total_cost": 0.0710514,
+      "total_input_tokens": 71868,
+      "total_output_tokens": 1578,
       "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/Code/GraphMol/QueryOps.cpp\n+++ b/Code/GraphMol/QueryOps.cpp\n@@ -941,6 +941,22 @@\n \n namespace QueryOps {\n namespace {\n+void completeQueryAndChildren(Queries::Query<int, Atom const *, true> *query,\n+                              Atom *tgt, unsigned int magicVal) {\n+  PRECONDITION(query, \"no query\");\n+  PRECONDITION(tgt, \"no atom\");\n+  if (query->getDescription() == \"AtomAtomicNum\") {\n+    auto *eqQuery = static_cast<ATOM_EQUALS_QUERY *>(query);\n+    if (static_cast<unsigned int>(eqQuery->getVal()) == magicVal) {\n+      int tgtVal = eqQuery->getDataFunc()(tgt);\n+      eqQuery->setVal(tgtVal);\n+    }\n+  }\n+  for (auto childIt = query->beginChildren(); childIt != query->endChildren();\n+       ++childIt) {\n+    completeQueryAndChildren(childIt->get(), tgt, magicVal);\n+  }\n+}\n void completeQueryAndChildren(ATOM_EQUALS_QUERY *query, Atom *tgt,\n                               unsigned int magicVal) {\n   PRECONDITION(query, \"no query\");\n@@ -959,9 +975,8 @@\n void completeMolQueries(RWMol *mol, unsigned int magicVal) {\n   PRECONDITION(mol, \"bad molecule\");\n   for (auto atom : mol->atoms()) {\n-    if (atom->hasQuery()) {\n-      auto *query = static_cast<ATOM_EQUALS_QUERY *>(atom->getQuery());\n-      completeQueryAndChildren(query, atom, magicVal);\n+    if (atom->hasQuery() && atom->getQuery()) {\n+      completeQueryAndChildren(atom->getQuery(), atom, magicVal);\n     }\n   }\n }\n",
+    "patch": "--- a/Code/GraphMol/QueryOps.cpp\n+++ b/Code/GraphMol/QueryOps.cpp\n@@ -941,18 +941,18 @@\n \n namespace QueryOps {\n namespace {\n-void completeQueryAndChildren(ATOM_EQUALS_QUERY *query, Atom *tgt,\n+void completeQueryAndChildren(ATOM_QUERY *query, Atom *tgt,\n                               unsigned int magicVal) {\n   PRECONDITION(query, \"no query\");\n   PRECONDITION(tgt, \"no atom\");\n-  if (static_cast<unsigned int>(query->getVal()) == magicVal) {\n-    int tgtVal = query->getDataFunc()(tgt);\n-    query->setVal(tgtVal);\n+  auto *eqQuery = dynamic_cast<ATOM_EQUALS_QUERY *>(query);\n+  if (eqQuery && static_cast<unsigned int>(eqQuery->getVal()) == magicVal) {\n+    int tgtVal = eqQuery->getDataFunc()(tgt);\n+    eqQuery->setVal(tgtVal);\n   }\n   for (auto childIt = query->beginChildren(); childIt != query->endChildren();\n        ++childIt) {\n-    completeQueryAndChildren((ATOM_EQUALS_QUERY *)(childIt->get()), tgt,\n-                             magicVal);\n+    completeQueryAndChildren(childIt->get(), tgt, magicVal);\n   }\n }\n }  // namespace\n@@ -960,7 +960,7 @@\n   PRECONDITION(mol, \"bad molecule\");\n   for (auto atom : mol->atoms()) {\n     if (atom->hasQuery()) {\n-      auto *query = static_cast<ATOM_EQUALS_QUERY *>(atom->getQuery());\n+      auto *query = atom->getQuery();\n       completeQueryAndChildren(query, atom, magicVal);\n     }\n   }\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -262,36 +266,50 @@
       {
         "tool_name": "read_source",
         "args": [
-          "rdkit/Code/GraphMol/FileParsers/MolFileParser.cpp",
-          3189
-        ],
-        "kwargs": {},
-        "timestamp": 793133.260112102,
-        "success": true,
-        "result_summary": "Ok({'contents': '3090                     unsigned int &nAtoms, unsigned int &nBonds,\\n3091                     bool strictParsing) {\\n3092   conf = new Conformer(nAtoms);\\n3093   if (nAtoms == 0) {\\n..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
           "rdkit/Code/GraphMol/QueryOps.cpp",
           963
         ],
         "kwargs": {},
-        "timestamp": 793133.261068391,
+        "timestamp": 1855550.06091019,
         "success": true,
         "result_summary": "Ok({'contents': ' 864       }\\n 865     }\\n 866   }\\n 867 }\\n 868 \\n 869 bool isComplexQuery(const Atom *a) {\\n 870   PRECONDITION(a, \"bad atom\");\\n 871   if (!a->hasQuery()) {\\n 872     return false;..."
       }
     ],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "completeQueryAndChildren",
+          "rdkit/Code/GraphMol/QueryOps.cpp",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1855652.287686165,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='rdkit/Code/GraphMol/QueryOps.cpp', refs=[FileReference(line=954, content='    completeQueryAndChildren((ATOM_EQUALS_QUERY *)(childIt->get()), tgt,', enclosing_definition=..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "ATOM_EQUALS_QUERY",
+          "rdkit/Code/GraphMol/QueryOps.cpp",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1857757.751443087,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='rdkit/Code/GraphMol/QueryOps.cpp', refs=[FileReference(line=86, content='ATOM_EQUALS_QUERY *makeAtomRingBondCountQuery(int what) {', enclosing_definition='makeAtomRingBon..."
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "Code/GraphMol/QueryOps.cpp",
-          "@@ -941,6 +941,20 @@\n \n namespace QueryOps {\n namespace {\n+void completeQueryAndChildren(Queries::Query<int, Atom const *, true> *query,\n+                              Atom *tgt, unsigned int magicVal) {\n+  PRECONDITION(query, \"no query\");\n+  PRECONDITION(tgt, \"no atom\");\n+  if (query->getDescription() == \"AtomAtomicNum\") {\n+    auto *eqQuery = static_cast<ATOM_EQUALS_QUERY *>(query);\n+    if (static_cast<unsigned int>(eqQuery->getVal()) == magicVal) {\n+      int tgtVal = eqQuery->getDataFunc()(tgt);\n+      eqQuery->setVal(tgtVal);\n+    }\n+  }\n+  for (auto childIt = query->beginChildren(); childIt != query->endChildren();\n+       ++childIt) {\n+    completeQueryAndChildren(childIt->get(), tgt, magicVal);\n+  }\n+}\n void completeQueryAndChildren(ATOM_EQUALS_QUERY *query, Atom *tgt,\n                               unsigned int magicVal) {\n   PRECONDITION(query, \"no query\");\n@@ -959,10 +973,9 @@\n void completeMolQueries(RWMol *mol, unsigned int magicVal) {\n   PRECONDITION(mol, \"bad molecule\");\n   for (auto atom : mol->atoms()) {\n-    if (atom->hasQuery()) {\n-      auto *query = static_cast<ATOM_EQUALS_QUERY *>(atom->getQuery());\n-      completeQueryAndChildren(query, atom, magicVal);\n+    if (atom->hasQuery() && atom->getQuery()) {\n+      completeQueryAndChildren(atom->getQuery(), atom, magicVal);\n     }\n   }\n }\n"
+          "@@ -941,19 +941,23 @@\n namespace QueryOps {\n namespace {\n-void completeQueryAndChildren(ATOM_EQUALS_QUERY *query, Atom *tgt,\n+void completeQueryAndChildren(ATOM_QUERY *query, Atom *tgt,\n                               unsigned int magicVal) {\n   PRECONDITION(query, \"no query\");\n   PRECONDITION(tgt, \"no atom\");\n-  if (static_cast<unsigned int>(query->getVal()) == magicVal) {\n-    int tgtVal = query->getDataFunc()(tgt);\n-    query->setVal(tgtVal);\n+  auto *eqQuery = dynamic_cast<ATOM_EQUALS_QUERY *>(query);\n+  if (eqQuery && static_cast<unsigned int>(eqQuery->getVal()) == magicVal) {\n+    int tgtVal = eqQuery->getDataFunc()(tgt);\n+    eqQuery->setVal(tgtVal);\n   }\n   for (auto childIt = query->beginChildren(); childIt != query->endChildren();\n        ++childIt) {\n-    completeQueryAndChildren((ATOM_EQUALS_QUERY *)(childIt->get()), tgt,\n-                             magicVal);\n+    completeQueryAndChildren(childIt->get(), tgt, magicVal);\n   }\n }\n }  // namespace\n void completeMolQueries(RWMol *mol, unsigned int magicVal) {\n   PRECONDITION(mol, \"bad molecule\");\n   for (auto atom : mol->atoms()) {\n     if (atom->hasQuery()) {\n-      auto *query = static_cast<ATOM_EQUALS_QUERY *>(atom->getQuery());\n+      auto *query = atom->getQuery();\n       completeQueryAndChildren(query, atom, magicVal);\n     }\n   }\n"
         ],
         "kwargs": {},
-        "timestamp": 793149.193519643,
+        "timestamp": 1857766.809660215,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -301,7 +319,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 793533.383920205,
+        "timestamp": 1858163.052462137,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

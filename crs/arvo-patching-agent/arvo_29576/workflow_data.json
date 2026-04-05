@@ -1,5 +1,5 @@
 {
-  "vuln_id": 79,
+  "vuln_id": 379,
   "crash_result": {
     "output": "UndefinedBehaviorSanitizer:DEADLYSIGNAL\n==20635==ERROR: UndefinedBehaviorSanitizer: SEGV on unknown address 0x000000000038 (pc 0x0000004b4d1f bp 0x7ffe2ccbf4a0 sp 0x7ffe2ccbf480 T20635)\n==20635==The signal is caused by a READ memory access.\n==20635==Hint: address points to the zero page.\n    #0 0x4b4d1f in Mat_MulDims /src/matio/src/mat.c:263:52\n    #1 0x4ba555 in Mat_VarGetSize /src/matio/src/mat.c:2064:19\n    #2 0x4ba5e4 in Mat_VarGetSize /src/matio/src/mat.c:1995:50\n    #3 0x4b47a2 in MatioRe",
     "stack": "#0 0x4b4d1f in Mat_MulDims matio/src/mat.c:263:52\n#1 0x4ba555 in Mat_VarGetSize matio/src/mat.c:2064:19\n#2 0x4ba5e4 in Mat_VarGetSize matio/src/mat.c:1995:50\n#3 0x4b47a2 in MatioRead(char const*) matio/ossfuzz/./matio_wrap.h:37:5\n#4 0x4b4837 in LLVMFuzzerTestOneInput matio/ossfuzz/./matio_fuzzer.cpp:28:10\n#5 0x443751 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:599:15\n#6 0x42d412 in fuzzer::RunOneTest(fuzzer::Fuzzer*, ",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "Mat_VarGetSize",
     "file": "matio/src/mat.c",
-    "description": "Mat_VarGetSize calls Mat_MulDims(matvar, &bytes) for non-struct/cell/sparse variables when matvar->rank > 0, but it does not validate that matvar->dims is non-NULL. For this PoV, a parsed variable has rank > 0 with an invalid/missing dims pointer, so Mat_MulDims dereferences matvar->dims[i] and crashes with a null/near-null read at mat.c:263.",
-    "conditions": "The crafted MAT v7.3/HDF5 input causes the parser to construct at least one matvar_t with rank set positive while dims is NULL/corrupt. During fuzz harness processing (MatioRead -> Mat_VarGetSize recursion), execution reaches the generic branch in Mat_VarGetSize and invokes Mat_MulDims on that malformed matvar_t, triggering the invalid read in Mat_MulDims."
+    "description": "`Mat_VarGetSize` recursively walks nested struct/cell members and assumes every `matvar_t` it visits has a valid `dims` array whenever `rank > 0`. In the non-struct/cell/sparse branch it sets `bytes` then calls `Mat_MulDims(matvar, &bytes)`, and `Mat_MulDims` unconditionally reads `matvar->dims[i]`. For this PoV, a malformed nested variable has `rank > 0` but `dims == NULL` (or invalid), so `Mat_MulDims` dereferences a null/near-null pointer and crashes at mat.c:263. Root cause is missing validation/invariant enforcement in `Mat_VarGetSize` before propagating `matvar` into `Mat_MulDims` (crash manifests inside `Mat_MulDims`).",
+    "conditions": "Fuzzer loads a crafted MAT v7.3 file containing nested variables (via struct/cell recursion in `Mat_VarGetSize`) where at least one child `matvar_t` has inconsistent metadata: positive `rank` but absent/invalid `dims`. During recursive size computation (`MatioRead` -> `Mat_VarGetSize` -> `Mat_VarGetSize` -> `Mat_MulDims`), the code enters the generic branch (`class_type` not struct/cell/sparse), calls `Mat_MulDims`, and triggers an invalid read of `matvar->dims[i]`."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.15302385000000002,
-      "total_input_tokens": 148743,
-      "total_output_tokens": 315,
+      "total_cost": 0.15499785,
+      "total_input_tokens": 148919,
+      "total_output_tokens": 434,
       "total_cached_tokens": 70912,
       "llm_calls": [
         {
-          "timestamp": 1773385579.7526872,
+          "timestamp": 1774836878.7618778,
           "model": "gpt-5.3-codex",
-          "cost": 0.12541725,
-          "input_tokens": 70891,
+          "cost": 0.12557125,
+          "input_tokens": 70979,
           "output_tokens": 97,
-          "total_tokens": 70988,
+          "total_tokens": 71076,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,26 +51,26 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ALm4fP0OmB9Yw0T4P4FnZca6"
+              "tool_call_id": "call_IboewZXofaR7G4pVxDNNqkR2"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_GykPpxY7ENtpDKcTXrB63P6f"
+              "tool_call_id": "call_QJnJ4PazREGPQEn25mZgxlVU"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Eo0AvUuoePZlFrmqh86whCfg"
+              "tool_call_id": "call_mCKyTwuzDNuWmMPCUIMY2igr"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773385589.2059393,
+          "timestamp": 1774836887.2796078,
           "model": "gpt-5.3-codex",
-          "cost": 0.0276066,
-          "input_tokens": 77852,
-          "output_tokens": 218,
-          "total_tokens": 78070,
+          "cost": 0.029426599999999997,
+          "input_tokens": 77940,
+          "output_tokens": 337,
+          "total_tokens": 78277,
           "cached_tokens": 70912,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -80,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_HsQkXymy2Jh3sixJedk1rXcK"
+              "tool_call_id": "call_7Ba2ezAISJuSY8DEVqotaTQ7"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,45 +88,49 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 3,
-      "total_cost": 0.16240000000000002,
-      "total_input_tokens": 223296,
-      "total_output_tokens": 248,
-      "total_cached_tokens": 147200,
+      "total_llm_calls": 5,
+      "total_cost": 0.1990352,
+      "total_input_tokens": 393456,
+      "total_output_tokens": 286,
+      "total_cached_tokens": 313344,
       "llm_calls": [
         {
-          "timestamp": 1773385592.7620697,
+          "timestamp": 1774836891.3950577,
           "model": "gpt-5.3-codex",
-          "cost": 0.12592125,
-          "input_tokens": 71387,
-          "output_tokens": 71,
-          "total_tokens": 71458,
-          "cached_tokens": 0,
+          "cost": 0.12498745,
+          "input_tokens": 72143,
+          "output_tokens": 97,
+          "total_tokens": 72240,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_J8TWPPx7cNry8f5WAAhQ574j"
+              "tool_call_id": "call_XJKyKO0l48Yb3qVGmYvdJyhI"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_YjZECjyfEnZgSzopMnlA3jJE"
+              "tool_call_id": "call_uxDYw1vJKNRsIf0kvRgOI9Eb"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_sN0d376zw8V7qKP8eD74WuhB"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773385599.0336018,
+          "timestamp": 1774836895.076581,
           "model": "gpt-5.3-codex",
-          "cost": 0.022261049999999998,
-          "input_tokens": 75871,
-          "output_tokens": 127,
-          "total_tokens": 75998,
-          "cached_tokens": 71296,
+          "cost": 0.0267932,
+          "input_tokens": 79104,
+          "output_tokens": 133,
+          "total_tokens": 79237,
+          "cached_tokens": 72064,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,19 +139,56 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_nXhSvDNI2UJYGcfQGJtX1155"
+              "tool_call_id": "call_tL7u4481gUwVpmZVxqWzi4oU"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773385601.9498377,
+          "timestamp": 1774836897.007761,
           "model": "gpt-5.3-codex",
-          "cost": 0.0142177,
-          "input_tokens": 76038,
-          "output_tokens": 50,
-          "total_tokens": 76088,
-          "cached_tokens": 75904,
+          "cost": 0.01455195,
+          "input_tokens": 79277,
+          "output_tokens": 29,
+          "total_tokens": 79306,
+          "cached_tokens": 79104,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_GA7ILEIXwV0se2Tnj6JFv4kZ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774836900.1461985,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01781185,
+          "input_tokens": 81455,
+          "output_tokens": 4,
+          "total_tokens": 81459,
+          "cached_tokens": 79232,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": false,
+          "tool_call_count": 0,
+          "tool_calls": null,
+          "finish_reason": "stop"
+        },
+        {
+          "timestamp": 1774836902.3574228,
+          "model": "gpt-5.3-codex",
+          "cost": 0.014890749999999998,
+          "input_tokens": 81477,
+          "output_tokens": 23,
+          "total_tokens": 81500,
+          "cached_tokens": 81280,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,7 +197,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_nvDSfoSPUi7gM1TJ7rgnPBU4"
+              "tool_call_id": "call_ST3IAwiD7yWfoZTkmO1DfViv"
             }
           ],
           "finish_reason": "tool_calls"
@@ -164,10 +205,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.31542385000000006,
-      "total_input_tokens": 372039,
-      "total_output_tokens": 563,
-      "total_llm_calls": 5
+      "total_cost": 0.35403304999999996,
+      "total_input_tokens": 542375,
+      "total_output_tokens": 720,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
@@ -182,10 +223,21 @@
         "tool_name": "read_source",
         "args": [
           "matio/src/mat.c",
+          263
+        ],
+        "kwargs": {},
+        "timestamp": 1869179.97158746,
+        "success": true,
+        "result_summary": "Ok({'contents': '164             printf(\"%hhd\",*(mat_int8_t*)data);\\n165             break;\\n166         case MAT_T_UINT8:\\n167             printf(\"%hhu\",*(mat_uint8_t*)data);\\n168             break;\\..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "matio/src/mat.c",
           2064
         ],
         "kwargs": {},
-        "timestamp": 417881.48866942,
+        "timestamp": 1869179.972732815,
         "success": true,
         "result_summary": "Ok({'contents': '1965 size_t\\n1966 Mat_VarGetSize(matvar_t *matvar)\\n1967 {\\n1968     int err;\\n1969     size_t i;\\n1970     size_t bytes = 0, overhead = 0, ptr = 0;\\n1971 \\n1972 #if defined(_WIN64) |..."
       },
@@ -193,12 +245,23 @@
         "tool_name": "read_source",
         "args": [
           "matio/src/mat.c",
-          263
+          1995
         ],
         "kwargs": {},
-        "timestamp": 417881.4901198,
+        "timestamp": 1869179.974109811,
         "success": true,
-        "result_summary": "Ok({'contents': '164             printf(\"%hhd\",*(mat_int8_t*)data);\\n165             break;\\n166         case MAT_T_UINT8:\\n167             printf(\"%hhu\",*(mat_uint8_t*)data);\\n168             break;\\..."
+        "result_summary": "Ok({'contents': '1896 \\n1897     subs = (int*)malloc(rank*sizeof(int));\\n1898     if ( NULL == subs) {\\n1899         return subs;\\n1900     }\\n1901 \\n1902     l = index;\\n1903     for ( i = rank; i--;..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "matio/src/mat.c",
+          1
+        ],
+        "kwargs": {},
+        "timestamp": 1869185.582769416,
+        "success": true,
+        "result_summary": "Ok({'contents': '  1 /** @file mat.c\\n  2  * Matlab MAT file functions\\n  3  * @ingroup MAT\\n  4  */\\n  5 /*\\n  6  * Copyright (c) 2005-2021, Christopher C. Hulbert\\n  7  * All rights reserved.\\n  8  ..."
       }
     ],
     "find_references": [],

@@ -1,5 +1,5 @@
 {
-  "vuln_id": 201,
+  "vuln_id": 410,
   "crash_result": {
     "output": "==1435==ERROR: AddressSanitizer: heap-use-after-free on address 0x607000000116 at pc 0x00000054de1f bp 0x7ffd7d30b7f0 sp 0x7ffd7d30b7e8\nREAD of size 1 at 0x607000000116 thread T0\nSCARINESS: 40 (1-byte-read-heap-use-after-free)\n    #0 0x54de1e in AK::Utf8CodePointIterator::operator*() const /src/serenity/AK/Utf8View.cpp:244:53\n    #1 0x51333b in AK::URLParser::parse(AK::StringView const&, AK::URL const*, AK::Optional<AK::URL>, AK::Optional<AK::URLParser::State>) /src/serenity/AK/URLParser.cpp:238",
     "stack": "#0 0x54de1e in AK::Utf8CodePointIterator::operator*() const serenity/AK/Utf8View.cpp:244:53\n#1 0x51333b in AK::URLParser::parse(AK::StringView const&, AK::URL const*, AK::Optional<AK::URL>, AK::Optional<AK::URLParser::State>) serenity/AK/URLParser.cpp:238:26\n#2 0x4e2fbe in AK::URL::URL(AK::StringView const&) serenity/AK/URL.cpp:20:11\n#3 0x4d54eb in LLVMFuzzerTestOneInput serenity/Meta/Lagom/Fuzzers/FuzzURL.cpp:12:16\n#4 0x4d52b5 in ExecuteFilesOnyByOne aflplusplus/utils/aflpp_driver/aflpp_driver.",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "parse",
     "file": "serenity/AK/URLParser.cpp",
-    "description": "Use-after-free in URLParser::parse due to binding a StringView (`processed_input`) to temporary storage owned by local `String processed_input_string`. When tab/newline are present, parse creates `processed_input_string`, mutates it with replace(), then assigns `processed_input = processed_input_string` (view into that String). After leaving the if-block, `processed_input_string` is destroyed (freeing StringImpl), but `Utf8View input(processed_input)` later iterates that dangling view, leading to UAF read in Utf8CodePointIterator::operator* (Utf8View.cpp:244).",
-    "conditions": "FuzzURL passes attacker-controlled bytes to URL constructor, which calls URLParser::parse. Input must be non-empty and contain '\\t' or '\\n' so the replacement branch runs. The parser then continues using `processed_input` after the local replacement String has gone out of scope, so subsequent UTF-8 iteration dereferences freed memory and crashes."
+    "description": "In URLParser::parse, `processed_input` is a StringView that is reassigned to a temporary `String` (`processed_input_string`) after tab/newline stripping (lines ~211-217). The code does `processed_input = processed_input_string;` then leaves the scope, destroying `processed_input_string` and freeing its StringImpl. `processed_input` becomes a dangling view, but is then used to build `Utf8View input(processed_input)` and iterated, causing a heap-use-after-free in Utf8CodePointIterator::operator*(). Root cause is lifetime mismanagement in URLParser::parse (storing a view to freed temporary), not Utf8View itself.",
+    "conditions": "Triggered when URLParser::parse takes input containing `\\t` or `\\n` so the replacement branch executes. FuzzURL passes attacker-controlled bytes directly as StringView into URL(string_view) -> URLParser::parse. In that branch, replacements allocate a new String, then a dangling StringView is kept after temporary destruction; subsequent UTF-8 iteration over `processed_input` dereferences freed memory and crashes."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.0227815,
-      "total_input_tokens": 15546,
-      "total_output_tokens": 332,
-      "total_cached_tokens": 5760,
+      "total_cost": 0.0253267,
+      "total_input_tokens": 13618,
+      "total_output_tokens": 366,
+      "total_cached_tokens": 2304,
       "llm_calls": [
         {
-          "timestamp": 1773522125.519529,
+          "timestamp": 1774844103.9387507,
           "model": "gpt-5.3-codex",
-          "cost": 0.0076881,
-          "input_tokens": 4614,
-          "output_tokens": 102,
-          "total_tokens": 4716,
+          "cost": 0.0079261,
+          "input_tokens": 4702,
+          "output_tokens": 108,
+          "total_tokens": 4810,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_SxNUPPaIPtEplOIpbyHCN4nR"
+              "tool_call_id": "call_EWuPNFWzkvMYwyX7ilDetSee"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_uwCs8KUmXCommwfn3MbyunCX"
+              "tool_call_id": "call_jSz3nqY8JznwBId1jXsSU1NJ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_U0zIiNARmycWv5J1ib8ytVc0"
+              "tool_call_id": "call_rJG8YBskImnhi4TgVH834Fdb"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773522134.7579215,
+          "timestamp": 1774844108.6465387,
           "model": "gpt-5.3-codex",
-          "cost": 0.0150934,
-          "input_tokens": 10932,
-          "output_tokens": 230,
-          "total_tokens": 11162,
-          "cached_tokens": 4608,
+          "cost": 0.0174006,
+          "input_tokens": 8916,
+          "output_tokens": 258,
+          "total_tokens": 9174,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_11pu5cVtDO4FHRn8U8tjGfOx"
+              "tool_call_id": "call_hhJIQOAmbeYWVYNJT1nbBWEm"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,19 +88,19 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.03516205,
-      "total_input_tokens": 32667,
-      "total_output_tokens": 329,
-      "total_cached_tokens": 16896,
+      "total_llm_calls": 5,
+      "total_cost": 0.044773049999999995,
+      "total_input_tokens": 50887,
+      "total_output_tokens": 394,
+      "total_cached_tokens": 31616,
       "llm_calls": [
         {
-          "timestamp": 1773522137.7559652,
+          "timestamp": 1774844110.3563988,
           "model": "gpt-5.3-codex",
-          "cost": 0.006085450000000001,
-          "input_tokens": 4383,
+          "cost": 0.00903595,
+          "input_tokens": 6069,
           "output_tokens": 74,
-          "total_tokens": 4457,
+          "total_tokens": 6143,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -110,23 +110,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_nIvyn7vKzELfMk0Go6pkFUzB"
+              "tool_call_id": "call_STlLPd6bJCVBjYv9jBvHvLwg"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_IKvXFh2QkqziVE370pax6Khl"
+              "tool_call_id": "call_TdHqbiAOtP6gSjGfnzYiLdau"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773522142.7359848,
+          "timestamp": 1774844113.8852274,
           "model": "gpt-5.3-codex",
-          "cost": 0.01227835,
-          "input_tokens": 9189,
-          "output_tokens": 218,
-          "total_tokens": 9407,
-          "cached_tokens": 4352,
+          "cost": 0.0132713,
+          "input_tokens": 10846,
+          "output_tokens": 269,
+          "total_tokens": 11115,
+          "cached_tokens": 6016,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,18 +135,39 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_S7Z5TBqtFxsMBwGNlaILtYUc"
+              "tool_call_id": "call_3ACSW4FluZP3eATuAGUgz3UA"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773522144.2547052,
+          "timestamp": 1774844114.9339101,
           "model": "gpt-5.3-codex",
-          "cost": 0.01419145,
-          "input_tokens": 9495,
+          "cost": 0.00246365,
+          "input_tokens": 11203,
           "output_tokens": 14,
-          "total_tokens": 9509,
+          "total_tokens": 11217,
+          "cached_tokens": 11008,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_SkHkCOY8v2v8WF6wm54OMVf0"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774847719.9309564,
+          "model": "gpt-5.3-codex",
+          "cost": 0.017406199999999997,
+          "input_tokens": 11332,
+          "output_tokens": 14,
+          "total_tokens": 11346,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -156,19 +177,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_i9VdqIL0jsNlGgDdYvlf0O1y"
+              "tool_call_id": "call_iWQgYEEjYLcyjYSZH8oOryzi"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773522300.2973368,
+          "timestamp": 1774847915.1109495,
           "model": "gpt-5.3-codex",
-          "cost": 0.0026068000000000003,
-          "input_tokens": 9600,
+          "cost": 0.0025959499999999996,
+          "input_tokens": 11437,
           "output_tokens": 23,
-          "total_tokens": 9623,
-          "cached_tokens": 9216,
+          "total_tokens": 11460,
+          "cached_tokens": 11264,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,7 +198,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_jqLWocFHg54tcEJEnMeS4mzu"
+              "tool_call_id": "call_F3LyStcviF9EEFPPdaF4D8Vs"
             }
           ],
           "finish_reason": "tool_calls"
@@ -185,15 +206,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.057943549999999996,
-      "total_input_tokens": 48213,
-      "total_output_tokens": 661,
-      "total_llm_calls": 6
+      "total_cost": 0.07009974999999999,
+      "total_input_tokens": 64505,
+      "total_output_tokens": 760,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/serenity/AK/URLParser.cpp\n+++ b/serenity/AK/URLParser.cpp\n@@ -206,14 +206,15 @@\n         return {};\n \n     auto processed_input = raw_input.substring_view(start_index, end_index - start_index);\n+    String processed_input_storage;\n \n     // NOTE: This replaces all tab and newline characters with nothing.\n     if (processed_input.contains(\"\\t\") || processed_input.contains(\"\\n\")) {\n         report_validation_error();\n-        String processed_input_string(processed_input);\n-        processed_input_string.replace(\"\\t\", \"\", true);\n-        processed_input_string.replace(\"\\n\", \"\", true);\n-        processed_input = processed_input_string;\n+        processed_input_storage = String(processed_input);\n+        processed_input_storage.replace(\"\\t\", \"\", true);\n+        processed_input_storage.replace(\"\\n\", \"\", true);\n+        processed_input = processed_input_storage;\n     }\n \n     State state = state_override.value_or(State::SchemeStart);\n",
+    "patch": "--- a/serenity/AK/URLParser.cpp\n+++ b/serenity/AK/URLParser.cpp\n@@ -205,15 +205,16 @@\n     if (start_index >= end_index)\n         return {};\n \n+    String processed_input_storage;\n     auto processed_input = raw_input.substring_view(start_index, end_index - start_index);\n \n     // NOTE: This replaces all tab and newline characters with nothing.\n     if (processed_input.contains(\"\\t\") || processed_input.contains(\"\\n\")) {\n         report_validation_error();\n-        String processed_input_string(processed_input);\n-        processed_input_string.replace(\"\\t\", \"\", true);\n-        processed_input_string.replace(\"\\n\", \"\", true);\n-        processed_input = processed_input_string;\n+        processed_input_storage = String(processed_input);\n+        processed_input_storage.replace(\"\\t\", \"\", true);\n+        processed_input_storage.replace(\"\\n\", \"\", true);\n+        processed_input = processed_input_storage;\n     }\n \n     State state = state_override.value_or(State::SchemeStart);\n",
     "build_artifacts_count": 1,
     "tested_povs_count": 1,
     "last_validation": {
@@ -213,23 +234,23 @@
         "tool_name": "read_source",
         "args": [
           "serenity/AK/URLParser.cpp",
-          240
+          238
         ],
         "kwargs": {},
-        "timestamp": 554426.464631816,
+        "timestamp": 1876398.931651313,
         "success": true,
-        "result_summary": "Ok({'contents': '141     StringBuilder builder;\\n142     if (mime_type.starts_with(\";\") || mime_type.is_empty()) {\\n143         builder.append(\"text/plain\");\\n144         builder.append(mime_type);\\n1..."
+        "result_summary": "Ok({'contents': '139     }\\n140 \\n141     StringBuilder builder;\\n142     if (mime_type.starts_with(\";\") || mime_type.is_empty()) {\\n143         builder.append(\"text/plain\");\\n144         builder.appe..."
       },
       {
         "tool_name": "read_source",
         "args": [
           "serenity/AK/URLParser.cpp",
-          200
+          210
         ],
         "kwargs": {},
-        "timestamp": 554426.466135365,
+        "timestamp": 1876398.93223635,
         "success": true,
-        "result_summary": "Ok({'contents': '101 }\\n102 \\n103 constexpr bool is_normalized_windows_drive_letter(StringView const& input)\\n104 {\\n105     return input.length() == 2 && is_ascii_alpha(input[0]) && input[1] == \\':\\'..."
+        "result_summary": "Ok({'contents': '111 }\\n112 \\n113 constexpr bool is_double_dot_path_segment(StringView const& input)\\n114 {\\n115     return input == \"..\"sv || input.equals_ignoring_case(\".%2e\"sv) || input.equals_igno..."
       }
     ],
     "find_references": [],
@@ -238,10 +259,10 @@
         "tool_name": "apply_patch",
         "args": [
           "serenity/AK/URLParser.cpp",
-          "@@ -208,13 +208,14 @@\n     auto processed_input = raw_input.substring_view(start_index, end_index - start_index);\n+    String processed_input_storage;\n \n     // NOTE: This replaces all tab and newline characters with nothing.\n     if (processed_input.contains(\"\\t\") || processed_input.contains(\"\\n\")) {\n         report_validation_error();\n-        String processed_input_string(processed_input);\n-        processed_input_string.replace(\"\\t\", \"\", true);\n-        processed_input_string.replace(\"\\n\", \"\", true);\n-        processed_input = processed_input_string;\n+        processed_input_storage = String(processed_input);\n+        processed_input_storage.replace(\"\\t\", \"\", true);\n+        processed_input_storage.replace(\"\\n\", \"\", true);\n+        processed_input = processed_input_storage;\n     }\n"
+          "@@ -205,17 +205,18 @@ URL URLParser::parse(StringView const& raw_input, URL const* base_url, Optional\n     if (start_index >= end_index)\n         return {};\n \n+    String processed_input_storage;\n     auto processed_input = raw_input.substring_view(start_index, end_index - start_index);\n \n     // NOTE: This replaces all tab and newline characters with nothing.\n     if (processed_input.contains(\"\\t\") || processed_input.contains(\"\\n\")) {\n         report_validation_error();\n-        String processed_input_string(processed_input);\n-        processed_input_string.replace(\"\\t\", \"\", true);\n-        processed_input_string.replace(\"\\n\", \"\", true);\n-        processed_input = processed_input_string;\n+        processed_input_storage = String(processed_input);\n+        processed_input_storage.replace(\"\\t\", \"\", true);\n+        processed_input_storage.replace(\"\\n\", \"\", true);\n+        processed_input = processed_input_storage;\n     }\n \n     State state = state_override.value_or(State::SchemeStart);\n"
         ],
         "kwargs": {},
-        "timestamp": 554431.33975619,
+        "timestamp": 1876402.477889973,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -251,7 +272,15 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 554587.816390223,
+        "timestamp": 1880007.046418008,
+        "success": true,
+        "result_summary": "Err(CRSError(the code failed to build, extra={'validation_status': 'build_failed', 'build_error': 'Build timed out', 'suggestion': 'You may want to undo some edits before proceeding with the `undo_las..."
+      },
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1880201.807509089,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

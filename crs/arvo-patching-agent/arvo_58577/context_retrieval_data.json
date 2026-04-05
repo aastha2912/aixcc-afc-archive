@@ -6,10 +6,10 @@
       "tool_name": "read_source",
       "args": [
         "src/gc.c",
-        730
+        1078
       ],
       "kwargs": {},
-      "timestamp": 499950.370027674,
+      "timestamp": 1909044.074939615,
       "success": true,
       "result_summary": "Err(CRSError(path 'src/gc.c' does not exist in directory tree. Similar paths: mruby/src/gc.c, extra=None))"
     },
@@ -17,10 +17,10 @@
       "tool_name": "read_source",
       "args": [
         "src/gc.c",
-        650
+        743
       ],
       "kwargs": {},
-      "timestamp": 499951.173640908,
+      "timestamp": 1909046.15667066,
       "success": true,
       "result_summary": "Err(CRSError(path 'src/gc.c' does not exist in directory tree. Similar paths: mruby/src/gc.c, extra=None))"
     },
@@ -31,20 +31,9 @@
         743
       ],
       "kwargs": {},
-      "timestamp": 499952.890624722,
+      "timestamp": 1909068.330142462,
       "success": true,
       "result_summary": "Ok({'contents': '644       mrb_int len = MRB_ENV_LEN(e);\\n645       for (mrb_int i=0; i<len; i++) {\\n646         mrb_gc_mark_value(mrb, e->stack[i]);\\n647       }\\n648       children += len;\\n649     ..."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "mruby/src/gc.c",
-        681
-      ],
-      "kwargs": {},
-      "timestamp": 499952.892017515,
-      "success": true,
-      "result_summary": "Ok({'contents': '582   /* mark fibers */\\n583   mrb_gc_mark(mrb, (struct RBasic*)c->fib);\\n584   if (c->prev) {\\n585     c = c->prev;\\n586     goto start;\\n587   }\\n588 }\\n589 \\n590 static size_t\\n591..."
     },
     {
       "tool_name": "read_source",
@@ -53,7 +42,7 @@
         1078
       ],
       "kwargs": {},
-      "timestamp": 499952.89304711,
+      "timestamp": 1909068.334541733,
       "success": true,
       "result_summary": "Ok({'contents': \" 979   if (!is_white(obj)) return;\\n 980   paint_black(obj);\\n 981   mrb_gc_mark(mrb, (struct RBasic*)obj->c);\\n 982   mrb_gc_free_iv(mrb, obj);\\n 983   struct RException *err = (stru..."
     }
@@ -62,14 +51,50 @@
     {
       "tool_name": "find_references",
       "args": [
-        "gc_mark_children",
+        "atomic_gray_list",
         "src/gc.c",
         false
       ],
       "kwargs": {},
-      "timestamp": 499950.76861926,
+      "timestamp": 1909060.380117042,
       "success": true,
-      "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: mruby/src/gc.c, extra=None))"
+      "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: mruby/src/gc.c, mruby/include/mruby/gc.h, extra=None))"
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "gray_list",
+        "src/gc.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1909065.931592605,
+      "success": true,
+      "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: mruby/src/gc.c, mruby/include/mruby/gc.h, extra=None))"
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "atomic_gray_list",
+        "mruby/src/gc.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1909093.073988658,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='mruby/src/gc.c', refs=[FileReference(line=906, content='    gc->atomic_gray_list = NULL;', enclosing_definition='root_scan_phase'), FileReference(line=1014, content='  gc..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "gray_list",
+        "mruby/src/gc.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1909104.538508352,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='mruby/src/gc.c', refs=[FileReference(line=533, content='  obj->gcnext = gc->gray_list;', enclosing_definition='add_gray_list'), FileReference(line=534, content='  gc->gra..."
     }
   ],
   "apply_patch": [
@@ -77,10 +102,10 @@
       "tool_name": "apply_patch",
       "args": [
         "mruby/src/gc.c",
-        "@@ -677,9 +677,15 @@ gc_mark_children(mrb_state *mrb, mrb_gc *gc, struct RBasic *obj)\n       size_t len = ARY_LEN(a);\n       mrb_value *p = ARY_PTR(a);\n \n       for (size_t i=0; i<len; i++) {\n-        mrb_gc_mark_value(mrb, p[i]);\n+        mrb_value v = p[i];\n+        if (mrb_immediate_p(v)) {\n+          continue;\n+        }\n+        struct RBasic *child = mrb_basic_ptr(v);\n+        if (!heap_p(gc, child)) continue;\n+        mrb_gc_mark(mrb, child);\n       }\n       children += len;\n     }\n     break;"
+        "@@ -1027,6 +1027,31 @@ prepare_incremental_sweep(mrb_state *mrb, mrb_gc *gc)\n   gc->live_after_mark = gc->live;\n }\n \n+static void\n+unlink_gray_list_in_page(struct RBasic **list, mrb_heap_page *page)\n+{\n+  struct RBasic *obj = *list;\n+  struct RBasic *prev = NULL;\n+  RVALUE *start = page->objects;\n+  RVALUE *end = start + MRB_HEAP_PAGE_SIZE;\n+\n+  while (obj) {\n+    struct RBasic *next = obj->gcnext;\n+    RVALUE *slot = (RVALUE*)obj;\n+\n+    if (slot >= start && slot < end) {\n+      if (prev) {\n+        prev->gcnext = next;\n+      }\n+      else {\n+        *list = next;\n+      }\n+    }\n+    else {\n+      prev = obj;\n+    }\n+    obj = next;\n+  }\n+}\n+\n static size_t\n incremental_sweep_phase(mrb_state *mrb, mrb_gc *gc, size_t limit)\n {\n@@ -1075,6 +1100,8 @@ incremental_sweep_phase(mrb_state *mrb, mrb_gc *gc, size_t limit)\n       if (gc->heaps == page)\n         gc->heaps = page->next;\n \n+      unlink_gray_list_in_page(&gc->gray_list, page);\n+      unlink_gray_list_in_page(&gc->atomic_gray_list, page);\n       mrb_free(mrb, page);\n       page = next;\n     }\n"
       ],
       "kwargs": {},
-      "timestamp": 499955.865287832,
+      "timestamp": 1909113.812561217,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
@@ -90,7 +115,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 499986.885663501,
+      "timestamp": 1909165.099036905,
       "success": true,
       "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
     }

@@ -1,5 +1,5 @@
 {
-  "vuln_id": 267,
+  "vuln_id": 340,
   "crash_result": {
     "output": "==8473==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x60b000000202 at pc 0x00000052b9d4 bp 0x7fff0e6bdc40 sp 0x7fff0e6bdc38\nREAD of size 4 at 0x60b000000202 thread T0\nSCARINESS: 17 (4-byte-read-heap-buffer-overflow)\n    #0 0x52b9d3 in concat_hash_string /src/ndpi/src/lib/protocols/ssh.c:99:19\n    #1 0x52a8e3 in ndpi_search_ssh_tcp /src/ndpi/src/lib/protocols/ssh.c:310:10\n    #2 0x52bbb3 in search_ssh_again /src/ndpi/src/lib/protocols/ssh.c:64:3\n    #3 0x4f8276 in ndpi_process_extra_",
     "stack": "#0 0x52b9d3 in concat_hash_string ndpi/src/lib/protocols/ssh.c:99:19\n#1 0x52a8e3 in ndpi_search_ssh_tcp ndpi/src/lib/protocols/ssh.c:310:10\n#2 0x52bbb3 in search_ssh_again ndpi/src/lib/protocols/ssh.c:64:3\n#3 0x4f8276 in ndpi_process_extra_packet ndpi/src/lib/ndpi_main.c:4390:9\n#4 0x4fa058 in ndpi_detection_process_packet ndpi/src/lib/ndpi_main.c:4746:7\n#5 0x4d7baf in packet_processing ndpi/example/reader_util.c:1371:31\n#6 0x4d608e in ndpi_workflow_process_packet ndpi/example/reader_util.c:1806:",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "concat_hash_string",
     "file": "ndpi/src/lib/protocols/ssh.c",
-    "description": "Heap out-of-bounds read due to missing bounds checks before reading 32-bit length fields from packet->payload. In concat_hash_string(), it immediately does `len = ntohl(*(u_int32_t*)&packet->payload[offset])` at offset 22 (and similarly at later offsets) without first ensuring at least 4 bytes remain. For truncated/malformed SSH KEXINIT payloads, this reads past the end of the packet buffer and crashes under ASan.",
-    "conditions": "In fuzz_ndpi_reader, packets are copied into an exact-size heap buffer (`malloc(header->caplen)`), so any over-read is detected. The PoC drives SSH parsing to ndpi_search_ssh_tcp(), reaches msgcode==20 (SSH key exchange init), then calls concat_hash_string(). If payload_packet_len is small/truncated relative to expected SSH fields (especially around initial offset 22), concat_hash_string reads a u32 length out of bounds before validation, triggering the 4-byte heap-buffer-overflow."
+    "description": "`concat_hash_string` performs multiple 32-bit length reads from `packet->payload` (starting at fixed offset 22) before ensuring at least 4 bytes remain. The first read `ntohl(*(u_int32_t*)&packet->payload[offset])` and later similar reads can occur when `offset` is already near/end of payload, causing out-of-bounds heap read. Validation is done too late/incompletely (checks often happen after reading `len`, and not consistently before every `u_int32_t` fetch).",
+    "conditions": "In `fuzz_ndpi_reader`, packets are copied into an exact-size heap buffer (`malloc(header->caplen)`), so any parser overread is detected. Trigger requires SSH flow reaching `ndpi_search_ssh_tcp` key-exchange path (`msgcode == 20`), which calls `concat_hash_string` with attacker-controlled payload length/content. A truncated/malformed SSH KEXINIT payload with insufficient bytes at/after offset 22 causes the 4-byte length load to read past the end of `packet_checked`, producing the ASan heap-buffer-overflow."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.022621549999999997,
-      "total_input_tokens": 13845,
-      "total_output_tokens": 346,
-      "total_cached_tokens": 4096,
+      "total_cost": 0.02790235,
+      "total_input_tokens": 14021,
+      "total_output_tokens": 370,
+      "total_cached_tokens": 1152,
       "llm_calls": [
         {
-          "timestamp": 1773715464.5000336,
+          "timestamp": 1774819469.4994662,
           "model": "gpt-5.3-codex",
-          "cost": 0.0087815,
-          "input_tokens": 4162,
+          "cost": 0.0071211,
+          "input_tokens": 4250,
           "output_tokens": 107,
-          "total_tokens": 4269,
-          "cached_tokens": 0,
+          "total_tokens": 4357,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_e0efWgN6CzzuLxYJAR6t7uSa"
+              "tool_call_id": "call_TGD2DWVaemt0ix3Lb58yCtHn"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_PbMefCH6d8BShgYo8WlcYNt0"
+              "tool_call_id": "call_KprD3hUe7p4K1zaL6exaGsP7"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_qYLM4MqPAoB5Zf4nwpFNbhnG"
+              "tool_call_id": "call_IyAKwDWaTa0gEnmnRF3GZk1e"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773715471.6056588,
+          "timestamp": 1774819474.6063612,
           "model": "gpt-5.3-codex",
-          "cost": 0.01384005,
-          "input_tokens": 9683,
-          "output_tokens": 239,
-          "total_tokens": 9922,
-          "cached_tokens": 4096,
+          "cost": 0.02078125,
+          "input_tokens": 9771,
+          "output_tokens": 263,
+          "total_tokens": 10034,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_GmiDgV6RvK85l1MdUouvpyHA"
+              "tool_call_id": "call_zNi8CLN4diCW0kfgD1OocjdZ"
             }
           ],
           "finish_reason": "tool_calls"
@@ -89,18 +89,18 @@
     },
     "patching": {
       "total_llm_calls": 5,
-      "total_cost": 0.034820449999999996,
-      "total_input_tokens": 36131,
-      "total_output_tokens": 1182,
-      "total_cached_tokens": 28544,
+      "total_cost": 0.0375963,
+      "total_input_tokens": 40554,
+      "total_output_tokens": 1245,
+      "total_cached_tokens": 32256,
       "llm_calls": [
         {
-          "timestamp": 1773715474.1477542,
+          "timestamp": 1774819476.205012,
           "model": "gpt-5.3-codex",
-          "cost": 0.0053381999999999995,
-          "input_tokens": 4532,
-          "output_tokens": 74,
-          "total_tokens": 4606,
+          "cost": 0.0070042,
+          "input_tokens": 5404,
+          "output_tokens": 84,
+          "total_tokens": 5488,
           "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -110,23 +110,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_yrtRHcV7fII3HPDzgHaQCp48"
+              "tool_call_id": "call_0gnMiXaBVnUX65KoumeY1bjk"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_80NU5jdlkYFAu6qWXmf5vW1T"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Pu9Y4PV0q8N5g7BgK9xx6jGi"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773715536.0770702,
+          "timestamp": 1774819547.6767342,
           "model": "gpt-5.3-codex",
-          "cost": 0.002408,
-          "input_tokens": 4704,
+          "cost": 0.00252805,
+          "input_tokens": 5579,
           "output_tokens": 88,
-          "total_tokens": 4792,
-          "cached_tokens": 4480,
+          "total_tokens": 5667,
+          "cached_tokens": 5376,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,23 +135,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_eSkVkCmpfuMQkZIrtayhrU0j"
+              "tool_call_id": "call_lLjzEitLzYLU99MZ6fXNJm41"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_FlqgUUxTU8buNz2dxOL151V2"
+              "tool_call_id": "call_3LZLshcC80jxjdHTCrAGWai9"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773715543.266641,
+          "timestamp": 1774819551.9471316,
           "model": "gpt-5.3-codex",
-          "cost": 0.005753649999999999,
-          "input_tokens": 7171,
+          "cost": 0.0058737,
+          "input_tokens": 8046,
           "output_tokens": 33,
-          "total_tokens": 7204,
-          "cached_tokens": 4608,
+          "total_tokens": 8079,
+          "cached_tokens": 5504,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +160,19 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ne0in2aht32YNPCduFVu8IGg"
+              "tool_call_id": "call_EX7M8MQj8B7FZrLYSYqtG5Rf"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773715553.755012,
+          "timestamp": 1774819561.2186463,
           "model": "gpt-5.3-codex",
-          "cost": 0.01823325,
-          "input_tokens": 9379,
-          "output_tokens": 922,
-          "total_tokens": 10301,
-          "cached_tokens": 7040,
+          "cost": 0.01909355,
+          "input_tokens": 10253,
+          "output_tokens": 975,
+          "total_tokens": 11228,
+          "cached_tokens": 7936,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,19 +181,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_SN7etkg3Js3xCEE0zZowINiO"
+              "tool_call_id": "call_1MMhJhpvKwQ52duN23PH8Xu5"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773715555.966427,
+          "timestamp": 1774819562.856754,
           "model": "gpt-5.3-codex",
-          "cost": 0.00308735,
-          "input_tokens": 10345,
+          "cost": 0.0030968000000000002,
+          "input_tokens": 11272,
           "output_tokens": 65,
-          "total_tokens": 10410,
-          "cached_tokens": 10112,
+          "total_tokens": 11337,
+          "cached_tokens": 11136,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -202,7 +202,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Md4y6Ke2qsVrpNwNgTT7bcRh"
+              "tool_call_id": "call_P7iQ3O8bjShypdk3PuVDv67s"
             }
           ],
           "finish_reason": "tool_calls"
@@ -210,9 +210,9 @@
       ]
     },
     "total": {
-      "total_cost": 0.05744199999999999,
-      "total_input_tokens": 49976,
-      "total_output_tokens": 1528,
+      "total_cost": 0.06549864999999999,
+      "total_input_tokens": 54575,
+      "total_output_tokens": 1615,
       "total_llm_calls": 7
     }
   },
@@ -227,12 +227,25 @@
         "tool_name": "read_definition",
         "args": [
           "concat_hash_string",
+          "src/lib/protocols/ssh.c",
+          1,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1851834.667416742,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: ndpi/src/lib/protocols/ssh.c, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "concat_hash_string",
           "ndpi/src/lib/protocols/ssh.c",
           1,
           true
         ],
         "kwargs": {},
-        "timestamp": 747830.455809248,
+        "timestamp": 1851839.266089016,
         "success": true,
         "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n96 static u_int16_t concat_hash_string(struct ndpi_packet_struct *packet,, extra=None))"
       }
@@ -245,18 +258,7 @@
           99
         ],
         "kwargs": {},
-        "timestamp": 747821.742676232,
-        "success": true,
-        "result_summary": "Err(CRSError(path 'src/lib/protocols/ssh.c' does not exist in directory tree. Similar paths: ndpi/src/lib/protocols/ssh.c, extra=None))"
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "src/lib/protocols/ssh.c",
-          310
-        ],
-        "kwargs": {},
-        "timestamp": 747821.742807382,
+        "timestamp": 1851830.065664781,
         "success": true,
         "result_summary": "Err(CRSError(path 'src/lib/protocols/ssh.c' does not exist in directory tree. Similar paths: ndpi/src/lib/protocols/ssh.c, extra=None))"
       },
@@ -267,7 +269,7 @@
           99
         ],
         "kwargs": {},
-        "timestamp": 747824.654025364,
+        "timestamp": 1851836.253886063,
         "success": true,
         "result_summary": "Ok({'contents': '  1 /*\\n  2  * ssh.c\\n  3  *\\n  4  * Copyright (C) 2009-2011 by ipoque GmbH\\n  5  * Copyright (C) 2011-20 - ntop.org\\n  6  *\\n  7  * This file is part of nDPI, an open source deep pac..."
       },
@@ -275,12 +277,12 @@
         "tool_name": "read_source",
         "args": [
           "ndpi/src/lib/protocols/ssh.c",
-          200
+          201
         ],
         "kwargs": {},
-        "timestamp": 747831.841545786,
+        "timestamp": 1851840.522580593,
         "success": true,
-        "result_summary": "Ok({'contents': '101 \\n102   /* -1 for \\';\\' */\\n103   if((offset >= packet->payload_packet_len) || (len >= packet->payload_packet_len-offset-1))\\n104     goto invalid_payload;\\n105 \\n106   /* ssh.kex..."
+        "result_summary": "Ok({'contents': '102   /* -1 for \\';\\' */\\n103   if((offset >= packet->payload_packet_len) || (len >= packet->payload_packet_len-offset-1))\\n104     goto invalid_payload;\\n105 \\n106   /* ssh.kex_algor..."
       }
     ],
     "find_references": [],

@@ -1,5 +1,5 @@
 {
-  "vuln_id": 49,
+  "vuln_id": 327,
   "crash_result": {
     "output": "==640==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x61a000000f60 at pc 0x0000010130c3 bp 0x7fff46355870 sp 0x7fff46355868\nREAD of size 4 at 0x61a000000f60 thread T0\nSCARINESS: 27 (4-byte-read-heap-buffer-overflow-far-from-bounds)\n    #0 0x10130c2 in Visit /src/arrow/cpp/src/arrow/array/validate.cc:380:32\n    #1 0x10130c2 in arrow::Status arrow::VisitArrayInline<arrow::internal::(anonymous namespace)::ValidateArrayDataVisitor>(arrow::Array const&, arrow::internal::(anonymous namespa",
     "stack": "#0 0x10130c2 in Visit arrow/cpp/src/arrow/array/validate.cc:380:32\n#1 0x10130c2 in arrow::Status arrow::VisitArrayInline<arrow::internal::(anonymous namespace)::ValidateArrayDataVisitor>(arrow::Array const&, arrow::internal::(anonymous namespace)::ValidateArrayDataVisitor*) arrow/cpp/src/arrow/visitor_inline.h:110:5\n#2 0x1006708 in arrow::internal::ValidateArrayData(arrow::Array const&) arrow/cpp/src/arrow/array/validate.cc:467:10\n#3 0x709a63 in arrow::RecordBatch::ValidateFull() const arrow/cpp",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "Visit",
     "file": "arrow/cpp/src/arrow/array/validate.cc",
-    "description": "In ValidateArrayDataVisitor::Visit(const UnionArray&), dense-union validation dereferences offsets[i] without first verifying that the union has a valid offsets buffer for the declared array length. For malformed IPC input, a UnionArray can be constructed with inconsistent/missing/truncated offset data, so reading raw_value_offsets()[i] causes an out-of-bounds heap read (ASan crash at validate.cc:380).",
-    "conditions": "The arrow-ipc-stream-fuzz harness calls ipc::internal::FuzzIpcStream(), which opens attacker-controlled IPC stream bytes and reads RecordBatches, then calls RecordBatch::ValidateFull() -> internal::ValidateArrayData() -> ValidateArrayDataVisitor::Visit(UnionArray). The PoV must produce a dense UnionArray with non-null elements and an invalid/undersized offsets buffer relative to array.length(), so the loop over i reads offsets[i] past the buffer."
+    "description": "Root cause is missing null-check for dense UnionArray value offsets buffer in ValidateArrayDataVisitor::Visit(const UnionArray&). In the dense-union branch it unconditionally does `const int32_t* offsets = array.raw_value_offsets();` then reads `offsets[i]` for each non-null slot. If a malformed IPC message constructs a dense union array with length > 0 but without a valid offsets buffer, `raw_value_offsets()` is null/invalid and ValidateFull performs an out-of-bounds read (ASan at validate.cc:380).",
+    "conditions": "Trigger via IPC stream fuzz input that decodes to a RecordBatch containing a DENSE UnionArray with non-null elements and inconsistent/missing offsets buffer metadata. Data flow: stream_fuzz -> ipc::internal::FuzzIpcStream -> RecordBatchStreamReader::Open/ReadNext (accepts malformed union buffers) -> RecordBatch::ValidateFull -> internal::ValidateArrayData -> ValidateArrayDataVisitor::Visit(UnionArray), where offsets are dereferenced without first validating presence/size of the offsets buffer."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.02863595,
-      "total_input_tokens": 15797,
-      "total_output_tokens": 330,
+      "total_cost": 0.02943395,
+      "total_input_tokens": 15973,
+      "total_output_tokens": 365,
       "total_cached_tokens": 2304,
       "llm_calls": [
         {
-          "timestamp": 1773369492.6763904,
+          "timestamp": 1774815552.0917096,
           "model": "gpt-5.3-codex",
-          "cost": 0.00948885,
-          "input_tokens": 5571,
+          "cost": 0.00964285,
+          "input_tokens": 5659,
           "output_tokens": 111,
-          "total_tokens": 5682,
+          "total_tokens": 5770,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,26 +51,26 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_lUnUz9sfk25I3Zq0z7dKHMIt"
+              "tool_call_id": "call_FWYiVqRX3k9Y3lKcF84Qr3Km"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_81uPFm7d4j49jrLTqSgCV9H3"
+              "tool_call_id": "call_ktH545o8g6oEv8c3DiWcDehq"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_EoBaPhwvzzzZOQ3pRGnBdT5h"
+              "tool_call_id": "call_GnKj37e4djfphtaPzR4xQ8te"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773369504.2624357,
+          "timestamp": 1774815557.5713248,
           "model": "gpt-5.3-codex",
-          "cost": 0.0191471,
-          "input_tokens": 10226,
-          "output_tokens": 219,
-          "total_tokens": 10445,
+          "cost": 0.0197911,
+          "input_tokens": 10314,
+          "output_tokens": 254,
+          "total_tokens": 10568,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -80,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_VnY2oPsFJcqlYUpFm6XbD4nK"
+              "tool_call_id": "call_NCItUNyDowlHMPXrYbpzp3QP"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,19 +88,19 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 3,
-      "total_cost": 0.0199605,
-      "total_input_tokens": 23118,
-      "total_output_tokens": 336,
-      "total_cached_tokens": 16000,
+      "total_llm_calls": 5,
+      "total_cost": 0.02633435,
+      "total_input_tokens": 43493,
+      "total_output_tokens": 462,
+      "total_cached_tokens": 35712,
       "llm_calls": [
         {
-          "timestamp": 1773369506.2533963,
+          "timestamp": 1774815559.2386186,
           "model": "gpt-5.3-codex",
-          "cost": 0.00904645,
-          "input_tokens": 5963,
-          "output_tokens": 88,
-          "total_tokens": 6051,
+          "cost": 0.01045345,
+          "input_tokens": 6775,
+          "output_tokens": 87,
+          "total_tokens": 6862,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -110,23 +110,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_gOD23M7qAZbtqC08yFoxSWhs"
+              "tool_call_id": "call_H7eSM3NTo4Jtfv8aMQZPE22Q"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_DcMILqZPNXcxBkoBcYQEPj7K"
+              "tool_name": "find_references",
+              "tool_call_id": "call_nsgnIoVfvLBaQJQJHWwtyXRc"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773369627.3849373,
+          "timestamp": 1774815683.298172,
           "model": "gpt-5.3-codex",
-          "cost": 0.0079289,
-          "input_tokens": 8470,
+          "cost": 0.0072072,
+          "input_tokens": 8864,
           "output_tokens": 170,
-          "total_tokens": 8640,
-          "cached_tokens": 5888,
+          "total_tokens": 9034,
+          "cached_tokens": 6784,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,19 +135,61 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_SKWAMkQWnej2ZSkn6T1Xxc12"
+              "tool_call_id": "call_sXgCxYp8oeRsBGYvbkJTHMzn"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773369629.511643,
+          "timestamp": 1774815685.610635,
           "model": "gpt-5.3-codex",
-          "cost": 0.0029851499999999998,
-          "input_tokens": 8685,
-          "output_tokens": 78,
-          "total_tokens": 8763,
-          "cached_tokens": 8448,
+          "cost": 0.00412825,
+          "input_tokens": 9079,
+          "output_tokens": 168,
+          "total_tokens": 9247,
+          "cached_tokens": 8960,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_x2Bov444Ji1SgSAMxiHHW3Ax"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774815686.6262977,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00221865,
+          "input_tokens": 9335,
+          "output_tokens": 14,
+          "total_tokens": 9349,
+          "cached_tokens": 9088,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_izxWvPSntn49o6aKQKej9Wsv"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774815809.1116204,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0023268000000000004,
+          "input_tokens": 9440,
+          "output_tokens": 23,
+          "total_tokens": 9463,
+          "cached_tokens": 9216,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,7 +198,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_jX7jOQW8RpMWGKr7vW9Dr4Wq"
+              "tool_call_id": "call_mR5Ijg5uXDcSxfYF0dLbxtTY"
             }
           ],
           "finish_reason": "tool_calls"
@@ -164,33 +206,29 @@
       ]
     },
     "total": {
-      "total_cost": 0.04859645,
-      "total_input_tokens": 38915,
-      "total_output_tokens": 666,
-      "total_llm_calls": 5
+      "total_cost": 0.0557683,
+      "total_input_tokens": 59466,
+      "total_output_tokens": 827,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
-    "success": false,
-    "failure_reason": "the agent did not produce a result"
+    "success": true,
+    "patch": "--- a/arrow/cpp/src/arrow/array/validate.cc\n+++ b/arrow/cpp/src/arrow/array/validate.cc\n@@ -372,6 +372,12 @@\n \n       // Check offsets\n       const int32_t* offsets = array.raw_value_offsets();\n+      if (offsets == nullptr) {\n+        if (array.length() != 0) {\n+          return Status::Invalid(\"non-empty dense union array but value_offsets is null\");\n+        }\n+        return Status::OK();\n+      }\n       for (int64_t i = 0; i < array.length(); ++i) {\n         if (array.IsNull(i)) {\n           continue;\n",
+    "build_artifacts_count": 1,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "Visit",
-          "arrow/cpp/src/arrow/array/validate.cc",
-          340,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 401913.254779921,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n 33   Status Visit(const NullArray& array) {\n 39   Status Visit(const PrimitiveArray& array) {\n 52   Status ..."
-      }
-    ],
+    "read_definition": [],
     "read_source": [
       {
         "tool_name": "read_source",
@@ -199,14 +237,48 @@
           380
         ],
         "kwargs": {},
-        "timestamp": 401795.020833181,
+        "timestamp": 1847847.815781225,
         "success": true,
         "result_summary": "Ok({'contents': '281       return Status::Invalid(\"Expected \", type.num_children(),\\n282                              \" child arrays in array \"\\n283                              \"of type \",\\n284      ..."
       }
     ],
-    "find_references": [],
-    "apply_patch": [],
-    "test_patch": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "raw_value_offsets",
+          "arrow/cpp/src/arrow/array/validate.cc",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1847969.428977629,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='arrow/cpp/src/arrow/array/validate.cc', refs=[FileReference(line=374, content='      const int32_t* offsets = array.raw_value_offsets();', enclosing_definition='Visit')])..."
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "cpp/src/arrow/array/validate.cc",
+          "@@ -371,6 +371,12 @@ struct ValidateArrayDataVisitor {\n       }\n \n       // Check offsets\n       const int32_t* offsets = array.raw_value_offsets();\n+      if (offsets == nullptr) {\n+        if (array.length() != 0) {\n+          return Status::Invalid(\"non-empty dense union array but value_offsets is null\");\n+        }\n+        return Status::OK();\n+      }\n       for (int64_t i = 0; i < array.length(); ++i) {\n         if (array.IsNull(i)) {\n           continue;\n"
+        ],
+        "kwargs": {},
+        "timestamp": 1847974.204780197,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1848096.622134685,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
     "undo_last_patch": [],
     "list_current_edits": []
   }

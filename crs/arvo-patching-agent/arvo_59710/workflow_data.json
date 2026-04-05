@@ -1,5 +1,5 @@
 {
-  "vuln_id": 181,
+  "vuln_id": 501,
   "crash_result": {
     "output": "==2967==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x606000006e36 at pc 0x000000622d88 bp 0x7ffe64684830 sp 0x7ffe64684828\nREAD of size 1 at 0x606000006e36 thread T0\nSCARINESS: 12 (1-byte-read-heap-buffer-overflow)\n    #0 0x622d87 in pcpp::IDnsResource::decodeName(char const*, char*, int) /src/PcapPlusPlus/Packet++/src/DnsResource.cpp\n    #1 0x622219 in pcpp::IDnsResource::IDnsResource(pcpp::DnsLayer*, unsigned long) /src/PcapPlusPlus/Packet++/src/DnsResource.cpp:16:17\n    #2 0x615",
     "stack": "#0 0x622d87 in pcpp::IDnsResource::decodeName(char const*, char*, int) PcapPlusPlus/Packet++/src/DnsResource.cpp\n#1 0x622219 in pcpp::IDnsResource::IDnsResource(pcpp::DnsLayer*, unsigned long) PcapPlusPlus/Packet++/src/DnsResource.cpp:16:17\n#2 0x615287 in DnsQuery PcapPlusPlus/Packet++/header/DnsResource.h:133:56\n#3 0x615287 in pcpp::DnsLayer::parseResources() PcapPlusPlus/Packet++/src/DnsLayer.cpp:190:19\n#4 0x614596 in init PcapPlusPlus/Packet++/src/DnsLayer.cpp:86:3\n#5 0x614596 in pcpp::DnsLay",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "IDnsResource::decodeName",
     "file": "PcapPlusPlus/Packet++/src/DnsResource.cpp",
-    "description": "Heap out-of-bounds read in DNS name decoding due to missing bounds check before reading the second byte of a compression pointer. In IDnsResource::decodeName(), `wordLength = encodedName[0]` is read safely, but when `(wordLength & 0xc0) == 0xc0`, the code computes `offsetInLayer` using `encodedName[1]` (line with `(0xFF & encodedName[1])`) after only checking `curOffsetInLayer + 2 > m_DataLen`. This check is vulnerable to size_t overflow when `curOffsetInLayer` is near SIZE_MAX (possible because pointer subtraction uses an out-of-range `encodedName` derived from malformed resource offsets), so the guard can be bypassed and `encodedName[1]` is read past packet end, causing the ASan 1-byte heap-buffer-overflow.",
-    "conditions": "FuzzTarget feeds a malformed pcap packet that is parsed as UDP->DNS. In DnsLayer::parseResources(), attacker-controlled DNS counts/structure cause construction of a DnsQuery at an offset that can be at/near the end of the DNS buffer. IDnsResource constructor calls decodeName() on that offset. If the first byte has compression-pointer bits set (0xC0) but there is no second byte in bounds, decodeName still reads `encodedName[1]` due to the overflow-prone `curOffsetInLayer + 2 > m_DataLen` check, triggering OOB read."
+    "description": "Heap OOB read is caused by signedness misuse when parsing DNS label length. `wordLength` is read as `uint8_t`, but bounds checks use `curOffsetInLayer + wordLength + 1` where `wordLength` is promoted as signed `char` from attacker-controlled bytes. For bytes >=0x80 that are not compression pointers, `wordLength` can become negative during arithmetic, bypassing the length check, and then `encodedName += wordLength + 1` moves the pointer incorrectly (including backwards/outside packet). Subsequent `wordLength = encodedName[0]` reads past allocation. Crash happens in `decodeName`, and constructor `IDnsResource::IDnsResource` calls it without additional validation.",
+    "conditions": "FuzzTarget feeds a malformed DNS packet (via UDP->DnsLayer parsing). During `DnsLayer::parseResources`, a `DnsQuery`/`IDnsResource` is constructed at an attacker-controlled offset and `decodeName(getRawData(), ...)` is invoked. If the encoded DNS name contains a non-pointer length byte with high bit set (e.g., >=0x80 but not `0xC0` pointer form), the invalid arithmetic lets checks pass and advances `encodedName` out of bounds, leading to 1-byte heap-buffer-overflow read."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.02994705,
-      "total_input_tokens": 18631,
-      "total_output_tokens": 631,
-      "total_cached_tokens": 7296,
+      "total_cost": 0.028521849999999998,
+      "total_input_tokens": 21399,
+      "total_output_tokens": 572,
+      "total_cached_tokens": 10752,
       "llm_calls": [
         {
-          "timestamp": 1773516385.6459346,
+          "timestamp": 1774878609.984712,
           "model": "gpt-5.3-codex",
-          "cost": 0.0072303,
-          "input_tokens": 4362,
+          "cost": 0.0073843,
+          "input_tokens": 4450,
           "output_tokens": 144,
-          "total_tokens": 4506,
+          "total_tokens": 4594,
           "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_kUzgfjHPb3WrxuJnzYsYJN9K"
+              "tool_call_id": "call_aR2yFA6QYfcn8SJmIhcleJ9v"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_mIbougzSweDaKfnwyMJNm7Uw"
+              "tool_call_id": "call_M7GB3bIVLawhXX6iGv3u1GdW"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_rvwSmq8fwVfWlFwrJU8wByoJ"
+              "tool_call_id": "call_sG2LjAAzMWunj7XO1mx9evIo"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516401.440651,
+          "timestamp": 1774878639.2644718,
           "model": "gpt-5.3-codex",
-          "cost": 0.008158849999999999,
-          "input_tokens": 4627,
-          "output_tokens": 134,
-          "total_tokens": 4761,
-          "cached_tokens": 1152,
+          "cost": 0.0028192499999999997,
+          "input_tokens": 4715,
+          "output_tokens": 116,
+          "total_tokens": 4831,
+          "cached_tokens": 4480,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -79,28 +79,28 @@
           "tool_call_count": 3,
           "tool_calls": [
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_2kIPcdA2e1iQlFmIk1m3Q31J"
+              "tool_name": "read_source",
+              "tool_call_id": "call_1fwHi7QHp36XdTHBoBjfYVc2"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_CauOjzPfQb7IA88t7tmSjTGF"
+              "tool_call_id": "call_7OMHA1UasJfBTJ8SEoH3s2Pg"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_ppEl5CrF8MDd8M4R0sPIKQZ6"
+              "tool_name": "read_source",
+              "tool_call_id": "call_9c3GytJeG5SrlWjKDpGOubzH"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516410.5360997,
+          "timestamp": 1774878645.6262114,
           "model": "gpt-5.3-codex",
-          "cost": 0.0145579,
-          "input_tokens": 9642,
-          "output_tokens": 353,
-          "total_tokens": 9995,
-          "cached_tokens": 4608,
+          "cost": 0.0183183,
+          "input_tokens": 12234,
+          "output_tokens": 312,
+          "total_tokens": 12546,
+          "cached_tokens": 4736,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -109,7 +109,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_299IhGIMckybyeKYs0bta8dY"
+              "tool_call_id": "call_JbeokQhKiuEkDsAEkq0gWVMn"
             }
           ],
           "finish_reason": "tool_calls"
@@ -117,45 +117,62 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 3,
-      "total_cost": 0.0259203,
-      "total_input_tokens": 23434,
-      "total_output_tokens": 751,
-      "total_cached_tokens": 16256,
+      "total_llm_calls": 6,
+      "total_cost": 0.0312165,
+      "total_input_tokens": 46358,
+      "total_output_tokens": 899,
+      "total_cached_tokens": 39680,
       "llm_calls": [
         {
-          "timestamp": 1773516412.0092926,
+          "timestamp": 1774878646.9977233,
           "model": "gpt-5.3-codex",
-          "cost": 0.00508795,
-          "input_tokens": 4309,
-          "output_tokens": 84,
-          "total_tokens": 4393,
+          "cost": 0.0068169500000000004,
+          "input_tokens": 5609,
+          "output_tokens": 45,
+          "total_tokens": 5654,
           "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_PKsmGpwOHtowRrThUU5hsLoQ"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_KSLQzp2Sv05v8gTJXob9ACOo"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_sfrbssTRnoHrv2t062EPeexN"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516422.905093,
+          "timestamp": 1774878654.5019395,
           "model": "gpt-5.3-codex",
-          "cost": 0.01796795,
-          "input_tokens": 9237,
-          "output_tokens": 604,
-          "total_tokens": 9841,
-          "cached_tokens": 4224,
+          "cost": 0.0018311999999999998,
+          "input_tokens": 5712,
+          "output_tokens": 36,
+          "total_tokens": 5748,
+          "cached_tokens": 5504,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_ohMnjKf9qO5sIKhXbV0K4Wew"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774878663.3725028,
+          "model": "gpt-5.3-codex",
+          "cost": 0.010920349999999999,
+          "input_tokens": 8165,
+          "output_tokens": 393,
+          "total_tokens": 8558,
+          "cached_tokens": 5632,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -164,19 +181,61 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_VeNlHiAU8Ys2oUJj91sesFC2"
+              "tool_call_id": "call_U1gTIzG8XRmACiUkFILo7w71"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773516424.6265018,
+          "timestamp": 1774878668.2820199,
           "model": "gpt-5.3-codex",
-          "cost": 0.0028644,
-          "input_tokens": 9888,
-          "output_tokens": 63,
-          "total_tokens": 9951,
-          "cached_tokens": 9728,
+          "cost": 0.00718515,
+          "input_tokens": 8605,
+          "output_tokens": 388,
+          "total_tokens": 8993,
+          "cached_tokens": 8448,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_SB3kHDaZEodHnthsPySbKSF5"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774878669.49741,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0021773499999999998,
+          "input_tokens": 9081,
+          "output_tokens": 14,
+          "total_tokens": 9095,
+          "cached_tokens": 8832,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_cs5wtYyUlsZ6VwaZgINtfGud"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774878711.1733208,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0022855,
+          "input_tokens": 9186,
+          "output_tokens": 23,
+          "total_tokens": 9209,
+          "cached_tokens": 8960,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -185,7 +244,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_PUTPx8WqkA78FD2LMYGT7RgY"
+              "tool_call_id": "call_XRilGEPmQWF37bNNzX1rnlcL"
             }
           ],
           "finish_reason": "tool_calls"
@@ -193,46 +252,80 @@
       ]
     },
     "total": {
-      "total_cost": 0.055867349999999996,
-      "total_input_tokens": 42065,
-      "total_output_tokens": 1382,
-      "total_llm_calls": 6
+      "total_cost": 0.059738349999999996,
+      "total_input_tokens": 67757,
+      "total_output_tokens": 1471,
+      "total_llm_calls": 9
     }
   },
   "patch_result": {
-    "success": false,
-    "failure_reason": "the agent did not produce a result"
+    "success": true,
+    "patch": "--- a/Packet++/src/DnsResource.cpp\n+++ b/Packet++/src/DnsResource.cpp\n@@ -65,7 +65,7 @@\n \t\treturn encodedNameLength;\n \t}\n \n-\tuint8_t wordLength = encodedName[0];\n+\tuint8_t wordLength = static_cast<uint8_t>(encodedName[0]);\n \n \t// A string to parse\n \twhile (wordLength != 0)\n@@ -101,6 +101,13 @@\n \t\t}\n \t\telse\n \t\t{\n+\t\t\t// DNS label length must not use reserved high bits unless it's a compression pointer (0xC0)\n+\t\t\tif ((wordLength & 0xc0) != 0)\n+\t\t\t{\n+\t\t\t\tPCPP_LOG_ERROR(\"DNS parsing error: label length contains reserved bits\");\n+\t\t\t\treturn 0;\n+\t\t\t}\n+\n \t\t\t// return if next word would be outside of the DNS layer or overflow the buffer behind resultPtr\n \t\t\tif (curOffsetInLayer + wordLength + 1 > m_DnsLayer->m_DataLen || encodedNameLength + wordLength > 255)\n \t\t\t{\n@@ -148,7 +155,7 @@\n \t\t\t\treturn encodedNameLength;\n \t\t\t}\n \n-\t\t\twordLength = encodedName[0];\n+\t\t\twordLength = static_cast<uint8_t>(encodedName[0]);\n \t\t}\n \t}\n \n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "decodeName",
+          "PcapPlusPlus/Packet++/src/DnsResource.cpp",
+          1,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1910941.452271436,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n52 size_t IDnsResource::decodeName(const char* encodedName, char* result, int iteration), extra=None))"
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
           "PcapPlusPlus/Packet++/src/DnsResource.cpp",
-          1
+          52
         ],
         "kwargs": {},
-        "timestamp": 548700.585010243,
+        "timestamp": 1910943.078061733,
         "success": true,
         "result_summary": "Ok({'contents': '  1 #define LOG_MODULE PacketLogModuleDnsLayer\\n  2 \\n  3 #include \"DnsResource.h\"\\n  4 #include \"Logger.h\"\\n  5 #include <sstream>\\n  6 #include <string.h>\\n  7 #include \"EndianPorta..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "PcapPlusPlus/Packet++/src/DnsResource.cpp",
-          120
-        ],
-        "kwargs": {},
-        "timestamp": 548700.585989449,
-        "success": true,
-        "result_summary": "Ok({'contents': ' 21 IDnsResource::IDnsResource(uint8_t* emptyRawData)\\n 22 \\t: m_DnsLayer(nullptr), m_OffsetInLayer(0), m_NextResource(nullptr), m_DecodedName(\"\"), m_NameLength(0), m_ExternalRawData(..."
       }
     ],
     "find_references": [],
-    "apply_patch": [],
-    "test_patch": [],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "Packet++/src/DnsResource.cpp",
+          "@@ -68,7 +68,7 @@ size_t IDnsResource::decodeName(const char* encodedName, char* result, int iter\n-\tuint8_t wordLength = encodedName[0];\n+\tuint8_t wordLength = static_cast<uint8_t>(encodedName[0]);\n@@ -103,6 +103,13 @@ size_t IDnsResource::decodeName(const char* encodedName, char* result, int iter\n \t\telse\n \t\t{\n+\t\t\t// DNS label length must not use reserved high bits unless it's a compression pointer (0xC0)\n+\t\t\tif ((wordLength & 0xc0) != 0)\n+\t\t\t{\n+\t\t\t\tPCPP_LOG_ERROR(\"DNS parsing error: label length contains reserved bits\");\n+\t\t\t\treturn 0;\n+\t\t\t}\n+\n \t\t\t// return if next word would be outside of the DNS layer or overflow the buffer behind resultPtr\n \t\t\tif (curOffsetInLayer + wordLength + 1 > m_DnsLayer->m_DataLen || encodedNameLength + wordLength > 255)\n \t\t\t{\n@@ -148,7 +155,7 @@ size_t IDnsResource::decodeName(const char* encodedName, char* result, int iter\n \t\t\t\treturn encodedNameLength;\n \t\t\t}\n \n-\t\t\twordLength = encodedName[0];\n+\t\t\twordLength = static_cast<uint8_t>(encodedName[0]);\n \t\t}\n \t}\n"
+        ],
+        "kwargs": {},
+        "timestamp": 1910956.88145872,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1910996.594020454,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
     "undo_last_patch": [],
     "list_current_edits": []
   }

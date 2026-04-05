@@ -1,5 +1,5 @@
 {
-  "vuln_id": 167,
+  "vuln_id": 484,
   "crash_result": {
     "output": "==5396==ERROR: AddressSanitizer: global-buffer-overflow on address 0x085dd22e at pc 0x08190768 bp 0xfff030e8 sp 0xfff02cd0\nREAD of size 1 at 0x085dd22e thread T0\nSCARINESS: 12 (1-byte-read-global-buffer-overflow)\n    #0 0x8190767 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n    #1 0x831464f in xmlStrndup /src/libxml2/xmlstring.c:53:5\n    #2 0x835eda8 in htmlParseSystemLiteral /src/libxml2/HTMLparser.c:3015:19\n    #3 0x83406b7 in htmlParseExtern",
     "stack": "#0 0x8190767 in __asan_memcpy llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n#1 0x831464f in xmlStrndup libxml2/xmlstring.c:53:5\n#2 0x835eda8 in htmlParseSystemLiteral libxml2/HTMLparser.c:3015:19\n#3 0x83406b7 in htmlParseExternalID libxml2/HTMLparser.c:3327:12\n#4 0x83406b7 in htmlParseDocTypeDecl libxml2/HTMLparser.c:3703:11\n#5 0x83482a9 in htmlParseTryOrFinish libxml2/HTMLparser.c:6015:25\n#6 0x83482a9 in htmlParseChunk libxml2/HTMLparser.c:6312:5\n#7 0x81d4c36 in LLV",
@@ -24,25 +24,54 @@
   "analyzed_vuln": {
     "function": "htmlParseSystemLiteral",
     "file": "libxml2/HTMLparser.c",
-    "description": "`htmlParseSystemLiteral` computes `startPosition = CUR_PTR - BASE_PTR` and later duplicates `len` bytes from `BASE_PTR + startPosition` via `xmlStrndup`. The parser advances with `NEXT` while scanning the literal, but this function only checks `CUR_PTR < BASE_PTR` once before the loop and never revalidates pointer bounds before `xmlStrndup`. With malformed/non-UTF8 HTML input that perturbs parser cursor state during DOCTYPE external ID parsing, `BASE_PTR + startPosition` can become an invalid global address and `xmlStrndup` performs an out-of-bounds read (ASan global-buffer-overflow in memcpy).",
-    "conditions": "Triggered in the `html` fuzz harness (`fuzz/html.c`) when parsing a crafted document containing a `<!DOCTYPE ... PUBLIC ... \"...\">`/system literal sequence. Data flows: `LLVMFuzzerTestOneInput` -> `htmlParseChunk` -> `htmlParseTryOrFinish` -> `htmlParseDocTypeDecl` -> `htmlParseExternalID` -> `htmlParseSystemLiteral`. The input must reach `htmlParseSystemLiteral` with a quoted system literal and malformed byte patterns that desynchronize parser cursor/base assumptions, so `xmlStrndup(BASE_PTR+startPosition, len)` reads outside valid input memory."
+    "description": "htmlParseSystemLiteral computes startPosition as CUR_PTR - BASE_PTR before scanning the quoted literal, then increments len while advancing with NEXT. In push-parsing/error paths, pointer movement can desynchronize such that BASE_PTR+startPosition no longer points to a valid in-buffer region for the recorded len. The function then calls xmlStrndup(BASE_PTR+startPosition, len) without revalidating that [start, start+len) is still within current input bounds, causing an out-of-bounds read in memcpy inside xmlStrndup.",
+    "conditions": "Triggered via the html fuzz harness push parser (htmlParseChunk) with crafted malformed/invalid-byte HTML including a DOCTYPE external ID (SYSTEM/PUBLIC ... \"...\"). The parser enters htmlParseDocTypeDecl -> htmlParseExternalID -> htmlParseSystemLiteral; after consuming malformed bytes and quotes across parser buffer state, err remains 0 and the final xmlStrndup uses stale/invalid base-relative offsets, leading to a global-buffer-overflow read."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 4,
-      "total_cost": 0.024415299999999997,
-      "total_input_tokens": 19022,
-      "total_output_tokens": 691,
-      "total_cached_tokens": 11776,
+      "total_cost": 0.029786049999999998,
+      "total_input_tokens": 27691,
+      "total_output_tokens": 567,
+      "total_cached_tokens": 16896,
       "llm_calls": [
         {
-          "timestamp": 1773465538.6405215,
+          "timestamp": 1774875598.4550016,
           "model": "gpt-5.3-codex",
           "cost": 0.006442799999999999,
-          "input_tokens": 4096,
+          "input_tokens": 4184,
+          "output_tokens": 110,
+          "total_tokens": 4294,
+          "cached_tokens": 1536,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_9sAZuJdM89vGBa5bDAJ2fEDB"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_JvVmqwz48yUlHB0fxz3FpNK8"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_ERCdn2qhOhIa1zlQSzPnchlG"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774875610.138239,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0027604500000000002,
+          "input_tokens": 4411,
           "output_tokens": 121,
-          "total_tokens": 4217,
-          "cached_tokens": 1536,
+          "total_tokens": 4532,
+          "cached_tokens": 4224,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,27 +80,27 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_ZC542cMSqZx0U0NiuXBWJKBu"
+              "tool_call_id": "call_8YhIYuVKIr3eZFd4E6tR8haH"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_zRMVBh9O7M3fBNZbcRjMKLLQ"
+              "tool_call_id": "call_ChTSwBha7ukHOa4gdbLAcQCE"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_CCwpKesqm3xx9TqH2J64Dksy"
+              "tool_name": "read_source",
+              "tool_call_id": "call_HKLKP2trHmaZUx6BGbMnKaTe"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773465543.6112921,
+          "timestamp": 1774875620.4500911,
           "model": "gpt-5.3-codex",
-          "cost": 0.007009799999999999,
-          "input_tokens": 4332,
-          "output_tokens": 132,
-          "total_tokens": 4464,
-          "cached_tokens": 1536,
+          "cost": 0.006498100000000001,
+          "input_tokens": 6846,
+          "output_tokens": 98,
+          "total_tokens": 6944,
+          "cached_tokens": 4352,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -79,57 +108,28 @@
           "tool_call_count": 3,
           "tool_calls": [
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_vyQM2JT0d1s42MnDUxqfkKIT"
+              "tool_name": "read_source",
+              "tool_call_id": "call_UGH9GBIw0R4hZIW0yNa656yv"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_50ZcX7iluOrBIJvRSEtTvmnF"
+              "tool_name": "read_source",
+              "tool_call_id": "call_yMdKrHBTeK3wL1SNdSnai2yd"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_IBjlN6uc3iaLP69TFCTcqpul"
+              "tool_name": "read_source",
+              "tool_call_id": "call_ydE6NAQ7HnyArosSwbRYEUog"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773465550.6801796,
+          "timestamp": 1774875625.4581795,
           "model": "gpt-5.3-codex",
-          "cost": 0.00347655,
-          "input_tokens": 4617,
-          "output_tokens": 132,
-          "total_tokens": 4749,
-          "cached_tokens": 4096,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 3,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_KeFhDlmnPycJfBmUcFXFyeWm"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_EvHfzFYbflIyfTt6nsgqqOoB"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_OOUIoEatRqyYM5uTiWPg592s"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773465559.9929204,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00748615,
-          "input_tokens": 5977,
-          "output_tokens": 306,
-          "total_tokens": 6283,
-          "cached_tokens": 4608,
+          "cost": 0.014084699999999999,
+          "input_tokens": 12250,
+          "output_tokens": 238,
+          "total_tokens": 12488,
+          "cached_tokens": 6784,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -138,7 +138,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_nAfdhTilY88p7O8poYeModcQ"
+              "tool_call_id": "call_YGq2pKakcDZJLQAjl7z6UYWJ"
             }
           ],
           "finish_reason": "tool_calls"
@@ -147,19 +147,19 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.02207765,
-      "total_input_tokens": 32347,
-      "total_output_tokens": 284,
-      "total_cached_tokens": 24448,
+      "total_cost": 0.022778,
+      "total_input_tokens": 28296,
+      "total_output_tokens": 322,
+      "total_cached_tokens": 19840,
       "llm_calls": [
         {
-          "timestamp": 1773465561.4416835,
+          "timestamp": 1774875627.7109857,
           "model": "gpt-5.3-codex",
-          "cost": 0.006055700000000001,
-          "input_tokens": 4366,
-          "output_tokens": 74,
-          "total_tokens": 4440,
-          "cached_tokens": 1664,
+          "cost": 0.00661045,
+          "input_tokens": 5179,
+          "output_tokens": 84,
+          "total_tokens": 5263,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -167,24 +167,24 @@
           "tool_call_count": 2,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_0CxIc5aI8rqKitb3bVYK0G2H"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_MmlySIyRouiSz1SWYXx4v028"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_BPrQxyo8oNf7dEOJJKVur9XX"
+              "tool_call_id": "call_ZEBHitFeNqSffZwi97NH8H6k"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773465564.3343723,
+          "timestamp": 1774875636.014481,
           "model": "gpt-5.3-codex",
-          "cost": 0.0115241,
-          "input_tokens": 9118,
-          "output_tokens": 173,
-          "total_tokens": 9291,
-          "cached_tokens": 4352,
+          "cost": 0.0122717,
+          "input_tokens": 7478,
+          "output_tokens": 201,
+          "total_tokens": 7679,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -193,19 +193,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_5cM1M00nQOVUBKW8QS5SF4Ez"
+              "tool_call_id": "call_NThk4ehf8aXdWnCinvxmM0nO"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773465565.5928087,
+          "timestamp": 1774875637.3666997,
           "model": "gpt-5.3-codex",
-          "cost": 0.00209405,
-          "input_tokens": 9379,
+          "cost": 0.00189385,
+          "input_tokens": 7767,
           "output_tokens": 14,
-          "total_tokens": 9393,
-          "cached_tokens": 9216,
+          "total_tokens": 7781,
+          "cached_tokens": 7552,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -214,19 +214,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_XVbSZUvfAucTmwYhqZuM6yNA"
+              "tool_call_id": "call_HU9F8cYbeP2fNFGsAMfhFIVI"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773465596.1643193,
+          "timestamp": 1774875670.2372096,
           "model": "gpt-5.3-codex",
-          "cost": 0.0024038,
-          "input_tokens": 9484,
+          "cost": 0.002002,
+          "input_tokens": 7872,
           "output_tokens": 23,
-          "total_tokens": 9507,
-          "cached_tokens": 9216,
+          "total_tokens": 7895,
+          "cached_tokens": 7680,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -235,7 +235,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_M1apQxgHC76RO3GDfZdqpTJh"
+              "tool_call_id": "call_gfd2p0jsPQ7kOiD99qytCjqK"
             }
           ],
           "finish_reason": "tool_calls"
@@ -243,15 +243,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.04649295,
-      "total_input_tokens": 51369,
-      "total_output_tokens": 975,
+      "total_cost": 0.05256405,
+      "total_input_tokens": 55987,
+      "total_output_tokens": 889,
       "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/HTMLparser.c\n+++ b/HTMLparser.c\n@@ -3011,8 +3011,13 @@\n                      \"Unfinished SystemLiteral\\n\", NULL, NULL);\n     } else {\n         NEXT;\n-        if (err == 0)\n+        if (err == 0) {\n+            if ((CUR_PTR < BASE_PTR) ||\n+                ((size_t) (CUR_PTR - BASE_PTR) < startPosition) ||\n+                (len > (size_t) (CUR_PTR - BASE_PTR - startPosition)))\n+                return(NULL);\n             ret = xmlStrndup((BASE_PTR+startPosition), len);\n+        }\n     }\n \n     return(ret);\n",
+    "patch": "--- a/HTMLparser.c\n+++ b/HTMLparser.c\n@@ -3011,8 +3011,15 @@\n                      \"Unfinished SystemLiteral\\n\", NULL, NULL);\n     } else {\n         NEXT;\n-        if (err == 0)\n+        if (err == 0) {\n+            if ((CUR_PTR < BASE_PTR) || (startPosition > (size_t)(CUR_PTR - BASE_PTR)) ||\n+                (len > (size_t)(CUR_PTR - BASE_PTR) - startPosition)) {\n+                htmlParseErr(ctxt, XML_ERR_INTERNAL_ERROR,\n+                             \"SystemLiteral buffer range invalid\\n\", NULL, NULL);\n+                return(NULL);\n+            }\n             ret = xmlStrndup((BASE_PTR+startPosition), len);\n+        }\n     }\n \n     return(ret);\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -265,29 +265,32 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "htmlParseSystemLiteral",
+          "libxml2/HTMLparser.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1907921.172967173,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n2981 htmlParseSystemLiteral(htmlParserCtxtPtr ctxt) {, extra=None))"
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
           "libxml2/HTMLparser.c",
-          3327
+          2980
         ],
         "kwargs": {},
-        "timestamp": 497850.019969513,
+        "timestamp": 1907916.289680752,
         "success": true,
-        "result_summary": "Ok({'contents': '3228 \\t    nbchar = 0;\\n3229             SHRINK;\\n3230 \\t}\\n3231 \\tcur = CUR_CHAR(l);\\n3232     }\\n3233     if (ctxt->instate == XML_PARSER_EOF)\\n3234         return;\\n3235     if (nb..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "libxml2/HTMLparser.c",
-          3015
-        ],
-        "kwargs": {},
-        "timestamp": 497850.022450811,
-        "success": true,
-        "result_summary": "Ok({'contents': '2916 \\t        if (str != NULL)\\n2917 \\t\\t    *str = name;\\n2918 \\t    }\\n2919 \\t}\\n2920     }\\n2921     return(ent);\\n2922 }\\n2923 \\n2924 /**\\n2925  * htmlParseAttValue:\\n2926  * @ct..."
+        "result_summary": "Ok({'contents': '2881  * [68] EntityRef ::= \\'&\\' Name \\';\\'\\n2882  *\\n2883  * Returns the associated htmlEntityDescPtr if found, or NULL otherwise,\\n2884  *         if non-NULL *str will have to be f..."
       }
     ],
     "find_references": [],
@@ -296,10 +299,10 @@
         "tool_name": "apply_patch",
         "args": [
           "libxml2/HTMLparser.c",
-          "@@ -3012,7 +3012,12 @@ htmlParseSystemLiteral(htmlParserCtxtPtr ctxt) {\n     } else {\n         NEXT;\n-        if (err == 0)\n+        if (err == 0) {\n+            if ((CUR_PTR < BASE_PTR) ||\n+                ((size_t) (CUR_PTR - BASE_PTR) < startPosition) ||\n+                (len > (size_t) (CUR_PTR - BASE_PTR - startPosition)))\n+                return(NULL);\n             ret = xmlStrndup((BASE_PTR+startPosition), len);\n+        }\n     }\n \n     return(ret);\n"
+          "@@ -3012,7 +3012,14 @@ htmlParseSystemLiteral(htmlParserCtxtPtr ctxt) {\n     } else {\n         NEXT;\n-        if (err == 0)\n+        if (err == 0) {\n+            if ((CUR_PTR < BASE_PTR) || (startPosition > (size_t)(CUR_PTR - BASE_PTR)) ||\n+                (len > (size_t)(CUR_PTR - BASE_PTR) - startPosition)) {\n+                htmlParseErr(ctxt, XML_ERR_INTERNAL_ERROR,\n+                             \"SystemLiteral buffer range invalid\\n\", NULL, NULL);\n+                return(NULL);\n+            }\n             ret = xmlStrndup((BASE_PTR+startPosition), len);\n+        }\n     }\n \n     return(ret);"
         ],
         "kwargs": {},
-        "timestamp": 497852.96045624,
+        "timestamp": 1907924.687200917,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -309,7 +312,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 497883.745034564,
+        "timestamp": 1907957.651392014,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

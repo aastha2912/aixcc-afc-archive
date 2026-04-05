@@ -1,5 +1,5 @@
 {
-  "vuln_id": 220,
+  "vuln_id": 428,
   "crash_result": {
     "output": "==10428==ERROR: AddressSanitizer: heap-buffer-overflow on address 0xe8709807 at pc 0x081d696b bp 0xff8bb738 sp 0xff8bb730\nREAD of size 1 at 0xe8709807 thread T0\nSCARINESS: 22 (1-byte-read-heap-buffer-overflow-far-from-bounds)\n    #0 0x81d696a in MqttDecode_Vbi /src/wolfmqtt/src/mqtt_packet.c:232:23\n    #1 0x81d696a in MqttDecode_Props /src/wolfmqtt/src/mqtt_packet.c:501:15\n    #2 0x81dd8db in MqttDecode_Auth /src/wolfmqtt/src/mqtt_packet.c:1746:23\n    #3 0x81d3cbc in MqttClient_DecodePacket /src",
     "stack": "#0 0x81d696a in MqttDecode_Vbi wolfmqtt/src/mqtt_packet.c:232:23\n#1 0x81d696a in MqttDecode_Props wolfmqtt/src/mqtt_packet.c:501:15\n#2 0x81dd8db in MqttDecode_Auth wolfmqtt/src/mqtt_packet.c:1746:23\n#3 0x81d3cbc in MqttClient_DecodePacket wolfmqtt/src/mqtt_client.c:528:18\n#4 0x81cebbf in MqttClient_WaitType wolfmqtt/src/mqtt_client.c:907:18\n#5 0x81ce16c in MqttClient_Connect wolfmqtt/src/mqtt_client.c:1436:10\n#6 0x81c8b97 in wolfMQTTFuzzer::Initialize() wolfmqtt-fuzzers/fuzzer.cpp:456:9\n#7 0x81c",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "MqttDecode_Props",
     "file": "wolfmqtt/src/mqtt_packet.c",
-    "description": "Heap OOB read is caused by MqttDecode_Props not validating that remaining property bytes (prop_len) and buffer bytes are sufficient before decoding each property identifier/value. It calls MqttDecode_Vbi(buf, ..., buf_len - (buf - pbuf)) even when buf has already advanced beyond pbuf+buf_len due to malformed prior length fields, so the computed length underflows (word32) to a huge value and MqttDecode_Vbi reads from an invalid pointer (crash at mqtt_packet.c:232).",
-    "conditions": "From the fuzzer path (Connect -> WaitType -> DecodePacket -> MqttDecode_Auth), attacker-controlled AUTH packet bytes set a properties length and property contents such that MqttDecode_Auth passes a truncated remaining length into MqttDecode_Props, then inside the property loop buf/propery-length accounting becomes inconsistent (no upfront per-field bounds checks). A crafted property sequence can move buf past the real rx buffer while loop still continues, leading to underflow in (buf_len - (buf - pbuf)) and OOB read in MqttDecode_Vbi."
+    "description": "Heap OOB read is caused by missing bounds checks in property decoding loop. MqttDecode_Props calls MqttDecode_Vbi(buf, ..., buf_len-(buf-pbuf)) for each property identifier, but it does not first ensure there is any data left in the declared property section (prop_len) and does not consistently constrain reads to prop_len. If prior parsing underflows/over-consumes prop_len (word32) or leaves buf at/near end, loop can still attempt another identifier decode and MqttDecode_Vbi dereferences buf (line 232), producing OOB read.",
+    "conditions": "Trigger requires an AUTH packet path (via MqttDecode_Auth) where reason code permits properties and attacker-controlled property length/contents are inconsistent. Fuzzer input supplies malformed property bytes so MqttDecode_Auth passes rx_payload+buf_len/props_len into MqttDecode_Props; inside loop, insufficient remaining bytes for next property identifier are not rejected before MqttDecode_Vbi reads first byte. Thus crafted packet with invalid/truncated properties can drive buf past available heap buffer and crash."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.0222285,
-      "total_input_tokens": 12494,
-      "total_output_tokens": 530,
-      "total_cached_tokens": 4480,
+      "total_cost": 0.020618499999999998,
+      "total_input_tokens": 12758,
+      "total_output_tokens": 526,
+      "total_cached_tokens": 5760,
       "llm_calls": [
         {
-          "timestamp": 1773532162.858909,
+          "timestamp": 1774851791.5065918,
           "model": "gpt-5.3-codex",
-          "cost": 0.0053991,
-          "input_tokens": 3042,
+          "cost": 0.0055531,
+          "input_tokens": 3130,
           "output_tokens": 135,
-          "total_tokens": 3177,
+          "total_tokens": 3265,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_iFK0kApi9F4jdiVccGyoaE0W"
+              "tool_call_id": "call_2zSysCtbyxGppTqTMv3ILyc8"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_WWlT0i6toC7tIAaeryIfhjaH"
+              "tool_call_id": "call_8MUPgzglKhSZscM6tQp13j1E"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_z7K1jBKYGThVyprlcCH5FYDw"
+              "tool_call_id": "call_6tZRkY6K5We5TyaJxsBfhm9d"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532231.756426,
+          "timestamp": 1774851926.5389442,
           "model": "gpt-5.3-codex",
-          "cost": 0.0077525,
-          "input_tokens": 3350,
+          "cost": 0.0060921,
+          "input_tokens": 3438,
           "output_tokens": 135,
-          "total_tokens": 3485,
-          "cached_tokens": 0,
+          "total_tokens": 3573,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,27 +80,27 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_NxJlZflFu8uenYW4GNnSTPkx"
+              "tool_call_id": "call_OBnFzTwjtQv9ZvQHGtY676z6"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_FrPSsl3tfbW8ck01F2HPsLr0"
+              "tool_call_id": "call_c3AKOuIrU1BeluL6RZ2unAJ8"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_KM22pwxzgoYsVwtFkTWZpStm"
+              "tool_call_id": "call_ZMQjTqWQ1qGCcuXCAvfGQtjD"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532255.4752817,
+          "timestamp": 1774851993.726493,
           "model": "gpt-5.3-codex",
-          "cost": 0.0090769,
-          "input_tokens": 6102,
-          "output_tokens": 260,
-          "total_tokens": 6362,
-          "cached_tokens": 3328,
+          "cost": 0.0089733,
+          "input_tokens": 6190,
+          "output_tokens": 256,
+          "total_tokens": 6446,
+          "cached_tokens": 3456,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -109,7 +109,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_dvMIk4uK1k3NQVXDbQE7kiP3"
+              "tool_call_id": "call_Ybim1PZNYaREJdowk81WjJ1d"
             }
           ],
           "finish_reason": "tool_calls"
@@ -117,19 +117,19 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 5,
-      "total_cost": 0.03090815,
-      "total_input_tokens": 40497,
-      "total_output_tokens": 544,
-      "total_cached_tokens": 30208,
+      "total_llm_calls": 4,
+      "total_cost": 0.045595199999999995,
+      "total_input_tokens": 31136,
+      "total_output_tokens": 1856,
+      "total_cached_tokens": 22144,
       "llm_calls": [
         {
-          "timestamp": 1773532257.238003,
+          "timestamp": 1774851995.537359,
           "model": "gpt-5.3-codex",
-          "cost": 0.0048027,
-          "input_tokens": 3498,
+          "cost": 0.0060697,
+          "input_tokens": 4222,
           "output_tokens": 93,
-          "total_tokens": 3591,
+          "total_tokens": 4315,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -139,27 +139,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_OmxZmzgYkLH8JKJcboRB3lBf"
+              "tool_call_id": "call_WJjHJK7NKnIDAzQHfGpskpBs"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_8qnDFbvwOPGlkYilr5iwZNIN"
+              "tool_call_id": "call_bF3SC9MGYttKqA8yHncr5dfb"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_VFZzYHDOXDX559YbYfJ7wzvF"
+              "tool_call_id": "call_98wxuE7ardukN94HbwCSiXaJ"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532260.5469074,
+          "timestamp": 1774851998.2437751,
           "model": "gpt-5.3-codex",
-          "cost": 0.0024510499999999998,
-          "input_tokens": 3719,
+          "cost": 0.00250845,
+          "input_tokens": 4443,
           "output_tokens": 99,
-          "total_tokens": 3818,
-          "cached_tokens": 3456,
+          "total_tokens": 4542,
+          "cached_tokens": 4224,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -168,48 +168,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_SkwViRYPgcFqbWVmKArBfsHX"
+              "tool_call_id": "call_ZfK5A32zqZPChb5wFKJ0oP71"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_VqCpaQjYriS6gWGNPMISqnD1"
+              "tool_call_id": "call_bNaWQG1S77NRqODOgfJMAlTZ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_KOipZh7xXMBTUZsPIdc6iqlY"
+              "tool_call_id": "call_CIlg4ZtSpDsUoO45bYTTc0m9"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532261.9531329,
+          "timestamp": 1774852016.4017122,
           "model": "gpt-5.3-codex",
-          "cost": 0.011553850000000001,
-          "input_tokens": 9703,
-          "output_tokens": 30,
-          "total_tokens": 9733,
-          "cached_tokens": 3712,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_E9hgyxQHIUpoX3hveTwYRQsF"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773532267.126973,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00896525,
-          "input_tokens": 11635,
-          "output_tokens": 266,
-          "total_tokens": 11901,
-          "cached_tokens": 9600,
+          "cost": 0.033456849999999996,
+          "input_tokens": 10427,
+          "output_tokens": 1576,
+          "total_tokens": 12003,
+          "cached_tokens": 4352,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -218,19 +197,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_Zno3r4PlTVP9RN0EYarJrzq9"
+              "tool_call_id": "call_pizr8M4VcOXtt9T3SHdgp5yZ"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532268.9587877,
+          "timestamp": 1774852019.0977798,
           "model": "gpt-5.3-codex",
-          "cost": 0.0031352999999999997,
-          "input_tokens": 11942,
-          "output_tokens": 56,
-          "total_tokens": 11998,
-          "cached_tokens": 11776,
+          "cost": 0.0035602,
+          "input_tokens": 12044,
+          "output_tokens": 88,
+          "total_tokens": 12132,
+          "cached_tokens": 11904,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -239,7 +218,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_rdHkY40t9Rrb0OvXWqgpnGBB"
+              "tool_call_id": "call_bMrBgrv9i4PZf3CBFSu6QHXa"
             }
           ],
           "finish_reason": "tool_calls"
@@ -247,10 +226,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.05313665,
-      "total_input_tokens": 52991,
-      "total_output_tokens": 1074,
-      "total_llm_calls": 8
+      "total_cost": 0.06621369999999999,
+      "total_input_tokens": 43894,
+      "total_output_tokens": 2382,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
@@ -268,7 +247,18 @@
           501
         ],
         "kwargs": {},
-        "timestamp": 564546.710126136,
+        "timestamp": 1884284.931116904,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'src/mqtt_packet.c' does not exist in directory tree. Similar paths: wolfmqtt/src/mqtt_packet.c, extra=None))"
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "src/mqtt_packet.c",
+          1746
+        ],
+        "kwargs": {},
+        "timestamp": 1884284.93155508,
         "success": true,
         "result_summary": "Err(CRSError(path 'src/mqtt_packet.c' does not exist in directory tree. Similar paths: wolfmqtt/src/mqtt_packet.c, extra=None))"
       },
@@ -279,18 +269,7 @@
           232
         ],
         "kwargs": {},
-        "timestamp": 564546.710415507,
-        "success": true,
-        "result_summary": "Err(CRSError(path 'src/mqtt_packet.c' does not exist in directory tree. Similar paths: wolfmqtt/src/mqtt_packet.c, extra=None))"
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "src/mqtt_packet.c",
-          1746
-        ],
-        "kwargs": {},
-        "timestamp": 564546.710770853,
+        "timestamp": 1884284.932017064,
         "success": true,
         "result_summary": "Err(CRSError(path 'src/mqtt_packet.c' does not exist in directory tree. Similar paths: wolfmqtt/src/mqtt_packet.c, extra=None))"
       },
@@ -301,20 +280,9 @@
           1746
         ],
         "kwargs": {},
-        "timestamp": 564549.168316872,
+        "timestamp": 1884286.821418699,
         "success": true,
         "result_summary": "Ok({'contents': '1647     /* Return total length of packet */\\n1648     return header_len + remain_len;\\n1649 }\\n1650 \\n1651 int MqttEncode_Auth(byte *tx_buf, int tx_buf_len, MqttAuth *auth)\\n1652 {\\n..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "wolfmqtt/src/mqtt_packet.c",
-          232
-        ],
-        "kwargs": {},
-        "timestamp": 564549.170460887,
-        "success": true,
-        "result_summary": "Ok({'contents': '133 /* Property structure allocation array. Property type equal\\n134    to zero indicates unused element. */\\n135 static MqttProp clientPropStack[MQTT_MAX_PROPS];\\n136 #ifdef WOLFMQTT..."
       },
       {
         "tool_name": "read_source",
@@ -323,7 +291,7 @@
           501
         ],
         "kwargs": {},
-        "timestamp": 564549.172490962,
+        "timestamp": 1884286.822596306,
         "success": true,
         "result_summary": "Ok({'contents': '402             case MQTT_DATA_TYPE_INT:\\n403             {\\n404                 tmp = MqttEncode_Int(buf, cur_prop->data_int);\\n405                 rc += tmp;\\n406                 if..."
       },
@@ -331,12 +299,12 @@
         "tool_name": "read_source",
         "args": [
           "wolfmqtt/src/mqtt_packet.c",
-          602
+          232
         ],
         "kwargs": {},
-        "timestamp": 564550.529192051,
+        "timestamp": 1884286.824057969,
         "success": true,
-        "result_summary": "Ok({'contents': '503         if (tmp < 0) {\\n504             return tmp;\\n505         }\\n506         buf += tmp;\\n507         rc += (int)tmp;\\n508         prop_len -= tmp;\\n509 \\n510         /* TODO: ..."
+        "result_summary": "Ok({'contents': '133 /* Property structure allocation array. Property type equal\\n134    to zero indicates unused element. */\\n135 static MqttProp clientPropStack[MQTT_MAX_PROPS];\\n136 #ifdef WOLFMQTT..."
       }
     ],
     "find_references": [],

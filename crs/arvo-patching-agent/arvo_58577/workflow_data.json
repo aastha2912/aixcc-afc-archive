@@ -1,5 +1,5 @@
 {
-  "vuln_id": 173,
+  "vuln_id": 493,
   "crash_result": {
     "output": "==1040==ERROR: AddressSanitizer: heap-use-after-free on address 0x62f00002f1a0 at pc 0x0000005a6e82 bp 0x7ffcb67d1910 sp 0x7ffcb67d1908\nREAD of size 4 at 0x62f00002f1a0 thread T0\nSCARINESS: 45 (4-byte-read-heap-use-after-free)\n    #0 0x5a6e81 in mrb_gc_mark /src/mruby/src/gc.c:743:8\n    #1 0x5a6e81 in gc_mark_children /src/mruby/src/gc.c:681:9\n    #2 0x5a20aa in incremental_marking_phase /src/mruby/src/gc.c:969:20\n    #3 0x5a20aa in incremental_gc /src/mruby/src/gc.c:1118:14\n    #4 0x59ca11 in i",
     "stack": "#0 0x5a6e81 in mrb_gc_mark mruby/src/gc.c:743:8\n#1 0x5a6e81 in gc_mark_children mruby/src/gc.c:681:9\n#2 0x5a20aa in incremental_marking_phase mruby/src/gc.c:969:20\n#3 0x5a20aa in incremental_gc mruby/src/gc.c:1118:14\n#4 0x59ca11 in incremental_gc_finish mruby/src/gc.c:1143:5\n#5 0x59ca11 in mrb_full_gc mruby/src/gc.c:1241:3\n#6 0x5a087f in gc_start mruby/src/gc.c:1321:3\n#7 0x69d816 in mrb_vm_exec mruby/src/vm.c\n#8 0x686516 in mrb_vm_run mruby/src/vm.c:1351:22\n#9 0x6b655c in mrb_top_run mruby/src/v",
@@ -22,26 +22,59 @@
     "dedup": "mrb_gc_mark--gc_mark_children--incremental_marking_phase"
   },
   "analyzed_vuln": {
-    "function": "gc_mark_children",
+    "function": "incremental_sweep_phase",
     "file": "mruby/src/gc.c",
-    "description": "Heap-use-after-free is caused by GC marking traversing stale array element pointers in gc_mark_children() (MRB_TT_ARRAY/MRB_TT_STRUCT case). It reads ARY_PTR(a) and iterates len elements, calling mrb_gc_mark_value on entries that can reference objects from a heap page already freed during sweeping. The crash manifests in mrb_gc_mark() when it dereferences a freed RBasic pointer (is_white(obj) read). Root issue is unsafe/stale references retained in array storage that GC later trusts during mark traversal.",
-    "conditions": "Via mruby_fuzzer, attacker-controlled Ruby source creates malformed object graph/state (notably heavy array/string/index mutation patterns in the PoC), then triggers GC (explicitly with GC.start in the payload and/or implicit full GC during VM execution). During incremental/full GC, sweep frees a heap page (incremental_sweep_phase -> mrb_free(page)); later marking walks array contents in gc_mark_children and passes a dangling element pointer to mrb_gc_mark, producing UAF read. Trigger requires crafting script state so an array slot (or struct-backed array slot) still contains a pointer to an object whose page was swept/freed before that slot is safely updated/cleared."
+    "description": "The root cause is a stale GC worklist pointer: `incremental_sweep_phase()` can free an entire `mrb_heap_page` (`mrb_free(mrb, page)`) when `dead_slot` is true, but it does not unlink any objects from `gc->gray_list`/`gc->atomic_gray_list` that may still point into that page. Later in the same full-GC cycle, marking (`incremental_marking_phase` -> `gc_mark_children` -> `mrb_gc_mark`) dereferences one of those dangling `RBasic*` entries, producing the heap-use-after-free seen at `mrb_gc_mark` line 743 (`is_white(obj)`).",
+    "conditions": "Triggered by Ruby input that drives GC through both mark/sweep transitions with object graph mutations so that a heap page becomes fully dead and is freed during `incremental_sweep_phase`, while at least one object from that page remains queued in gray/atomic gray lists. In this PoV, `mruby_fuzzer` calls `mrb_load_string` on attacker-controlled script; the script causes heavy allocations/GC activity (including `GC.start` patterns), leading to page reclamation and later mark-phase traversal of stale pointers."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.053184949999999995,
-      "total_input_tokens": 55177,
-      "total_output_tokens": 545,
-      "total_cached_tokens": 32384,
+      "total_cost": 0.08019899999999999,
+      "total_input_tokens": 57708,
+      "total_output_tokens": 531,
+      "total_cached_tokens": 17920,
       "llm_calls": [
         {
-          "timestamp": 1773467641.51446,
+          "timestamp": 1774876733.1167397,
           "model": "gpt-5.3-codex",
-          "cost": 0.029942499999999997,
-          "input_tokens": 16054,
-          "output_tokens": 132,
-          "total_tokens": 16186,
+          "cost": 0.0275793,
+          "input_tokens": 16142,
+          "output_tokens": 125,
+          "total_tokens": 16267,
+          "cached_tokens": 1536,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_PmM8gY9PDEQsNAY2aA7KY19M"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Vao2cWyieL64LsOyPP8cVJIR"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_btM9yIpHFuOtP0wXWzKO6UH0"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_dYSX3bVXeeL7kD8In59pcOIb"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774876740.915939,
+          "model": "gpt-5.3-codex",
+          "cost": 0.03046575,
+          "input_tokens": 16441,
+          "output_tokens": 121,
+          "total_tokens": 16562,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,63 +84,30 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_oZlNSjYla3aoyqNQC1luy5S0"
+              "tool_call_id": "call_8vHhxQqoQBlySSX7EaV1L1VU"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Flj5GViQYg0DCDouJer3h3yA"
+              "tool_call_id": "call_oyFGVwXthde9anfvSBeTk097"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_kVH2WWBsSUxJJZORgDdevAtY"
+              "tool_call_id": "call_5L6lVFECMv91qOP9rW1T1TGX"
             },
             {
-              "tool_name": "find_references",
-              "tool_call_id": "call_erN5kiIA88OUhinf0w2LFhsd"
+              "tool_name": "read_source",
+              "tool_call_id": "call_BjwrjCEyoGkvJaZ4ELIfs23c"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467651.225837,
+          "timestamp": 1774876747.7862508,
           "model": "gpt-5.3-codex",
-          "cost": 0.0052569999999999995,
-          "input_tokens": 16356,
-          "output_tokens": 131,
-          "total_tokens": 16487,
-          "cached_tokens": 16000,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 4,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_FaQKsSN4dauK22PqQ7VwY8u6"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_s6QDh0FbJhVUexWcofDI5Ccn"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_jV3Nxz88daeXdBukJmaBjAMD"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_BEeCYkUPpZJ2qPk77VNBj0RH"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773467659.3497844,
-          "model": "gpt-5.3-codex",
-          "cost": 0.01798545,
-          "input_tokens": 22767,
-          "output_tokens": 282,
-          "total_tokens": 23049,
+          "cost": 0.02215395,
+          "input_tokens": 25125,
+          "output_tokens": 285,
+          "total_tokens": 25410,
           "cached_tokens": 16384,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -117,7 +117,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_ZmiEr3jKmVV3Ja6HKzersQvD"
+              "tool_call_id": "call_wXxFoEq3TdXJoKBjoZJV6zFd"
             }
           ],
           "finish_reason": "tool_calls"
@@ -126,77 +126,85 @@
     },
     "patching": {
       "total_llm_calls": 5,
-      "total_cost": 0.0534716,
-      "total_input_tokens": 94936,
-      "total_output_tokens": 434,
-      "total_cached_tokens": 75392,
+      "total_cost": 0.062176449999999994,
+      "total_input_tokens": 104451,
+      "total_output_tokens": 716,
+      "total_cached_tokens": 82944,
       "llm_calls": [
         {
-          "timestamp": 1773467661.4011536,
+          "timestamp": 1774876750.7397282,
           "model": "gpt-5.3-codex",
-          "cost": 0.0237622,
-          "input_tokens": 14884,
-          "output_tokens": 96,
-          "total_tokens": 14980,
-          "cached_tokens": 2304,
+          "cost": 0.0296842,
+          "input_tokens": 17452,
+          "output_tokens": 126,
+          "total_tokens": 17578,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_eofIaKzLQLOFbXMij0wLrxZe"
+              "tool_call_id": "call_J2yxIBvhbK1LWJtRIJwXCW1b"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ghx22l3n1LkpqA6BGzTSmtkE"
+              "tool_call_id": "call_VKUvyXTX23t47WGaEbSHt4gf"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_KDIVPLDOsYuqzJZ0aet1v1NI"
+              "tool_call_id": "call_tqKkyT2Q5GbyoAO0jeqwuzbQ"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_X4diYmk10EtSjKWvPE6n8VcF"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467664.3140624,
+          "timestamp": 1774876779.752771,
           "model": "gpt-5.3-codex",
-          "cost": 0.00438515,
-          "input_tokens": 15101,
-          "output_tokens": 96,
-          "total_tokens": 15197,
-          "cached_tokens": 14848,
+          "cost": 0.0055314,
+          "input_tokens": 17756,
+          "output_tokens": 134,
+          "total_tokens": 17890,
+          "cached_tokens": 17408,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_WXEbCnefyyYjCYK59mUdnv3w"
+              "tool_call_id": "call_HiFhAi7BcaLWfSAXEVNdDqLJ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_wNAnvY5wjVxaa9ZYmPuIjpKa"
+              "tool_call_id": "call_fsn3nGWKORKMGMe0Ep5TI4rQ"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_xutCb0fYn6UiCSfE4lWVXMIG"
+              "tool_name": "find_references",
+              "tool_call_id": "call_9CkzLnRj7ahGkkkEspOwKdw5"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_jH0iF5CuKStfFBgm0uD5Aino"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467667.2513998,
+          "timestamp": 1774876825.1740007,
           "model": "gpt-5.3-codex",
-          "cost": 0.0165662,
-          "input_tokens": 21420,
-          "output_tokens": 205,
-          "total_tokens": 21625,
-          "cached_tokens": 15104,
+          "cost": 0.017582599999999997,
+          "input_tokens": 22708,
+          "output_tokens": 419,
+          "total_tokens": 23127,
+          "cached_tokens": 17792,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -205,19 +213,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_gEejVbdDwbXiNCLkZ9fDRvHs"
+              "tool_call_id": "call_uDVNUkL8hhAidzARjVj1ENQ7"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467668.3568592,
+          "timestamp": 1774876827.125797,
           "model": "gpt-5.3-codex",
-          "cost": 0.00432495,
-          "input_tokens": 21713,
+          "cost": 0.00453425,
+          "input_tokens": 23215,
           "output_tokens": 14,
-          "total_tokens": 21727,
-          "cached_tokens": 21504,
+          "total_tokens": 23229,
+          "cached_tokens": 23040,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -226,19 +234,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_bsY7Ir0EDuLOOwUR666eyaIW"
+              "tool_call_id": "call_sNNL2BhzL9dlBxHYJ2zIQmRK"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467699.4995205,
+          "timestamp": 1774876877.9370918,
           "model": "gpt-5.3-codex",
-          "cost": 0.0044331,
-          "input_tokens": 21818,
+          "cost": 0.004844,
+          "input_tokens": 23320,
           "output_tokens": 23,
-          "total_tokens": 21841,
-          "cached_tokens": 21632,
+          "total_tokens": 23343,
+          "cached_tokens": 23040,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -247,7 +255,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_HaEf3UpLgii1NL5fBSziyZKT"
+              "tool_call_id": "call_fE93bLzgl8vi8fwOMJLJTy5l"
             }
           ],
           "finish_reason": "tool_calls"
@@ -255,15 +263,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.10665654999999999,
-      "total_input_tokens": 150113,
-      "total_output_tokens": 979,
+      "total_cost": 0.14237545,
+      "total_input_tokens": 162159,
+      "total_output_tokens": 1247,
       "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/mruby/src/gc.c\n+++ b/mruby/src/gc.c\n@@ -678,7 +678,13 @@\n       mrb_value *p = ARY_PTR(a);\n \n       for (size_t i=0; i<len; i++) {\n-        mrb_gc_mark_value(mrb, p[i]);\n+        mrb_value v = p[i];\n+        if (mrb_immediate_p(v)) {\n+          continue;\n+        }\n+        struct RBasic *child = mrb_basic_ptr(v);\n+        if (!heap_p(gc, child)) continue;\n+        mrb_gc_mark(mrb, child);\n       }\n       children += len;\n     }\n",
+    "patch": "--- a/mruby/src/gc.c\n+++ b/mruby/src/gc.c\n@@ -1027,6 +1027,33 @@\n   gc->live_after_mark = gc->live;\n }\n \n+static void\n+unlink_gray_list_in_page(struct RBasic **list, mrb_heap_page *page)\n+{\n+  struct RBasic *obj = *list;\n+  struct RBasic *prev = NULL;\n+  RVALUE *start = page->objects;\n+  RVALUE *end = start + MRB_HEAP_PAGE_SIZE;\n+\n+  while (obj) {\n+    struct RBasic *next = obj->gcnext;\n+    RVALUE *slot = (RVALUE*)obj;\n+\n+    if (slot >= start && slot < end) {\n+      if (prev) {\n+        prev->gcnext = next;\n+      }\n+      else {\n+        *list = next;\n+      }\n+    }\n+    else {\n+      prev = obj;\n+    }\n+    obj = next;\n+  }\n+}\n+\n static size_t\n incremental_sweep_phase(mrb_state *mrb, mrb_gc *gc, size_t limit)\n {\n@@ -1075,6 +1102,8 @@\n       if (gc->heaps == page)\n         gc->heaps = page->next;\n \n+      unlink_gray_list_in_page(&gc->gray_list, page);\n+      unlink_gray_list_in_page(&gc->atomic_gray_list, page);\n       mrb_free(mrb, page);\n       page = next;\n     }\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -283,10 +291,10 @@
         "tool_name": "read_source",
         "args": [
           "src/gc.c",
-          730
+          1078
         ],
         "kwargs": {},
-        "timestamp": 499950.370027674,
+        "timestamp": 1909044.074939615,
         "success": true,
         "result_summary": "Err(CRSError(path 'src/gc.c' does not exist in directory tree. Similar paths: mruby/src/gc.c, extra=None))"
       },
@@ -294,10 +302,10 @@
         "tool_name": "read_source",
         "args": [
           "src/gc.c",
-          650
+          743
         ],
         "kwargs": {},
-        "timestamp": 499951.173640908,
+        "timestamp": 1909046.15667066,
         "success": true,
         "result_summary": "Err(CRSError(path 'src/gc.c' does not exist in directory tree. Similar paths: mruby/src/gc.c, extra=None))"
       },
@@ -308,20 +316,9 @@
           743
         ],
         "kwargs": {},
-        "timestamp": 499952.890624722,
+        "timestamp": 1909068.330142462,
         "success": true,
         "result_summary": "Ok({'contents': '644       mrb_int len = MRB_ENV_LEN(e);\\n645       for (mrb_int i=0; i<len; i++) {\\n646         mrb_gc_mark_value(mrb, e->stack[i]);\\n647       }\\n648       children += len;\\n649     ..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "mruby/src/gc.c",
-          681
-        ],
-        "kwargs": {},
-        "timestamp": 499952.892017515,
-        "success": true,
-        "result_summary": "Ok({'contents': '582   /* mark fibers */\\n583   mrb_gc_mark(mrb, (struct RBasic*)c->fib);\\n584   if (c->prev) {\\n585     c = c->prev;\\n586     goto start;\\n587   }\\n588 }\\n589 \\n590 static size_t\\n591..."
       },
       {
         "tool_name": "read_source",
@@ -330,7 +327,7 @@
           1078
         ],
         "kwargs": {},
-        "timestamp": 499952.89304711,
+        "timestamp": 1909068.334541733,
         "success": true,
         "result_summary": "Ok({'contents': \" 979   if (!is_white(obj)) return;\\n 980   paint_black(obj);\\n 981   mrb_gc_mark(mrb, (struct RBasic*)obj->c);\\n 982   mrb_gc_free_iv(mrb, obj);\\n 983   struct RException *err = (stru..."
       }
@@ -339,14 +336,50 @@
       {
         "tool_name": "find_references",
         "args": [
-          "gc_mark_children",
+          "atomic_gray_list",
           "src/gc.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 499950.76861926,
+        "timestamp": 1909060.380117042,
         "success": true,
-        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: mruby/src/gc.c, extra=None))"
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: mruby/src/gc.c, mruby/include/mruby/gc.h, extra=None))"
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "gray_list",
+          "src/gc.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1909065.931592605,
+        "success": true,
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: mruby/src/gc.c, mruby/include/mruby/gc.h, extra=None))"
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "atomic_gray_list",
+          "mruby/src/gc.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1909093.073988658,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='mruby/src/gc.c', refs=[FileReference(line=906, content='    gc->atomic_gray_list = NULL;', enclosing_definition='root_scan_phase'), FileReference(line=1014, content='  gc..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "gray_list",
+          "mruby/src/gc.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1909104.538508352,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='mruby/src/gc.c', refs=[FileReference(line=533, content='  obj->gcnext = gc->gray_list;', enclosing_definition='add_gray_list'), FileReference(line=534, content='  gc->gra..."
       }
     ],
     "apply_patch": [
@@ -354,10 +387,10 @@
         "tool_name": "apply_patch",
         "args": [
           "mruby/src/gc.c",
-          "@@ -677,9 +677,15 @@ gc_mark_children(mrb_state *mrb, mrb_gc *gc, struct RBasic *obj)\n       size_t len = ARY_LEN(a);\n       mrb_value *p = ARY_PTR(a);\n \n       for (size_t i=0; i<len; i++) {\n-        mrb_gc_mark_value(mrb, p[i]);\n+        mrb_value v = p[i];\n+        if (mrb_immediate_p(v)) {\n+          continue;\n+        }\n+        struct RBasic *child = mrb_basic_ptr(v);\n+        if (!heap_p(gc, child)) continue;\n+        mrb_gc_mark(mrb, child);\n       }\n       children += len;\n     }\n     break;"
+          "@@ -1027,6 +1027,31 @@ prepare_incremental_sweep(mrb_state *mrb, mrb_gc *gc)\n   gc->live_after_mark = gc->live;\n }\n \n+static void\n+unlink_gray_list_in_page(struct RBasic **list, mrb_heap_page *page)\n+{\n+  struct RBasic *obj = *list;\n+  struct RBasic *prev = NULL;\n+  RVALUE *start = page->objects;\n+  RVALUE *end = start + MRB_HEAP_PAGE_SIZE;\n+\n+  while (obj) {\n+    struct RBasic *next = obj->gcnext;\n+    RVALUE *slot = (RVALUE*)obj;\n+\n+    if (slot >= start && slot < end) {\n+      if (prev) {\n+        prev->gcnext = next;\n+      }\n+      else {\n+        *list = next;\n+      }\n+    }\n+    else {\n+      prev = obj;\n+    }\n+    obj = next;\n+  }\n+}\n+\n static size_t\n incremental_sweep_phase(mrb_state *mrb, mrb_gc *gc, size_t limit)\n {\n@@ -1075,6 +1100,8 @@ incremental_sweep_phase(mrb_state *mrb, mrb_gc *gc, size_t limit)\n       if (gc->heaps == page)\n         gc->heaps = page->next;\n \n+      unlink_gray_list_in_page(&gc->gray_list, page);\n+      unlink_gray_list_in_page(&gc->atomic_gray_list, page);\n       mrb_free(mrb, page);\n       page = next;\n     }\n"
         ],
         "kwargs": {},
-        "timestamp": 499955.865287832,
+        "timestamp": 1909113.812561217,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -367,7 +400,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 499986.885663501,
+        "timestamp": 1909165.099036905,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

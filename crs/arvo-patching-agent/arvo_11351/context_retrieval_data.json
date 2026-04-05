@@ -6,12 +6,12 @@
       "tool_name": "read_source",
       "args": [
         "harfbuzz/src/hb-ot-hdmx-table.hh",
-        140
+        150
       ],
       "kwargs": {},
-      "timestamp": 392960.26440789,
+      "timestamp": 1845242.993139909,
       "success": true,
-      "result_summary": "Ok({'contents': ' 41 \\n 42 \\n 43 struct DeviceRecord\\n 44 {\\n 45   struct SubsetView\\n 46   {\\n 47     const DeviceRecord *source_device_record;\\n 48     unsigned int size_device_record;\\n 49     hb_s..."
+      "result_summary": "Ok({'contents': ' 51 \\t\\t      unsigned int sizeDeviceRecord,\\n 52 \\t\\t      hb_subset_plan_t   *subset_plan)\\n 53     {\\n 54       this->source_device_record = source_device_record;\\n 55       this->..."
     },
     {
       "tool_name": "read_source",
@@ -20,7 +20,7 @@
         90
       ],
       "kwargs": {},
-      "timestamp": 392960.265437509,
+      "timestamp": 1845242.993648201,
       "success": true,
       "result_summary": "Ok({'contents': '  1 /*\\n  2  * Copyright \u00a9 2018  Google, Inc.\\n  3  *\\n  4  *  This is part of HarfBuzz, a text shaping library.\\n  5  *\\n  6  * Permission is hereby granted, without written agreemen..."
     },
@@ -28,12 +28,12 @@
       "tool_name": "read_source",
       "args": [
         "harfbuzz/src/hb-ot-hdmx-table.hh",
-        160
+        60
       ],
       "kwargs": {},
-      "timestamp": 393148.729893855,
+      "timestamp": 1845301.100846376,
       "success": true,
-      "result_summary": "Ok({'contents': ' 61     {\\n 62       return this->subset_plan->glyphs.len;\\n 63     }\\n 64 \\n 65     inline const HBUINT8* operator [] (unsigned int i) const\\n 66     {\\n 67       if (unlikely (i >= ..."
+      "result_summary": "Ok({'contents': '  1 /*\\n  2  * Copyright \u00a9 2018  Google, Inc.\\n  3  *\\n  4  *  This is part of HarfBuzz, a text shaping library.\\n  5  *\\n  6  * Permission is hereby granted, without written agreemen..."
     }
   ],
   "find_references": [],
@@ -42,10 +42,10 @@
       "tool_name": "apply_patch",
       "args": [
         "harfbuzz/src/hb-ot-hdmx-table.hh",
-        "@@ -152,8 +152,16 @@\n     for (unsigned int i = 0; i < source_hdmx->num_records; i++)\n     {\n+      const DeviceRecord *source_device_record = &(*source_hdmx)[i];\n+      if (unlikely (!source_device_record->sanitize (c->sanitize_context,\n+\t\t\t\t\t      source_hdmx->size_device_record)))\n+      {\n+\tDEBUG_MSG(SUBSET, nullptr, \"HDMX source device record %d is invalid.\", i);\n+\treturn_trace (false);\n+\t}\n+\n       DeviceRecord::SubsetView subset_view;\n-      subset_view.init (&(*source_hdmx)[i], source_hdmx->size_device_record, plan);\n+      subset_view.init (source_device_record, source_hdmx->size_device_record, plan);\n \n       if (!c->start_embed<DeviceRecord> ()->serialize (c, subset_view))\n \treturn_trace (false);\n"
+        "@@ -64,12 +64,17 @@ struct DeviceRecord\n     inline const HBUINT8* operator [] (unsigned int i) const\n     {\n       if (unlikely (i >= len ())) return nullptr;\n+      if (unlikely (sizeDeviceRecord < DeviceRecord::min_size)) return nullptr;\n+\n       hb_codepoint_t gid = this->subset_plan->glyphs [i];\n+      unsigned int width_count = sizeDeviceRecord - DeviceRecord::min_size;\n+      if (unlikely (gid >= width_count)) return nullptr;\n \n       const HBUINT8* width = &(this->source_device_record->widthsZ[gid]);\n \n-      if (width < ((const HBUINT8 *) this->source_device_record) + sizeDeviceRecord)\n+      if (width < ((const HBUINT8 *) this->source_device_record) + sizeDeviceRecord)\n \treturn width;\n       else\n \treturn nullptr;\n     }\n   };\n"
       ],
       "kwargs": {},
-      "timestamp": 392965.936688494,
+      "timestamp": 1845246.354589053,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     },
@@ -53,10 +53,10 @@
       "tool_name": "apply_patch",
       "args": [
         "harfbuzz/src/hb-ot-hdmx-table.hh",
-        "@@ -163,7 +163,7 @@\n \n   static inline size_t get_subsetted_size (hb_subset_plan_t *plan)\n   {\n-    return min_size + DeviceRecord::get_size (plan->glyphs.len);\n+    return min_size + plan->source->get_num<hb_ubytes_t> (HB_OT_TAG_hdmx).as_unsigned () * DeviceRecord::get_size (plan->glyphs.len);\n   }\n"
+        "@@ -95,8 +95,11 @@ struct DeviceRecord\n     this->pixelSize.set (subset_view.source_device_record->pixelSize);\n     this->maxWidth.set (subset_view.source_device_record->maxWidth);\n \n+    const HBUINT8 *source_base = (const HBUINT8 *) subset_view.source_device_record;\n+    if (unlikely (!c->check_range (source_base, subset_view.sizeDeviceRecord))) return_trace (false);\n+\n     for (unsigned int i = 0; i < subset_view.len (); i++)\n     {\n       const HBUINT8 *width = subset_view[i];\n       if (!width)\n"
       ],
       "kwargs": {},
-      "timestamp": 393019.789578221,
+      "timestamp": 1845303.75883644,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     },
@@ -64,34 +64,12 @@
       "tool_name": "apply_patch",
       "args": [
         "harfbuzz/src/hb-ot-hdmx-table.hh",
-        "@@ -164,7 +164,7 @@\n   static inline size_t get_subsetted_size (hb_subset_plan_t *plan)\n   {\n-    return min_size + DeviceRecord::get_size (plan->glyphs.len);\n+    return min_size + plan->num_output_glyphs () * DeviceRecord::get_size (plan->glyphs.len);\n   }\n"
+        "@@ -65,15 +65,15 @@ struct DeviceRecord\n     {\n       if (unlikely (i >= len ())) return nullptr;\n       if (unlikely (sizeDeviceRecord < DeviceRecord::min_size)) return nullptr;\n+      if (unlikely (!source_device_record->sanitize (hb_sanitize_context_t::dummy (), sizeDeviceRecord))) return nullptr;\n \n       hb_codepoint_t gid = this->subset_plan->glyphs [i];\n       unsigned int width_count = sizeDeviceRecord - DeviceRecord::min_size;\n       if (unlikely (gid >= width_count)) return nullptr;\n \n-      const HBUINT8* width = &(this->source_device_record->widthsZ[gid]);\n+      return &(this->source_device_record->widthsZ[gid]);\n \n-      if (width < ((const HBUINT8 *) this->source_device_record) + sizeDeviceRecord)\n-\treturn width;\n-      else\n-\treturn nullptr;\n+\n+\n     }\n   };\n"
       ],
       "kwargs": {},
-      "timestamp": 393023.886509741,
-      "success": true,
-      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
-    },
-    {
-      "tool_name": "apply_patch",
-      "args": [
-        "harfbuzz/src/hb-ot-hdmx-table.hh",
-        "@@ -65,11 +65,15 @@\n     inline const HBUINT8* operator [] (unsigned int i) const\n     {\n       if (unlikely (i >= len())) return nullptr;\n+      if (unlikely (size_device_record < DeviceRecord::min_size)) return nullptr;\n       hb_codepoint_t gid = this->subset_plan->glyphs [i];\n+      unsigned int max_gid = size_device_record - DeviceRecord::min_size;\n+      if (unlikely (gid >= max_gid)) return nullptr;\n \n       const HBUINT8* width = &(this->source_device_record->widths[gid]);\n \n-      if (width < ((const HBUINT8 *) this->source_device_record) + size_device_record)\n+      if (width <= ((const HBUINT8 *) this->source_device_record) + size_device_record - HBUINT8::static_size)\n \treturn width;\n       else\n \treturn nullptr;\n"
-      ],
-      "kwargs": {},
-      "timestamp": 393099.620912063,
+      "timestamp": 1845372.071161185,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
-    },
-    {
-      "tool_name": "apply_patch",
-      "args": [
-        "harfbuzz/src/hb-ot-hdmx-table.hh",
-        "@@ -150,7 +150,7 @@\n \n     this->version.set (source_hdmx->version);\n     this->num_records.set (source_hdmx->num_records);\n-    this->size_device_record.set (DeviceRecord::get_size (plan->glyphs.len));\n+    this->size_device_record.set (source_hdmx->size_device_record);\n \n     for (unsigned int i = 0; i < source_hdmx->num_records; i++)\n     {\n"
-      ],
-      "kwargs": {},
-      "timestamp": 393151.136397747,
-      "success": true,
-      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 4 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
   ],
   "test_patch": [
@@ -99,7 +77,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 393013.090564861,
+      "timestamp": 1845296.788813302,
       "success": true,
       "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
     },
@@ -107,7 +85,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 393092.012196502,
+      "timestamp": 1845359.177021799,
       "success": true,
       "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
     },
@@ -115,15 +93,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 393142.472883584,
-      "success": true,
-      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
-    },
-    {
-      "tool_name": "test_patch",
-      "args": [],
-      "kwargs": {},
-      "timestamp": 393192.719737163,
+      "timestamp": 1845427.102974995,
       "success": true,
       "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
     }
@@ -133,23 +103,7 @@
       "tool_name": "undo_last_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 393020.906537451,
-      "success": true,
-      "result_summary": "Ok({'total_edits': 1})"
-    },
-    {
-      "tool_name": "undo_last_patch",
-      "args": [],
-      "kwargs": {},
-      "timestamp": 393212.092817365,
-      "success": true,
-      "result_summary": "Ok({'total_edits': 3})"
-    },
-    {
-      "tool_name": "undo_last_patch",
-      "args": [],
-      "kwargs": {},
-      "timestamp": 393214.069735531,
+      "timestamp": 1845430.526607779,
       "success": true,
       "result_summary": "Ok({'total_edits': 2})"
     },
@@ -157,7 +111,7 @@
       "tool_name": "undo_last_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 393215.450828987,
+      "timestamp": 1845433.577556422,
       "success": true,
       "result_summary": "Ok({'total_edits': 1})"
     },
@@ -165,19 +119,10 @@
       "tool_name": "undo_last_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 393216.694644453,
+      "timestamp": 1845433.577660469,
       "success": true,
       "result_summary": "Ok({'total_edits': 0})"
     }
   ],
-  "list_current_edits": [
-    {
-      "tool_name": "list_current_edits",
-      "args": [],
-      "kwargs": {},
-      "timestamp": 393209.811474819,
-      "success": true,
-      "result_summary": "Ok({'edits': ['@@ -152,8 +152,16 @@\\n     for (unsigned int i = 0; i < source_hdmx->num_records; i++)\\n     {\\n+      const DeviceRecord *source_device_record = &(*source_hdmx)[i];\\n+      if (unlikel..."
-    }
-  ]
+  "list_current_edits": []
 }

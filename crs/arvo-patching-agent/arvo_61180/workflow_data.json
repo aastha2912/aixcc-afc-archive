@@ -1,5 +1,5 @@
 {
-  "vuln_id": 188,
+  "vuln_id": 507,
   "crash_result": {
     "output": "AddressSanitizer:DEADLYSIGNAL\n=================================================================\n==2968==ERROR: AddressSanitizer: SEGV on unknown address 0x608000010000 (pc 0x7e10f3871880 bp 0x7ffc82006e90 sp 0x7ffc82006658 T0)\n==2968==The signal is caused by a READ memory access.\nSCARINESS: 20 (wild-addr-read)\n    #0 0x7e10f3871880  (/lib/x86_64-linux-gnu/libc.so.6+0x184880) (BuildId: 87b331c034a6458c64ce09c03939e947212e18ce)\n    #1 0x5061dd in memchr /src/llvm-project/compiler-rt/lib/asan/../sa",
     "stack": "#0 0x7e10f3871880  (/lib/x86_64-linux-gnu/libc.so.6+0x184880) (BuildId: 87b331c034a6458c64ce09c03939e947212e18ce)\n#1 0x5061dd in memchr llvm-project/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc\n#2 0x7f04f4 in pcpp::SipRequestFirstLine::SipRequestFirstLine(pcpp::SipRequestLayer*) PcapPlusPlus/Packet++/src/SipLayer.cpp:138:32\n#3 0x7f624d in pcpp::SipRequestLayer::SipRequestLayer(unsigned char*, unsigned long, pcpp::Layer*, pcpp::Packet*) PcapPlusPlus/Packet++/src/SipL",
@@ -24,54 +24,58 @@
   "analyzed_vuln": {
     "function": "SipRequestFirstLine::SipRequestFirstLine",
     "file": "PcapPlusPlus/Packet++/src/SipLayer.cpp",
-    "description": "In SipRequestFirstLine::SipRequestFirstLine(SipRequestLayer*), parseVersion() can set m_VersionOffset to -1 when a SIP version token is not found in malformed input. The constructor then unconditionally does memchr(m_Data + m_VersionOffset, '\\n', m_DataLen - (size_t)m_VersionOffset). Because m_VersionOffset is negative, pointer arithmetic goes out of bounds and the computed length underflows to a huge size, causing an invalid read/SEGV inside memchr.",
-    "conditions": "FuzzTarget parses packet bytes into UDP, and UdpLayer::parseNextLayer() classifies payload as SIP request if parseMethod() recognizes a method token. A crafted UDP payload on SIP ports that has a valid-looking SIP method but lacks/invalidates the expected version pattern (' SIP/') makes parseVersion() fail (m_VersionOffset=-1). Constructor still calls memchr with that invalid offset, triggering OOB read and crash."
+    "description": "The root cause is missing validation of m_VersionOffset before using it as a pointer/length base. parseVersion() can set m_VersionOffset = -1 for malformed SIP request lines, but the constructor then does memchr(m_Data + m_VersionOffset, '\\n', m_DataLen - (size_t)m_VersionOffset). Casting -1 to size_t underflows the length and creates an invalid pointer/huge read range, leading to wild read SEGV in memchr. Crash manifests in SipRequestFirstLine constructor, reached via SipRequestLayer creation.",
+    "conditions": "Fuzzer input is parsed as UDP payload on a SIP port in UdpLayer::parseNextLayer. If parseMethod() accepts the payload as a SIP request method but parseVersion() fails to find a valid version token (so m_VersionOffset becomes -1), constructor still executes the memchr search using that invalid offset. A malformed SIP first line in UDP payload is sufficient to trigger the crash when Packet parsing reaches SipRequestLayer."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.0242326,
-      "total_input_tokens": 13740,
-      "total_output_tokens": 359,
-      "total_cached_tokens": 3072,
+      "total_cost": 0.023633749999999995,
+      "total_input_tokens": 14921,
+      "total_output_tokens": 399,
+      "total_cached_tokens": 5120,
       "llm_calls": [
         {
-          "timestamp": 1773517378.0494633,
+          "timestamp": 1774879537.3329377,
           "model": "gpt-5.3-codex",
-          "cost": 0.0053823,
-          "input_tokens": 3530,
-          "output_tokens": 116,
-          "total_tokens": 3646,
+          "cost": 0.0059843,
+          "input_tokens": 3618,
+          "output_tokens": 148,
+          "total_tokens": 3766,
           "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_gh2quA7rKSSdmrcS6mPqA35c"
+              "tool_call_id": "call_PmYiJquFiSNwnp3xDiyeMn14"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_En1Z6rRKlRcGysIUOHT6p07W"
+              "tool_call_id": "call_Q5PBt0g5AEKudAbUnLOn5iUk"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_mCUgDZ5W6sKBq6aSAypI12mL"
+              "tool_call_id": "call_S0baVPnNatWFQS1giMyMpBpR"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_8TTz7wWE5LeJ48RVd4ATKGqM"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773517385.4753048,
+          "timestamp": 1774879542.3804834,
           "model": "gpt-5.3-codex",
-          "cost": 0.0188503,
-          "input_tokens": 10210,
-          "output_tokens": 243,
-          "total_tokens": 10453,
-          "cached_tokens": 1536,
+          "cost": 0.017649449999999997,
+          "input_tokens": 11303,
+          "output_tokens": 251,
+          "total_tokens": 11554,
+          "cached_tokens": 3584,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +84,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_am0vRQQhS90B5nYWd4aeHoHI"
+              "tool_call_id": "call_aKrBdf3CIoh9qVw3RWpT6pmz"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,49 +92,66 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.03298855,
-      "total_input_tokens": 36177,
-      "total_output_tokens": 527,
-      "total_cached_tokens": 23936,
+      "total_llm_calls": 5,
+      "total_cost": 0.0285278,
+      "total_input_tokens": 41180,
+      "total_output_tokens": 663,
+      "total_cached_tokens": 33536,
       "llm_calls": [
         {
-          "timestamp": 1773517387.823024,
+          "timestamp": 1774879544.319589,
           "model": "gpt-5.3-codex",
-          "cost": 0.004520949999999999,
-          "input_tokens": 3729,
-          "output_tokens": 116,
-          "total_tokens": 3845,
+          "cost": 0.0056952,
+          "input_tokens": 4608,
+          "output_tokens": 90,
+          "total_tokens": 4698,
           "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 2,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_fZtHbSXrNr489QB3ZiMV1l5e"
+              "tool_call_id": "call_7Oz3ziTgBoiwpQ9tsuFfka95"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_dowQnXRLrnBOcJGVFx901c5M"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_cY6wBtewDpelbdRSgXGHow9S"
+              "tool_name": "find_references",
+              "tool_call_id": "call_zgFEOXWlfeUN6PNNKJfX83GE"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773517392.8814461,
+          "timestamp": 1774879789.2683897,
           "model": "gpt-5.3-codex",
-          "cost": 0.02356375,
-          "input_tokens": 10473,
-          "output_tokens": 374,
-          "total_tokens": 10847,
-          "cached_tokens": 0,
+          "cost": 0.00571865,
+          "input_tokens": 7127,
+          "output_tokens": 36,
+          "total_tokens": 7163,
+          "cached_tokens": 4608,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_OGaJhqZVuhF7QlcH94DtXs3V"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774879795.9823217,
+          "model": "gpt-5.3-codex",
+          "cost": 0.012341000000000001,
+          "input_tokens": 9388,
+          "output_tokens": 500,
+          "total_tokens": 9888,
+          "cached_tokens": 7040,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +160,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_gEqd5kptLqqWBjNaeMl6hpay"
+              "tool_call_id": "call_x6Ywwdr6gClfXhXMqicP2Kfb"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773517395.0224643,
+          "timestamp": 1774879797.9162896,
           "model": "gpt-5.3-codex",
-          "cost": 0.00239785,
-          "input_tokens": 10935,
+          "cost": 0.0023324,
+          "input_tokens": 9976,
           "output_tokens": 14,
-          "total_tokens": 10949,
-          "cached_tokens": 10752,
+          "total_tokens": 9990,
+          "cached_tokens": 9728,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +181,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_oTVqUpikE5IEbwo5mBkrAJsC"
+              "tool_call_id": "call_CiNARuGc290eICeWL15E5fId"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773517444.6414459,
+          "timestamp": 1774879872.099434,
           "model": "gpt-5.3-codex",
-          "cost": 0.0025059999999999995,
-          "input_tokens": 11040,
+          "cost": 0.0024405499999999997,
+          "input_tokens": 10081,
           "output_tokens": 23,
-          "total_tokens": 11063,
-          "cached_tokens": 10880,
+          "total_tokens": 10104,
+          "cached_tokens": 9856,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,7 +202,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_h0TKJipy4w03PwlSRby6OmYF"
+              "tool_call_id": "call_lZjv7vVBEZj0ubHH9fcglWWe"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,15 +210,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.05722115,
-      "total_input_tokens": 49917,
-      "total_output_tokens": 886,
-      "total_llm_calls": 6
+      "total_cost": 0.052161549999999994,
+      "total_input_tokens": 56101,
+      "total_output_tokens": 1062,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/Packet++/src/SipLayer.cpp\n+++ b/Packet++/src/SipLayer.cpp\n@@ -134,8 +134,21 @@\n \n \tparseVersion();\n \n-\tchar* endOfFirstLine;\n-\tif ((endOfFirstLine = (char *)memchr((char*)(m_SipRequest->m_Data + m_VersionOffset), '\\n', m_SipRequest->m_DataLen-(size_t)m_VersionOffset)) != nullptr)\n+\tchar* endOfFirstLine = nullptr;\n+\tif (m_VersionOffset >= 0 && static_cast<size_t>(m_VersionOffset) < m_SipRequest->m_DataLen)\n+\t{\n+\t\tendOfFirstLine = (char *)memchr((char*)(m_SipRequest->m_Data + m_VersionOffset),\n+\t\t                               '\\n',\n+\t\t                               m_SipRequest->m_DataLen - static_cast<size_t>(m_VersionOffset));\n+\t}\n+\telse\n+\t{\n+\t\tendOfFirstLine = (char *)memchr((char*)m_SipRequest->m_Data,\n+\t\t                               '\\n',\n+\t\t                               m_SipRequest->m_DataLen);\n+\t}\n+\n+\tif (endOfFirstLine != nullptr)\n \t{\n \t\tm_FirstLineEndOffset = endOfFirstLine - (char*)m_SipRequest->m_Data + 1;\n \t\tm_IsComplete = true;\n",
+    "patch": "--- a/Packet++/src/SipLayer.cpp\n+++ b/Packet++/src/SipLayer.cpp\n@@ -134,15 +134,31 @@\n \n \tparseVersion();\n \n-\tchar* endOfFirstLine;\n-\tif ((endOfFirstLine = (char *)memchr((char*)(m_SipRequest->m_Data + m_VersionOffset), '\\n', m_SipRequest->m_DataLen-(size_t)m_VersionOffset)) != nullptr)\n+\tchar* endOfFirstLine = nullptr;\n+\tif (m_VersionOffset >= 0 && static_cast<size_t>(m_VersionOffset) < m_SipRequest->m_DataLen)\n+\t{\n+\t\tendOfFirstLine = (char*)memchr((char*)(m_SipRequest->m_Data + m_VersionOffset),\n+\t\t                              '\\n',\n+\t\t                              m_SipRequest->m_DataLen - static_cast<size_t>(m_VersionOffset));\n+\t}\n+\telse if (m_VersionOffset >= m_SipRequest->m_DataLen)\n+\t{\n+\t\tPCPP_LOG_DEBUG(\"SIP version offset is out of bounds\");\n+\t}\n+\n+\tif (endOfFirstLine != nullptr)\n \t{\n \t\tm_FirstLineEndOffset = endOfFirstLine - (char*)m_SipRequest->m_Data + 1;\n \t\tm_IsComplete = true;\n \t}\n \telse\n \t{\n-\t\tm_FirstLineEndOffset = m_SipRequest->getDataLen();\n+\t\tchar* firstLineStart = (char*)m_SipRequest->m_Data;\n+\t\tchar* firstLineEnd = (char*)memchr(firstLineStart, '\\n', m_SipRequest->m_DataLen);\n+\t\tif (firstLineEnd != nullptr)\n+\t\t\tm_FirstLineEndOffset = firstLineEnd - firstLineStart + 1;\n+\t\telse\n+\t\t\tm_FirstLineEndOffset = m_SipRequest->getDataLen();\n \t\tm_IsComplete = false;\n \t}\n \n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -220,7 +241,7 @@
           138
         ],
         "kwargs": {},
-        "timestamp": 549676.432284732,
+        "timestamp": 1911832.898191299,
         "success": true,
         "result_summary": "Ok({'contents': ' 39 \\t{\"CANCEL\", SipRequestLayer::SipMethod::SipCANCEL },\\n 40 \\t{\"REGISTER\", SipRequestLayer::SipMethod::SipREGISTER },\\n 41 \\t{\"PRACK\", SipRequestLayer::SipMethod::SipPRACK },\\n 42 ..."
       },
@@ -228,35 +249,37 @@
         "tool_name": "read_source",
         "args": [
           "PcapPlusPlus/Packet++/src/SipLayer.cpp",
-          100
+          239
         ],
         "kwargs": {},
-        "timestamp": 549676.433482667,
+        "timestamp": 1912077.843583873,
         "success": true,
-        "result_summary": "Ok({'contents': '  1 #define LOG_MODULE PacketLogModuleSipLayer\\n  2 \\n  3 #include \"SipLayer.h\"\\n  4 #include \"SdpLayer.h\"\\n  5 #include \"PayloadLayer.h\"\\n  6 #include \"Logger.h\"\\n  7 #include \"Gener..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "PcapPlusPlus/Packet++/src/SipLayer.cpp",
-          360
-        ],
-        "kwargs": {},
-        "timestamp": 549676.434291872,
-        "success": true,
-        "result_summary": "Ok({'contents': '261 bool SipRequestFirstLine::setMethod(SipRequestLayer::SipMethod newMethod)\\n262 {\\n263 \\tif (newMethod == SipRequestLayer::SipMethodUnknown)\\n264 \\t{\\n265 \\t\\tPCPP_LOG_ERROR(\"Reque..."
+        "result_summary": "Ok({'contents': '140 \\t\\tm_FirstLineEndOffset = endOfFirstLine - (char*)m_SipRequest->m_Data + 1;\\n141 \\t\\tm_IsComplete = true;\\n142 \\t}\\n143 \\telse\\n144 \\t{\\n145 \\t\\tm_FirstLineEndOffset = m_SipReque..."
       }
     ],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "parseVersion",
+          "PcapPlusPlus/Packet++/src/SipLayer.cpp",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1912075.75213152,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='PcapPlusPlus/Packet++/src/SipLayer.cpp', refs=[FileReference(line=135, content='\\tparseVersion();', enclosing_definition='SipRequestFirstLine'), FileReference(line=882, c..."
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "PcapPlusPlus/Packet++/src/SipLayer.cpp",
-          "@@ -134,8 +134,19 @@ SipRequestFirstLine::SipRequestFirstLine(SipRequestLayer* sipRequest) : m_SipRe\n \n \tparseVersion();\n \n-\tchar* endOfFirstLine;\n-\tif ((endOfFirstLine = (char *)memchr((char*)(m_SipRequest->m_Data + m_VersionOffset), '\\n', m_SipRequest->m_DataLen-(size_t)m_VersionOffset)) != nullptr)\n+\tchar* endOfFirstLine = nullptr;\n+\tif (m_VersionOffset >= 0 && static_cast<size_t>(m_VersionOffset) < m_SipRequest->m_DataLen)\n+\t{\n+\t\tendOfFirstLine = (char *)memchr((char*)(m_SipRequest->m_Data + m_VersionOffset),\n+\t\t                               '\\n',\n+\t\t                               m_SipRequest->m_DataLen - static_cast<size_t>(m_VersionOffset));\n+\t}\n+\telse\n+\t{\n+\t\tendOfFirstLine = (char *)memchr((char*)m_SipRequest->m_Data,\n+\t\t                               '\\n',\n+\t\t                               m_SipRequest->m_DataLen);\n+\t}\n+\n+\tif (endOfFirstLine != nullptr)\n \t{\n \t\tm_FirstLineEndOffset = endOfFirstLine - (char*)m_SipRequest->m_Data + 1;\n \t\tm_IsComplete = true;"
+          "@@ -134,15 +134,29 @@\n \n \tparseVersion();\n \n-\tchar* endOfFirstLine;\n-\tif ((endOfFirstLine = (char *)memchr((char*)(m_SipRequest->m_Data + m_VersionOffset), '\\n', m_SipRequest->m_DataLen-(size_t)m_VersionOffset)) != nullptr)\n+\tchar* endOfFirstLine = nullptr;\n+\tif (m_VersionOffset >= 0 && static_cast<size_t>(m_VersionOffset) < m_SipRequest->m_DataLen)\n+\t{\n+\t\tendOfFirstLine = (char*)memchr((char*)(m_SipRequest->m_Data + m_VersionOffset),\n+\t\t                              '\\n',\n+\t\t                              m_SipRequest->m_DataLen - static_cast<size_t>(m_VersionOffset));\n+\t}\n+\telse if (m_VersionOffset >= m_SipRequest->m_DataLen)\n+\t{\n+\t\tPCPP_LOG_DEBUG(\"SIP version offset is out of bounds\");\n+\t}\n+\n+\tif (endOfFirstLine != nullptr)\n \t{\n \t\tm_FirstLineEndOffset = endOfFirstLine - (char*)m_SipRequest->m_Data + 1;\n \t\tm_IsComplete = true;\n \t}\n \telse\n \t{\n-\t\tm_FirstLineEndOffset = m_SipRequest->getDataLen();\n+\t\tchar* firstLineStart = (char*)m_SipRequest->m_Data;\n+\t\tchar* firstLineEnd = (char*)memchr(firstLineStart, '\\n', m_SipRequest->m_DataLen);\n+\t\tif (firstLineEnd != nullptr)\n+\t\t\tm_FirstLineEndOffset = firstLineEnd - firstLineStart + 1;\n+\t\telse\n+\t\t\tm_FirstLineEndOffset = m_SipRequest->getDataLen();\n \t\tm_IsComplete = false;\n \t}\n"
         ],
         "kwargs": {},
-        "timestamp": 549681.482237645,
+        "timestamp": 1912084.595167442,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -266,7 +289,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 549730.271066016,
+        "timestamp": 1912159.106804197,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

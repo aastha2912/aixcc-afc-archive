@@ -1,5 +1,5 @@
 {
-  "vuln_id": 156,
+  "vuln_id": 469,
   "crash_result": {
     "output": "==8479==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x619000000976 at pc 0x00000056deb8 bp 0x7ffd52a24290 sp 0x7ffd52a24288\nREAD of size 1 at 0x619000000976 thread T0\nSCARINESS: 12 (1-byte-read-heap-buffer-overflow)\n    #0 0x56deb7 in bit_read_B /src/libredwg/src/bits.c:166:10\n    #1 0x612ebd in dwg_decode_header_variables /src/libredwg/src/./header_variables.spec:436:7\n    #2 0x5a05a1 in decode_R13_R2000 /src/libredwg/src/decode.c:509:12\n    #3 0x58e5c8 in dwg_decode /src/libredwg/",
     "stack": "#0 0x56deb7 in bit_read_B libredwg/src/bits.c:166:10\n#1 0x612ebd in dwg_decode_header_variables libredwg/src/./header_variables.spec:436:7\n#2 0x5a05a1 in decode_R13_R2000 libredwg/src/decode.c:509:12\n#3 0x58e5c8 in dwg_decode libredwg/src/decode.c:229:12\n#4 0x56c732 in LLVMFuzzerTestOneInput libredwg/examples/llvmfuzz.c:88:11\n#5 0x43def3 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:611:15\n#6 0x429652 in fuzzer::RunOneT",
@@ -24,25 +24,58 @@
   "analyzed_vuln": {
     "function": "decode_R13_R2000",
     "file": "libredwg/src/decode.c",
-    "description": "In decode_R13_R2000, the code calls dwg_decode_header_variables(dat, dat, dat, dwg) using the full file Bit_Chain without constraining dat->size/endpoint to the declared header section length (dwg->header_vars.size / section bounds). The generated header parser (header_variables.spec, e.g. FIELD_B at line ~436) repeatedly calls bit_read_B, which reads dat->chain[dat->byte]. Because no effective per-section bound is enforced for these bit reads, malformed header metadata lets parsing run to the end of the fuzz buffer and perform a 1-byte OOB read at bits.c:166.",
-    "conditions": "A crafted DWG input must pass initial section checks so decode_R13_R2000 enters Header Variables parsing, then provide inconsistent/forged header variable length/contents so dwg_decode_header_variables continues reading boolean fields past available bytes for that logical section. Data flow: LLVMFuzzerTestOneInput -> dwg_decode -> decode_R13_R2000 -> dwg_decode_header_variables (header_variables.spec FIELD_B sequence) -> bit_read_B, where dat->byte reaches dat->size and reads one byte out of bounds."
+    "description": "Root cause is missing bounds enforcement for the header-variables bitstream before calling dwg_decode_header_variables. decode_R13_R2000 reads dwg->header_vars.size (RL) but does not constrain Bit_Chain (dat->size/end) to that section length prior to parsing the many FIELD_B/... reads in header_variables.spec. As a result, bit_read_B in bits.c can be driven to dat->byte == dat->size and perform dat->chain[dat->byte] OOB read (CHK_OVERFLOW only rejects > size, not == size with bit==0).",
+    "conditions": "In llvmfuzz, attacker-controlled DWG bytes set up a valid-enough R13/R2000 decode path and a malformed/truncated header variables section/length relationship. decode_R13_R2000 enters section 0, sets dat->byte to section start+16, reads header_vars.size, then dwg_decode_header_variables consumes fields past available input because no hard parse boundary is applied for that section. Eventually a FIELD_B read reaches end-of-buffer and triggers 1-byte heap OOB read in bit_read_B."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 5,
-      "total_cost": 0.030881549999999997,
-      "total_input_tokens": 42197,
-      "total_output_tokens": 560,
-      "total_cached_tokens": 32256,
+      "total_llm_calls": 6,
+      "total_cost": 0.052585049999999994,
+      "total_input_tokens": 64015,
+      "total_output_tokens": 607,
+      "total_cached_tokens": 43136,
       "llm_calls": [
         {
-          "timestamp": 1773435985.7892296,
+          "timestamp": 1774870408.5083432,
           "model": "gpt-5.3-codex",
-          "cost": 0.0084091,
-          "input_tokens": 5050,
-          "output_tokens": 99,
-          "total_tokens": 5149,
-          "cached_tokens": 1152,
+          "cost": 0.0108115,
+          "input_tokens": 5138,
+          "output_tokens": 130,
+          "total_tokens": 5268,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_mctP4wCjaqclVbUtJJQXFu0A"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_iZ9vJdbBsSgowAi4DMTAcUpW"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_ypQnMgSu8YilVP70EjgBqFum"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_10q86ZVFdFUAw5DzeIFDA3KA"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774870412.1993957,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0028525,
+          "input_tokens": 5454,
+          "output_tokens": 98,
+          "total_tokens": 5552,
+          "cached_tokens": 5120,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -50,57 +83,28 @@
           "tool_call_count": 3,
           "tool_calls": [
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_GGbt4mkXAcIcjLUHRyC1U0wk"
+              "tool_name": "read_source",
+              "tool_call_id": "call_EwuEGZQZmblRF34HQelteMAq"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_WAuePmiBp7viuv5lvuzqjsZY"
+              "tool_call_id": "call_e4RM4sClIK2UlkeHYWgTUP8Y"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_OrLAYKlVkq9b4wSUEk7mJnab"
+              "tool_call_id": "call_y2p1N9cKuvKEXOlHT1B56Hao"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773435992.5736456,
+          "timestamp": 1774870414.227231,
           "model": "gpt-5.3-codex",
-          "cost": 0.00287385,
-          "input_tokens": 5271,
-          "output_tokens": 108,
-          "total_tokens": 5379,
-          "cached_tokens": 4992,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 3,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_ZjfmfNRha1Xgt25K4LlNtWVc"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_6PTRX7oWcRqjh9Zy0y7SFx5B"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_14B8cQ3dsQQTrCElukrUoTJv"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773435995.6712213,
-          "model": "gpt-5.3-codex",
-          "cost": 0.01051715,
-          "input_tokens": 10413,
-          "output_tokens": 40,
-          "total_tokens": 10453,
-          "cached_tokens": 5248,
+          "cost": 0.022795499999999996,
+          "input_tokens": 12690,
+          "output_tokens": 42,
+          "total_tokens": 12732,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -109,19 +113,19 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_NW2sr3OGMPznBcXatX815V2X"
+              "tool_call_id": "call_TVaJNNKnsCSecvrM56WF3b2t"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773435999.4853365,
+          "timestamp": 1774870421.6850832,
           "model": "gpt-5.3-codex",
-          "cost": 0.00272965,
-          "input_tokens": 10603,
-          "output_tokens": 36,
-          "total_tokens": 10639,
-          "cached_tokens": 10368,
+          "cost": 0.0031822,
+          "input_tokens": 12772,
+          "output_tokens": 42,
+          "total_tokens": 12814,
+          "cached_tokens": 12544,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -129,20 +133,41 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "find_references",
-              "tool_call_id": "call_Y6PmtFRv4pxI6ePs7QG3yexf"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Yh1Nl1xoIThaX50xAN6lnbSC"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773436013.0068908,
+          "timestamp": 1774870425.624311,
           "model": "gpt-5.3-codex",
-          "cost": 0.0063517999999999995,
-          "input_tokens": 10860,
-          "output_tokens": 277,
-          "total_tokens": 11137,
-          "cached_tokens": 10496,
+          "cost": 0.0029998499999999997,
+          "input_tokens": 12871,
+          "output_tokens": 31,
+          "total_tokens": 12902,
+          "cached_tokens": 12672,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_f3Fxa7DaGpbW4o99DfOXBROL"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774870431.5022511,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0099435,
+          "input_tokens": 15090,
+          "output_tokens": 264,
+          "total_tokens": 15354,
+          "cached_tokens": 12800,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -151,7 +176,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_TldXrU6vXMAt1ShsVbJ3OlVD"
+              "tool_call_id": "call_2K2pIwkBYSNOXmPWnyt6NJ6d"
             }
           ],
           "finish_reason": "tool_calls"
@@ -160,18 +185,18 @@
     },
     "patching": {
       "total_llm_calls": 5,
-      "total_cost": 0.039844,
-      "total_input_tokens": 52200,
-      "total_output_tokens": 641,
-      "total_cached_tokens": 38400,
+      "total_cost": 0.050664249999999994,
+      "total_input_tokens": 48439,
+      "total_output_tokens": 516,
+      "total_cached_tokens": 26240,
       "llm_calls": [
         {
-          "timestamp": 1773436015.684526,
+          "timestamp": 1774870433.6342287,
           "model": "gpt-5.3-codex",
-          "cost": 0.010667999999999999,
-          "input_tokens": 5352,
+          "cost": 0.01230425,
+          "input_tokens": 6287,
           "output_tokens": 93,
-          "total_tokens": 5445,
+          "total_tokens": 6380,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -181,56 +206,52 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_cDedWaRO7100zD0wvDW5FQlV"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_ggh7pfzzXtt5PjkKiadD7tcw"
+              "tool_call_id": "call_cCCVXIe6jncLqaTpRDYjgFhH"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_Vn4FMKYV92yjvgSPf8XslZJh"
+              "tool_call_id": "call_ENjZyoYq04RAQrq8OwhsAMpg"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_n2IxKgBdHmSNeAzXdvKLm0w1"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773436021.8309932,
+          "timestamp": 1774870449.8869817,
           "model": "gpt-5.3-codex",
-          "cost": 0.0029638,
-          "input_tokens": 5748,
-          "output_tokens": 98,
-          "total_tokens": 5846,
-          "cached_tokens": 5376,
+          "cost": 0.0028248500000000003,
+          "input_tokens": 6683,
+          "output_tokens": 72,
+          "total_tokens": 6755,
+          "cached_tokens": 6272,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 2,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Ndyl7ZKcE4ny0ycswqwAp9Yu"
+              "tool_call_id": "call_GFpJ5d9nv0C61fvxR2ncQxfj"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_kFBvnXvtj3NhBMA55haijZXd"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_jEL8YRzPByIpsFed6gDsOKau"
+              "tool_call_id": "call_8ts2mskrFycA7doM7rNvd9gA"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773436027.573023,
+          "timestamp": 1774870454.7286801,
           "model": "gpt-5.3-codex",
-          "cost": 0.02003925,
-          "input_tokens": 13331,
-          "output_tokens": 413,
-          "total_tokens": 13744,
-          "cached_tokens": 5760,
+          "cost": 0.0140728,
+          "input_tokens": 11520,
+          "output_tokens": 314,
+          "total_tokens": 11834,
+          "cached_tokens": 6656,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -239,19 +260,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_y5a4YGT1oo2U0PCHRi29nR18"
+              "tool_call_id": "call_uiftr05rvyZAcSY6ksaaPKfz"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773436031.094488,
+          "timestamp": 1774870456.039693,
           "model": "gpt-5.3-codex",
-          "cost": 0.0030324,
-          "input_tokens": 13832,
+          "cost": 0.0027139,
+          "input_tokens": 11922,
           "output_tokens": 14,
-          "total_tokens": 13846,
-          "cached_tokens": 13568,
+          "total_tokens": 11936,
+          "cached_tokens": 11648,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -260,19 +281,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_Mc1Gmy91jcHg04iknr9WCn9Z"
+              "tool_call_id": "call_lFpPynswdumfwzub5vtPIxt1"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773436721.371365,
+          "timestamp": 1774871326.7821524,
           "model": "gpt-5.3-codex",
-          "cost": 0.0031405499999999998,
-          "input_tokens": 13937,
+          "cost": 0.018748449999999996,
+          "input_tokens": 12027,
           "output_tokens": 23,
-          "total_tokens": 13960,
-          "cached_tokens": 13696,
+          "total_tokens": 12050,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -281,7 +302,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_H6YTEGkdzjorFI3Fk0mlMiGJ"
+              "tool_call_id": "call_5YymWzlAnxCNzj9kCJ7UxyjX"
             }
           ],
           "finish_reason": "tool_calls"
@@ -289,15 +310,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.07072555,
-      "total_input_tokens": 94397,
-      "total_output_tokens": 1201,
-      "total_llm_calls": 10
+      "total_cost": 0.10324929999999999,
+      "total_input_tokens": 112454,
+      "total_output_tokens": 1123,
+      "total_llm_calls": 11
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/libredwg/src/decode.c\n+++ b/libredwg/src/decode.c\n@@ -497,6 +497,15 @@\n #define MAX_HEADER_SIZE 2048\n   dwg->header_vars.size = bit_read_RL (dat);\n   LOG_TRACE (\"         Length: \" FORMAT_RL \" [RL]\\n\", dwg->header_vars.size)\n+  {\n+    BITCODE_RL secsize = dwg->header.section[SECTION_HEADER_R13].size;\n+    BITCODE_RL max_hv_size = secsize > 20 ? secsize - 20 : 0;\n+    if (dwg->header_vars.size > max_hv_size)\n+      {\n+        LOG_WARN (\"Fixup illegal Header Length\");\n+        dwg->header_vars.size = max_hv_size;\n+      }\n+  }\n   if (dwg->header_vars.size > MAX_HEADER_SIZE)\n     {\n       LOG_WARN (\"Fixup illegal Header Length\");\n@@ -505,8 +514,14 @@\n         dwg->header_vars.size -= 16 + 4;\n     }\n   dat->bit = 0;\n-\n-  error |= dwg_decode_header_variables (dat, dat, dat, dwg);\n+  {\n+    size_t old_size = dat->size;\n+    size_t end_address = pvz + 4 + dwg->header_vars.size;\n+    if (end_address < dat->size)\n+      dat->size = end_address;\n+    error |= dwg_decode_header_variables (dat, dat, dat, dwg);\n+    dat->size = old_size;\n+  }\n \n   // LOG_HANDLE (\"@ 0x\" FORMAT_RLLx \".%\" PRIuSIZE \"\\n\", bit_position (dat)/8,\n   // bit_position (dat)%8); check slack Check CRC, hardcoded to 2 before end\n",
+    "patch": "--- a/libredwg/src/decode.c\n+++ b/libredwg/src/decode.c\n@@ -506,7 +506,23 @@\n     }\n   dat->bit = 0;\n \n+  {\n+    size_t old_size = dat->size;\n+    size_t hdr_end = (size_t)pvz + (size_t)dwg->header_vars.size;\n+    if (hdr_end > old_size)\n+      {\n+        LOG_WARN (\"Truncated Header Variables section: %\" PRIuSIZE \" > %\" PRIuSIZE,\n+                  hdr_end, old_size);\n+        hdr_end = old_size;\n+        if (hdr_end > (size_t)pvz)\n+          dwg->header_vars.size = (BITCODE_RL)(hdr_end - (size_t)pvz);\n+        else\n+          dwg->header_vars.size = 0;\n+      }\n+    dat->size = hdr_end;\n   error |= dwg_decode_header_variables (dat, dat, dat, dwg);\n+    dat->size = old_size;\n+  }\n \n   // LOG_HANDLE (\"@ 0x\" FORMAT_RLLx \".%\" PRIuSIZE \"\\n\", bit_position (dat)/8,\n   // bit_position (dat)%8); check slack Check CRC, hardcoded to 2 before end\n",
     "build_artifacts_count": 1,
     "tested_povs_count": 1,
     "last_validation": {
@@ -320,7 +341,7 @@
           166
         ],
         "kwargs": {},
-        "timestamp": 468304.643403371,
+        "timestamp": 1902722.676460082,
         "success": true,
         "result_summary": "Err(CRSError(path 'src/bits.c' does not exist in directory tree. Similar paths: libredwg/src/bits.c, extra=None))"
       },
@@ -331,7 +352,7 @@
           509
         ],
         "kwargs": {},
-        "timestamp": 468305.388779506,
+        "timestamp": 1902723.106576001,
         "success": true,
         "result_summary": "Err(CRSError(path 'src/decode.c' does not exist in directory tree. Similar paths: libredwg/src/decode.c, extra=None))"
       },
@@ -342,20 +363,9 @@
           509
         ],
         "kwargs": {},
-        "timestamp": 468310.410340557,
+        "timestamp": 1902738.46368424,
         "success": true,
         "result_summary": "Ok({'contents': '410           size_t old_size = dat->size;\\n411           BITCODE_BL vcount;\\n412           dat->size = end_address;\\n413           // clang-format off\\n414           #include \"auxhea..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "libredwg/src/decode.c",
-          450
-        ],
-        "kwargs": {},
-        "timestamp": 468310.413953333,
-        "success": true,
-        "result_summary": "Ok({'contents': '351         strcpy (dwg->header.section[j].name, section_names[j]);\\n352       LOG_TRACE (\"section[%u].number:  %4d [RC] %s\\\\n\", j,\\n353                  (int)dwg->header.section[j].n..."
       },
       {
         "tool_name": "read_source",
@@ -364,7 +374,7 @@
           166
         ],
         "kwargs": {},
-        "timestamp": 468310.417150864,
+        "timestamp": 1902738.464795247,
         "success": true,
         "result_summary": "Ok({'contents': ' 67   if (pos + advance > endpos)\\n 68     {\\n 69       loglevel = dat->opts & DWG_OPTS_LOGLEVEL;\\n 70       LOG_ERROR (\"%s buffer overflow at pos %\" PRIuSIZE \".%u, size %\" PRIuSIZE\\n..."
       }
@@ -378,7 +388,7 @@
           false
         ],
         "kwargs": {},
-        "timestamp": 468308.28204341,
+        "timestamp": 1902736.748876037,
         "success": true,
         "result_summary": "Ok([FileReferences(file_name='libredwg/src/decode_r2007.c', refs=[FileReference(line=1616, content='      dwg_decode_header_variables (&sec_dat, hdl_dat, &str_dat, dwg);', enclosing_definition='read_2..."
       }
@@ -388,10 +398,10 @@
         "tool_name": "apply_patch",
         "args": [
           "libredwg/src/decode.c",
-          "@@ -497,13 +497,26 @@\n #define MAX_HEADER_SIZE 2048\n   dwg->header_vars.size = bit_read_RL (dat);\n   LOG_TRACE (\"         Length: \" FORMAT_RL \" [RL]\\n\", dwg->header_vars.size)\n+  {\n+    BITCODE_RL secsize = dwg->header.section[SECTION_HEADER_R13].size;\n+    BITCODE_RL max_hv_size = secsize > 20 ? secsize - 20 : 0;\n+    if (dwg->header_vars.size > max_hv_size)\n+      {\n+        LOG_WARN (\"Fixup illegal Header Length\");\n+        dwg->header_vars.size = max_hv_size;\n+      }\n+  }\n   if (dwg->header_vars.size > MAX_HEADER_SIZE)\n     {\n       LOG_WARN (\"Fixup illegal Header Length\");\n       dwg->header_vars.size = dwg->header.section[SECTION_HEADER_R13].size;\n       if (dwg->header_vars.size > 20)\n         dwg->header_vars.size -= 16 + 4;\n     }\n   dat->bit = 0;\n-\n-  error |= dwg_decode_header_variables (dat, dat, dat, dwg);\n+  {\n+    size_t old_size = dat->size;\n+    size_t end_address = pvz + 4 + dwg->header_vars.size;\n+    if (end_address < dat->size)\n+      dat->size = end_address;\n+    error |= dwg_decode_header_variables (dat, dat, dat, dwg);\n+    dat->size = old_size;\n+  }\n "
+          "@@ -507,7 +507,24 @@\n   dat->bit = 0;\n \n+  {\n+    size_t old_size = dat->size;\n+    size_t hdr_end = (size_t)pvz + (size_t)dwg->header_vars.size;\n+    if (hdr_end > old_size)\n+      {\n+        LOG_WARN (\"Truncated Header Variables section: %\" PRIuSIZE \" > %\" PRIuSIZE,\n+                  hdr_end, old_size);\n+        hdr_end = old_size;\n+        if (hdr_end > (size_t)pvz)\n+          dwg->header_vars.size = (BITCODE_RL)(hdr_end - (size_t)pvz);\n+        else\n+          dwg->header_vars.size = 0;\n+      }\n+    dat->size = hdr_end;\n   error |= dwg_decode_header_variables (dat, dat, dat, dwg);\n+    dat->size = old_size;\n+  }\n \n   // LOG_HANDLE (\"@ 0x\" FORMAT_RLLx \".%\" PRIuSIZE \"\\n\", bit_position (dat)/8,\n   // bit_position (dat)%8); check slack Check CRC, hardcoded to 2 before end\n"
         ],
         "kwargs": {},
-        "timestamp": 468316.266010753,
+        "timestamp": 1902743.393723306,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -401,7 +411,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 469008.554623164,
+        "timestamp": 1903611.293820132,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

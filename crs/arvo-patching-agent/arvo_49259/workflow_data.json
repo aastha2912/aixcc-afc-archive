@@ -1,5 +1,5 @@
 {
-  "vuln_id": 137,
+  "vuln_id": 449,
   "crash_result": {
     "output": "==985==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x619000000480 at pc 0x000000669135 bp 0x7ffc4e308270 sp 0x7ffc4e308268\nWRITE of size 8 at 0x619000000480 thread T0\nSCARINESS: 42 (8-byte-write-heap-buffer-overflow)\n    #0 0x669134 in mrb_vm_exec /src/mruby/src/vm.c\n    #1 0x63184c in mrb_vm_run /src/mruby/src/vm.c:1208:12\n    #2 0x62d7dc in mrb_top_run /src/mruby/src/vm.c\n    #3 0x59aa3f in mrb_load_exec /src/mruby/mrbgems/mruby-compiler/core/parse.y:6889:7\n    #4 0x59c1a5 in mrb_",
     "stack": "#0 0x669134 in mrb_vm_exec mruby/src/vm.c\n#1 0x63184c in mrb_vm_run mruby/src/vm.c:1208:12\n#2 0x62d7dc in mrb_top_run mruby/src/vm.c\n#3 0x59aa3f in mrb_load_exec mruby/mrbgems/mruby-compiler/core/parse.y:6889:7\n#4 0x59c1a5 in mrb_load_nstring_cxt mruby/mrbgems/mruby-compiler/core/parse.y:6961:10\n#5 0x59c3a1 in mrb_load_string_cxt mruby/mrbgems/mruby-compiler/core/parse.y:6973:10\n#6 0x59c3a1 in mrb_load_string mruby/mrbgems/mruby-compiler/core/parse.y:6979:10\n#7 0x4d7029 in LLVMFuzzerTestOneInput",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "mrb_vm_exec",
     "file": "mruby/src/vm.c",
-    "description": "Heap buffer overflow is caused by VM execution using a stale/invalid register stack pointer (`regs` = `mrb->c->ci->stack`) after stack/callinfo state corruption from malformed compiled code paths. In this PoV, crafted source fed through `mrb_load_string` leads `mrb_vm_exec` to perform an 8-byte write at exactly one element past the allocated VM stack (1024 bytes), i.e. out-of-bounds write on `c->stbase` region.",
-    "conditions": "Data flow: `mruby_fuzzer` -> `mrb_load_string` (compiler parses attacker-controlled bytes) -> `mrb_load_exec`/`mrb_top_run` -> `mrb_vm_run` -> `mrb_vm_exec`. Trigger requires attacker input that compiles into inconsistent bytecode/control-flow/stack usage so VM register indexing exceeds current stack bounds; then an instruction in `mrb_vm_exec` writes through `regs[...]` past `stend`. The crash manifests as write at `0x...480`, immediately past a 128-slot initial stack allocation from `stack_init`."
+    "description": "Heap-buffer-overflow is caused by missing register-bound checks in VM opcode handlers that index the current stack frame via untrusted bytecode operand `a`. In this PoV, execution reaches OP_SETIDX and unconditionally writes `SET_NIL_VALUE(regs[a+3])`; when `a` is crafted near the end of the allocated stack frame, this writes past `c->stend` (ASan shows write at exactly end of 1024-byte stack buffer). The root cause is unsafe use of `a`-based register offsets in `mrb_vm_exec` without validating that `a+N < irep->nregs` / current frame capacity before read/write.",
+    "conditions": "Data flow: `mruby_fuzzer` calls `mrb_load_string` on attacker-controlled bytes, compiler/parser produces an irep, then `mrb_vm_run` initializes a fixed initial stack (128 mrb_value) and calls `mrb_vm_exec`. A malformed script/bytecode sequence must drive VM to an opcode path using multi-slot register access (here OP_SETIDX with `regs[a+3]`) with an out-of-range `a` value relative to available registers/stack. Because no bounds check is done before the write, a heap OOB write occurs."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 4,
-      "total_cost": 0.19740385000000002,
-      "total_input_tokens": 187663,
-      "total_output_tokens": 492,
-      "total_cached_tokens": 87552,
+      "total_llm_calls": 5,
+      "total_cost": 0.13060285,
+      "total_input_tokens": 238699,
+      "total_output_tokens": 573,
+      "total_cached_tokens": 187392,
       "llm_calls": [
         {
-          "timestamp": 1773425167.8876498,
+          "timestamp": 1774860441.7839177,
           "model": "gpt-5.3-codex",
-          "cost": 0.07785575,
-          "input_tokens": 43697,
-          "output_tokens": 99,
-          "total_tokens": 43796,
+          "cost": 0.07809375,
+          "input_tokens": 43785,
+          "output_tokens": 105,
+          "total_tokens": 43890,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,56 +51,56 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_5O13YWuAmYZrZut2C5kZWkdB"
+              "tool_call_id": "call_SiQ48KB8XQOT7vzE8HlutHYO"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_TgtkxrmmkMyUMtrKjZzmfx1W"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_kGEVolFPOHuNXodS7hqBA7fM"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773425219.746365,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00955465,
-          "input_tokens": 43927,
-          "output_tokens": 102,
-          "total_tokens": 44029,
-          "cached_tokens": 43648,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 3,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_WiRt6lwtw0KJy2Q1QFpxrBuw"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_finCEP2MnxWGBBFnjMEKDpNi"
+              "tool_call_id": "call_4EtNBjBIKt7pAz3MKXc5kWRY"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_UOIu1uU1PJMd646CgQxn2eUB"
+              "tool_call_id": "call_Fk8NjYjjNnYrDPXQkmZQdk2A"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773425239.6599958,
+          "timestamp": 1774860680.9078407,
           "model": "gpt-5.3-codex",
-          "cost": 0.08587600000000001,
-          "input_tokens": 48840,
-          "output_tokens": 29,
-          "total_tokens": 48869,
-          "cached_tokens": 0,
+          "cost": 0.009580549999999998,
+          "input_tokens": 44017,
+          "output_tokens": 107,
+          "total_tokens": 44124,
+          "cached_tokens": 43776,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_y37Wc3ooE6HDM3uwnejQ9rnf"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_2asuwUjVkWwdYBmxyYsOUqYC"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_XnftTgHWYSSpEtTyH8w7cAaX"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774860699.1385334,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0166796,
+          "input_tokens": 48920,
+          "output_tokens": 30,
+          "total_tokens": 48950,
+          "cached_tokens": 44032,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -109,19 +109,40 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_hiBZjkhcoFyJBJ6oowjay5lD"
+              "tool_call_id": "call_xFDrmVdwoYxB6AkUlFbZXnfi"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773425245.5511768,
+          "timestamp": 1774860701.1074734,
           "model": "gpt-5.3-codex",
-          "cost": 0.024117450000000002,
-          "input_tokens": 51199,
-          "output_tokens": 262,
-          "total_tokens": 51461,
-          "cached_tokens": 43904,
+          "cost": 0.0128674,
+          "input_tokens": 50940,
+          "output_tokens": 38,
+          "total_tokens": 50978,
+          "cached_tokens": 48768,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_CggQgUG1u96BVGnSgc2oqMx7"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774860856.149754,
+          "model": "gpt-5.3-codex",
+          "cost": 0.013381549999999999,
+          "input_tokens": 51037,
+          "output_tokens": 293,
+          "total_tokens": 51330,
+          "cached_tokens": 50816,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -130,7 +151,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_DT2R95i4IHap9qUsRZ8vZ2Y4"
+              "tool_call_id": "call_USUf6Fpc1b55ZxuPInl0s8Ue"
             }
           ],
           "finish_reason": "tool_calls"
@@ -139,18 +160,18 @@
     },
     "patching": {
       "total_llm_calls": 6,
-      "total_cost": 0.2124934,
-      "total_input_tokens": 283460,
-      "total_output_tokens": 424,
-      "total_cached_tokens": 183808,
+      "total_cost": 0.1344546,
+      "total_input_tokens": 286996,
+      "total_output_tokens": 355,
+      "total_cached_tokens": 236672,
       "llm_calls": [
         {
-          "timestamp": 1773425249.2734454,
+          "timestamp": 1774860859.4064372,
           "model": "gpt-5.3-codex",
-          "cost": 0.07750399999999999,
-          "input_tokens": 43688,
-          "output_tokens": 75,
-          "total_tokens": 43763,
+          "cost": 0.07968275,
+          "input_tokens": 44949,
+          "output_tokens": 73,
+          "total_tokens": 45022,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -160,23 +181,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_vKWMXliWoMa4hN7kOwRymoux"
+              "tool_call_id": "call_6lBeffJXMCiyJ9WSsMhxIOVu"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_CKnGF6bHnYex1Ve8tkDBOz5A"
+              "tool_call_id": "call_zmrp96lLasciLFEpLpOAFOyh"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773425253.248456,
+          "timestamp": 1774860863.3163311,
           "model": "gpt-5.3-codex",
-          "cost": 0.0778435,
-          "input_tokens": 43866,
+          "cost": 0.0092869,
+          "input_tokens": 45126,
           "output_tokens": 77,
-          "total_tokens": 43943,
-          "cached_tokens": 0,
+          "total_tokens": 45203,
+          "cached_tokens": 44928,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -185,23 +206,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Gt2tSvahAxiJWj7rzgskXzxM"
+              "tool_call_id": "call_awPEYdvGV4akpPMkAjPftw3p"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_UybKDoLVNmHHHVVAwOXVtl5Z"
+              "tool_call_id": "call_ArpSh9a0Xz3ytNnhbdkATDN4"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773425270.1479843,
+          "timestamp": 1774860885.5028534,
           "model": "gpt-5.3-codex",
-          "cost": 0.0141169,
-          "input_tokens": 47118,
-          "output_tokens": 29,
-          "total_tokens": 47147,
-          "cached_tokens": 43648,
+          "cost": 0.01261505,
+          "input_tokens": 47519,
+          "output_tokens": 30,
+          "total_tokens": 47549,
+          "cached_tokens": 45056,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -210,19 +231,19 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_YfEIw4t3TgENDusO5IIwdJue"
+              "tool_call_id": "call_GqkVU0latST3SUI9DPTVpzcm"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773425273.378686,
+          "timestamp": 1774860891.3691976,
           "model": "gpt-5.3-codex",
-          "cost": 0.02032555,
-          "input_tokens": 49365,
-          "output_tokens": 206,
-          "total_tokens": 49571,
-          "cached_tokens": 43776,
+          "cost": 0.01416625,
+          "input_tokens": 49615,
+          "output_tokens": 138,
+          "total_tokens": 49753,
+          "cached_tokens": 47360,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -231,19 +252,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_kfJPysjhR8YWFNkuccTX4xgL"
+              "tool_call_id": "call_QI6asjbBq783GSZckoGUInxo"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773425274.78602,
+          "timestamp": 1774860895.6249983,
           "model": "gpt-5.3-codex",
-          "cost": 0.00928165,
-          "input_tokens": 49659,
+          "cost": 0.009196949999999999,
+          "input_tokens": 49841,
           "output_tokens": 14,
-          "total_tokens": 49673,
-          "cached_tokens": 49408,
+          "total_tokens": 49855,
+          "cached_tokens": 49664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -252,19 +273,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_HFWHOrucI5QlSTHb1LqsTyo7"
+              "tool_call_id": "call_Tp66ghpcGB9yzTZKvoYBH9hW"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773425320.5139403,
+          "timestamp": 1774861176.6224473,
           "model": "gpt-5.3-codex",
-          "cost": 0.0134218,
-          "input_tokens": 49764,
+          "cost": 0.0095067,
+          "input_tokens": 49946,
           "output_tokens": 23,
-          "total_tokens": 49787,
-          "cached_tokens": 46976,
+          "total_tokens": 49969,
+          "cached_tokens": 49664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -273,7 +294,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_gE4bMkN4hbHu1T7h0zcxPt9h"
+              "tool_call_id": "call_4VicPgjYVvqqh8qGcEfq1eYn"
             }
           ],
           "finish_reason": "tool_calls"
@@ -281,15 +302,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.40989725,
-      "total_input_tokens": 471123,
-      "total_output_tokens": 916,
-      "total_llm_calls": 10
+      "total_cost": 0.26505745000000003,
+      "total_input_tokens": 525695,
+      "total_output_tokens": 928,
+      "total_llm_calls": 11
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/mruby/src/vm.c\n+++ b/mruby/src/vm.c\n@@ -1295,6 +1295,11 @@\n   int ai = mrb_gc_arena_save(mrb);\n   struct mrb_jmpbuf *prev_jmp = mrb->jmp;\n   struct mrb_jmpbuf c_jmp;\n+\n+  if (!mrb->c->ci->stack || mrb->c->ci->stack < mrb->c->stbase || mrb->c->ci->stack >= mrb->c->stend) {\n+    mrb_raise(mrb, E_RUNTIME_ERROR, \"invalid VM stack state\");\n+  }\n+\n   uint32_t a;\n   uint16_t b;\n   uint16_t c;\n",
+    "patch": "--- a/mruby/src/vm.c\n+++ b/mruby/src/vm.c\n@@ -1513,6 +1513,9 @@\n     CASE(OP_SETIDX, B) {\n       c = 2;\n       mid = MRB_OPSYM(aset);\n+      if (a + 3 >= irep->nregs) {\n+        mrb_raise(mrb, E_RUNTIME_ERROR, \"invalid OP_SETIDX register access\");\n+      }\n       SET_NIL_VALUE(regs[a+3]);\n       goto L_SENDB_SYM;\n     }\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -309,10 +330,10 @@
         "tool_name": "read_source",
         "args": [
           "src/vm.c",
-          1200
+          600
         ],
         "kwargs": {},
-        "timestamp": 457538.68091894,
+        "timestamp": 1893149.119349586,
         "success": true,
         "result_summary": "Err(CRSError(path 'src/vm.c' does not exist in directory tree. Similar paths: mruby/src/vm.c, extra=None))"
       },
@@ -320,49 +341,49 @@
         "tool_name": "read_source",
         "args": [
           "mruby/src/vm.c",
-          1200
+          650
         ],
         "kwargs": {},
-        "timestamp": 457541.9175186,
+        "timestamp": 1893151.894834634,
         "success": true,
-        "result_summary": "Ok({'contents': '1101   }\\n1102   else {\\n1103     mrb->exc = (struct RObject*)break_new(mrb, tag, proc, val);\\n1104   }\\n1105 }\\n1106 \\n1107 #define THROW_TAGGED_BREAK(mrb, tag, proc, val) \\\\\\n1108  ..."
+        "result_summary": "Ok({'contents': '551   if (nk == 0) {\\n552     argv[1] = blk;\\n553   }\\n554   else {\\n555     mrb_assert(nk == 15);\\n556     argv[1] = argv[n];\\n557     argv[2] = blk;\\n558   }\\n559   *c = 15 | (uint1..."
       },
       {
         "tool_name": "read_source",
         "args": [
           "mruby/src/vm.c",
-          140
+          1513
         ],
         "kwargs": {},
-        "timestamp": 457558.723541355,
+        "timestamp": 1893174.078314713,
         "success": true,
-        "result_summary": "Ok({'contents': ' 41 #define STACK_INIT_SIZE 128\\n 42 #define CALLINFO_INIT_SIZE 32\\n 43 \\n 44 /* Define amount of linear stack growth. */\\n 45 #ifndef MRB_STACK_GROWTH\\n 46 #define MRB_STACK_GROWTH 1..."
+        "result_summary": "Ok({'contents': '1414       SET_SYM_VALUE(regs[a], syms[b]);\\n1415       NEXT;\\n1416     }\\n1417 \\n1418     CASE(OP_LOADNIL, B) {\\n1419       SET_NIL_VALUE(regs[a]);\\n1420       NEXT;\\n1421     }\\n142..."
       }
     ],
     "find_references": [
       {
         "tool_name": "find_references",
         "args": [
-          "mrb_vm_exec",
+          "OP_SETIDX",
           "src/vm.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 457538.063651671,
+        "timestamp": 1893148.222868905,
         "success": true,
-        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: mruby/include/mruby.h, mruby/mrbgems/mruby-fiber/src/fiber.c, mruby/src/vm.c, extra=None))"
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: mruby/src/vm.c, mruby/mrbgems/mruby-compiler/core/codegen.c, mruby/src/codedump.c, extra=None))"
       },
       {
         "tool_name": "find_references",
         "args": [
-          "stack_extend",
+          "OP_SETIDX",
           "mruby/src/vm.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 457550.459837686,
+        "timestamp": 1893169.498144304,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='/src/mruby/src/vm.c', refs=[FileReference(line=163, content='stack_extend_alloc(mrb_state *mrb, mrb_int room)', enclosing_definition='N/A'), FileReference(line=204, conte..."
+        "result_summary": "Ok([FileReferences(file_name='mruby/src/vm.c', refs=[FileReference(line=1513, content='    CASE(OP_SETIDX, B) {', enclosing_definition='OPCODE')])])"
       }
     ],
     "apply_patch": [
@@ -370,10 +391,10 @@
         "tool_name": "apply_patch",
         "args": [
           "mruby/src/vm.c",
-          "@@ -1295,6 +1295,11 @@ mrb_vm_exec(mrb_state *mrb, const struct RProc *proc, const mrb_code *pc)\n   int ai = mrb_gc_arena_save(mrb);\n   struct mrb_jmpbuf *prev_jmp = mrb->jmp;\n   struct mrb_jmpbuf c_jmp;\n+\n+  if (!mrb->c->ci->stack || mrb->c->ci->stack < mrb->c->stbase || mrb->c->ci->stack >= mrb->c->stend) {\n+    mrb_raise(mrb, E_RUNTIME_ERROR, \"invalid VM stack state\");\n+  }\n+\n   uint32_t a;\n   uint16_t b;\n   uint16_t c;"
+          "@@ -1513,10 +1513,16 @@\n     CASE(OP_SETIDX, B) {\n       c = 2;\n       mid = MRB_OPSYM(aset);\n+      if (a + 3 >= irep->nregs) {\n+        mrb_raise(mrb, E_RUNTIME_ERROR, \"invalid OP_SETIDX register access\");\n+      }\n       SET_NIL_VALUE(regs[a+3]);\n       goto L_SENDB_SYM;\n     }\n"
         ],
         "kwargs": {},
-        "timestamp": 457561.989473656,
+        "timestamp": 1893180.08981815,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -383,7 +404,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 457607.126034669,
+        "timestamp": 1893463.234278308,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

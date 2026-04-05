@@ -1,5 +1,5 @@
 {
-  "vuln_id": 83,
+  "vuln_id": 381,
   "crash_result": {
     "output": "UndefinedBehaviorSanitizer:DEADLYSIGNAL\n==2015==ERROR: UndefinedBehaviorSanitizer: SEGV on unknown address 0x000069659da9 (pc 0x0000004e3354 bp 0x7ffcbd6efc10 sp 0x7ffcbd6efb60 T2015)\n==2015==The signal is caused by a READ memory access.\n    #0 0x4e3354 in sw32_ /src/c-blosc2/blosc/blosc-private.h:44:13\n    #1 0x4e3354 in blosc_d /src/c-blosc2/blosc/blosc2.c:1124:14\n    #2 0x4e2468 in _blosc_getitem /src/c-blosc2/blosc/blosc2.c:2611:14\n    #3 0x4e3f3d in blosc_getitem /src/c-blosc2/blosc/blosc2.",
     "stack": "#0 0x4e3354 in sw32_ c-blosc2/blosc/blosc-private.h:44:13\n#1 0x4e3354 in blosc_d c-blosc2/blosc/blosc2.c:1124:14\n#2 0x4e2468 in _blosc_getitem c-blosc2/blosc/blosc2.c:2611:14\n#3 0x4e3f3d in blosc_getitem c-blosc2/blosc/blosc2.c:2669:12\n#4 0x4f793e in get_coffset c-blosc2/blosc/frame.c:1564:12\n#5 0x4f8175 in frame_get_lazychunk c-blosc2/blosc/frame.c:1724:20\n#6 0x4fbe5e in frame_decompress_chunk c-blosc2/blosc/frame.c:2518:20\n#7 0x4f10c5 in blosc2_schunk_decompress_chunk c-blosc2/blosc/schunk.c:6",
@@ -24,58 +24,62 @@
   "analyzed_vuln": {
     "function": "get_coffset",
     "file": "c-blosc2/blosc/frame.c",
-    "description": "`get_coffset()` calls `blosc_getitem(coffsets, nchunk, 1, &offset)` on the offsets chunk returned by `get_coffsets()` without validating that this buffer is a well-formed Blosc chunk (or even large enough for header fields). In this PoV, malformed frame data makes `coffsets` invalid/truncated, so `blosc_getitem` enters `_blosc_getitem` and reads block-start metadata via `sw32_(bstarts + j)`, causing an out-of-bounds read/SEGV in `sw32_` (blosc-private.h:44).",
-    "conditions": "The fuzzer passes attacker-controlled bytes to `blosc2_schunk_open_sframe()`, then `blosc2_schunk_decompress_chunk()` triggers `frame_decompress_chunk()` -> `frame_get_lazychunk()` -> `get_coffset()`. If the crafted frame header/coffsets metadata causes `get_coffsets()` to return a pointer to malformed or undersized offsets data, `get_coffset()` still treats it as a valid compressed chunk and invokes `blosc_getitem` with implicit `INT32_MAX` srcsize assumptions, leading to OOB reads during chunk parsing and crash."
+    "description": "`get_coffset()` calls `blosc_getitem(coffsets, nchunk, 1, &offset)` on the c-offsets buffer returned by `get_coffsets()` without passing/validating the actual buffer length. `blosc_getitem()` (non-ctx variant) internally uses `INT32_MAX` as `srcsize`, so malformed/truncated attacker-controlled offset chunks can make `_blosc_getitem`/`blosc_d` read past the real buffer and crash in `sw32_` while parsing stream headers. The missing size-aware validation is in frame offset retrieval, not in the crashing `sw32_` helper.",
+    "conditions": "In the `decompress_frame_fuzzer`, attacker input is opened as an in-memory frame via `blosc2_schunk_open_sframe`, then `blosc2_schunk_decompress_chunk` triggers `frame_decompress_chunk -> frame_get_lazychunk -> get_coffset`. A crafted frame with an invalid/truncated `coffsets` chunk (or inconsistent metadata causing short coffsets data) reaches `get_coffset`; because it uses size-unbounded `blosc_getitem`, decompression of that coffsets entry performs OOB reads and segfaults. Trigger requires successful enough frame parsing to reach chunk-offset lookup plus malformed coffsets content/length."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.027002500000000002,
-      "total_input_tokens": 14878,
-      "total_output_tokens": 429,
-      "total_cached_tokens": 3200,
+      "total_cost": 0.030400999999999997,
+      "total_input_tokens": 17620,
+      "total_output_tokens": 473,
+      "total_cached_tokens": 4480,
       "llm_calls": [
         {
-          "timestamp": 1773387823.568016,
+          "timestamp": 1774837420.0252104,
           "model": "gpt-5.3-codex",
-          "cost": 0.0075635,
-          "input_tokens": 3218,
-          "output_tokens": 138,
-          "total_tokens": 3356,
-          "cached_tokens": 0,
+          "cost": 0.0063231,
+          "input_tokens": 3306,
+          "output_tokens": 168,
+          "total_tokens": 3474,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 5,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_lw5XeEDD01i8a2N2ucriYZ8d"
+              "tool_call_id": "call_TijpLhRlYGvFWeiMdipx1SqI"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_BAhc7f2ROzywHX9Gsb3RRBFj"
+              "tool_call_id": "call_EObZCb5KYsRKrTTnRc38K5kW"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ETtaQbEu9PZWPlhDjzF8HbPd"
+              "tool_call_id": "call_UKcpf3jb65lipZGvvWLBUxyf"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_zDdgjsZqv1zXM0PqPcSsuv4Y"
+              "tool_call_id": "call_sA6yJ0AJeYzmzkhefszpjTTc"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_9uQLjy5MNLjhsju8VNaww1Oh"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773387830.6154275,
+          "timestamp": 1774837426.703681,
           "model": "gpt-5.3-codex",
-          "cost": 0.019439,
-          "input_tokens": 11660,
-          "output_tokens": 291,
-          "total_tokens": 11951,
-          "cached_tokens": 3200,
+          "cost": 0.0240779,
+          "input_tokens": 14314,
+          "output_tokens": 305,
+          "total_tokens": 14619,
+          "cached_tokens": 3328,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -84,7 +88,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Da8StYnfOIa8g5rV3xPXu2Bc"
+              "tool_call_id": "call_FhomVMEvnvaMN1z5tEhcWAYg"
             }
           ],
           "finish_reason": "tool_calls"
@@ -92,19 +96,44 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.0272734,
-      "total_input_tokens": 23108,
-      "total_output_tokens": 370,
-      "total_cached_tokens": 11648,
+      "total_llm_calls": 8,
+      "total_cost": 0.0364791,
+      "total_input_tokens": 53962,
+      "total_output_tokens": 814,
+      "total_cached_tokens": 44032,
       "llm_calls": [
         {
-          "timestamp": 1773387832.244891,
+          "timestamp": 1774837428.674474,
           "model": "gpt-5.3-codex",
-          "cost": 0.0049147,
-          "input_tokens": 3650,
-          "output_tokens": 82,
-          "total_tokens": 3732,
+          "cost": 0.00549745,
+          "input_tokens": 4439,
+          "output_tokens": 97,
+          "total_tokens": 4536,
+          "cached_tokens": 2304,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_59eWWUafa4wXlSD3RvyyfcQR"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_iKRdFNCGZO0wkG8XNqCEpFHM"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774837507.238217,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0069079499999999995,
+          "input_tokens": 4677,
+          "output_tokens": 96,
+          "total_tokens": 4773,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -113,24 +142,87 @@
           "tool_call_count": 2,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_RBgmw0dwYgWhdvd0icVXLCOy"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ZgfhTF1rJKRUr2WjdinPo8r6"
             },
             {
-              "tool_name": "find_references",
-              "tool_call_id": "call_5MVO401Gwo9hKpMs27HjYoZU"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_PtBXxvhoYmmVX4fWV7UcD6Eh"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773387903.208509,
+          "timestamp": 1774837525.0943496,
           "model": "gpt-5.3-codex",
-          "cost": 0.008762949999999999,
-          "input_tokens": 6225,
-          "output_tokens": 251,
-          "total_tokens": 6476,
-          "cached_tokens": 3584,
+          "cost": 0.00340865,
+          "input_tokens": 5791,
+          "output_tokens": 38,
+          "total_tokens": 5829,
+          "cached_tokens": 4608,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_dBKqRyD8ehrjIv6qk7xVGhTb"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774837538.8306365,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0017569999999999999,
+          "input_tokens": 5852,
+          "output_tokens": 42,
+          "total_tokens": 5894,
+          "cached_tokens": 5760,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_D4ZiHKC8ryTM0fbHAxvKTCYI"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774837549.0439732,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00192325,
+          "input_tokens": 6011,
+          "output_tokens": 34,
+          "total_tokens": 6045,
+          "cached_tokens": 5760,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_H7gORdKNxIuaQRDCPcL9qS0R"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774837555.0944254,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01245615,
+          "input_tokens": 8657,
+          "output_tokens": 470,
+          "total_tokens": 9127,
+          "cached_tokens": 5888,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +231,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_2j0jjnmmxTUon3v58kAhR22i"
+              "tool_call_id": "call_QYmVyiMnNDZj5dicpGNMJ8fl"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773387904.6784623,
+          "timestamp": 1774837557.0538037,
           "model": "gpt-5.3-codex",
-          "cost": 0.0016029999999999998,
-          "input_tokens": 6564,
+          "cost": 0.00221025,
+          "input_tokens": 9215,
           "output_tokens": 14,
-          "total_tokens": 6578,
-          "cached_tokens": 6400,
+          "total_tokens": 9229,
+          "cached_tokens": 8960,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +252,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_NWb0uCGG3JKZUrilG0aCSDD5"
+              "tool_call_id": "call_FXmRJF5I0UrtVUZbscYQjWax"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773387970.0138488,
+          "timestamp": 1774837627.785006,
           "model": "gpt-5.3-codex",
-          "cost": 0.01199275,
-          "input_tokens": 6669,
+          "cost": 0.0023184,
+          "input_tokens": 9320,
           "output_tokens": 23,
-          "total_tokens": 6692,
-          "cached_tokens": 0,
+          "total_tokens": 9343,
+          "cached_tokens": 9088,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,7 +273,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_ktajf7OP7eouj5dJrCyJdu5m"
+              "tool_call_id": "call_3qwyiNWrSR4KUPDH3DKaoh9z"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,15 +281,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.0542759,
-      "total_input_tokens": 37986,
-      "total_output_tokens": 799,
-      "total_llm_calls": 6
+      "total_cost": 0.0668801,
+      "total_input_tokens": 71582,
+      "total_output_tokens": 1287,
+      "total_llm_calls": 10
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/blosc/frame.c\n+++ b/blosc/frame.c\n@@ -1561,6 +1561,15 @@\n   }\n \n   // Get the 64-bit offset\n+  int32_t coffsets_cbytes = sw32_(coffsets + BLOSC2_CHUNK_CBYTES);\n+  if (coffsets_cbytes < BLOSC_EXTENDED_HEADER_LENGTH) {\n+    BLOSC_TRACE_ERROR(\"Invalid offsets chunk while retrieving chunk offset.\");\n+    return -4;\n+  }\n+  if ((int64_t)coffsets_cbytes > cbytes) {\n+    BLOSC_TRACE_ERROR(\"Offsets chunk size exceeds frame cbytes.\");\n+    return -4;\n+  }\n   int rc = blosc_getitem(coffsets, nchunk, 1, &offset);\n   if (rc < 0) {\n     BLOSC_TRACE_ERROR(\"Problems retrieving a chunk offset.\");\n",
+    "patch": "--- a/blosc/frame.c\n+++ b/blosc/frame.c\n@@ -1554,14 +1554,28 @@\n int64_t get_coffset(blosc2_frame* frame, int32_t header_len, int64_t cbytes, int32_t nchunk) {\n   // Get the offset to nchunk\n   int64_t offset;\n-  uint8_t *coffsets = get_coffsets(frame, header_len, cbytes, NULL);\n+  int32_t coffsets_cbytes;\n+  uint8_t *coffsets = get_coffsets(frame, header_len, cbytes, &coffsets_cbytes);\n   if (coffsets == NULL) {\n     BLOSC_TRACE_ERROR(\"Cannot get the offset for chunk %d for the frame.\", nchunk);\n     return -3;\n   }\n \n+  // Validate coffsets buffer size before attempting to decode any item from it.\n+  // blosc_getitem() uses an unbounded srcsize (INT32_MAX), so we must use the\n+  // size-aware contextual variant to avoid out-of-bounds reads on malformed input.\n+  if (coffsets_cbytes < BLOSC_MIN_HEADER_LENGTH) {\n+    BLOSC_TRACE_ERROR(\"Invalid c-offsets chunk size.\");\n+    return -4;\n+  }\n+\n   // Get the 64-bit offset\n-  int rc = blosc_getitem(coffsets, nchunk, 1, &offset);\n+  blosc2_context dctx;\n+  memset(&dctx, 0, sizeof(blosc2_context));\n+  dctx.nthreads = 1;\n+  dctx.schunk = g_schunk;\n+  int rc = blosc2_getitem_ctx(&dctx, coffsets, coffsets_cbytes, nchunk, 1, &offset);\n+  free_thread_context(dctx.serial_context);\n   if (rc < 0) {\n     BLOSC_TRACE_ERROR(\"Problems retrieving a chunk offset.\");\n     return -4;\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -211,32 +303,97 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "get_coffsets",
+          "c-blosc2/blosc/frame.c",
+          1500,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1869792.038130361,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n909 uint8_t* get_coffsets(blosc2_frame *frame, int32_t header_len, int64_t cbytes, int32_t *off_cbytes) {, e..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "get_coffset",
+          "c-blosc2/blosc/frame.c",
+          1564,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1869792.03941178,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1554 int64_t get_coffset(blosc2_frame* frame, int32_t header_len, int64_t cbytes, int32_t nchunk) {, extra=N..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "get_coffsets",
+          "c-blosc2/blosc/frame.c",
+          909,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1869808.550407261,
+        "success": true,
+        "result_summary": "Ok({'contents': '909 uint8_t* get_coffsets(blosc2_frame *frame, int32_t header_len, int64_t cbytes, int32_t *off_cbytes) {\\n910   if (frame->coffsets != NULL) {\\n911     if (off_cbytes != NULL) {\\n912..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "get_coffset",
+          "c-blosc2/blosc/frame.c",
+          1554,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1869812.531216688,
+        "success": true,
+        "result_summary": "Ok({'contents': '1554 int64_t get_coffset(blosc2_frame* frame, int32_t header_len, int64_t cbytes, int32_t nchunk) {\\n1555   // Get the offset to nchunk\\n1556   int64_t offset;\\n1557   uint8_t *coffse..."
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
-          "c-blosc2/blosc/frame.c",
-          1564
+          "c-blosc2/blosc/blosc2.c",
+          2648
         ],
         "kwargs": {},
-        "timestamp": 420120.845034483,
+        "timestamp": 1869837.619663003,
         "success": true,
-        "result_summary": "Ok({'contents': '1465         data_chunk = realloc(data_chunk, (size_t)csize);\\n1466         prev_alloc = csize;\\n1467       }\\n1468       if (!frame->eframe) {\\n1469         fseek(fp, header_len + of..."
+        "result_summary": "Ok({'contents': '2549   /* Check region boundaries */\\n2550   if ((start < 0) || (start * typesize > nbytes)) {\\n2551     BLOSC_TRACE_ERROR(\"`start` out of bounds.\");\\n2552     return -1;\\n2553   }\\n2..."
       }
     ],
     "find_references": [
       {
         "tool_name": "find_references",
         "args": [
-          "get_coffset",
-          "c-blosc2/blosc/frame.c",
+          "blosc_getitem_ctx",
+          "c-blosc2/blosc",
           false
         ],
         "kwargs": {},
-        "timestamp": 420187.92665634,
+        "timestamp": 1869825.994650582,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/frame.c', refs=[FileReference(line=1641, content='  int64_t offset = get_coffset(frame, header_len, cbytes, nchunk);', enclosing_definition='frame_get_chun..."
+        "result_summary": "Err(CRSError(no results found, extra=None))"
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "_blosc_getitem",
+          "c-blosc2/blosc/blosc2.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1869836.241263406,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/blosc2.c', refs=[FileReference(line=2669, content='  result = _blosc_getitem(&context, src, INT32_MAX, start, nitems, dest);', enclosing_definition='blosc_..."
       }
     ],
     "apply_patch": [
@@ -244,10 +401,10 @@
         "tool_name": "apply_patch",
         "args": [
           "c-blosc2/blosc/frame.c",
-          "@@ -1561,6 +1561,15 @@ int64_t get_coffset(blosc2_frame* frame, int32_t header_len, int64_t cbytes, in\n   }\n \n   // Get the 64-bit offset\n+  int32_t coffsets_cbytes = sw32_(coffsets + BLOSC2_CHUNK_CBYTES);\n+  if (coffsets_cbytes < BLOSC_EXTENDED_HEADER_LENGTH) {\n+    BLOSC_TRACE_ERROR(\"Invalid offsets chunk while retrieving chunk offset.\");\n+    return -4;\n+  }\n+  if ((int64_t)coffsets_cbytes > cbytes) {\n+    BLOSC_TRACE_ERROR(\"Offsets chunk size exceeds frame cbytes.\");\n+    return -4;\n+  }\n   int rc = blosc_getitem(coffsets, nchunk, 1, &offset);\n   if (rc < 0) {\n     BLOSC_TRACE_ERROR(\"Problems retrieving a chunk offset.\");\n"
+          "@@ -1554,14 +1554,27 @@\n int64_t get_coffset(blosc2_frame* frame, int32_t header_len, int64_t cbytes, int32_t nchunk) {\n   // Get the offset to nchunk\n   int64_t offset;\n-  uint8_t *coffsets = get_coffsets(frame, header_len, cbytes, NULL);\n+  int32_t coffsets_cbytes;\n+  uint8_t *coffsets = get_coffsets(frame, header_len, cbytes, &coffsets_cbytes);\n   if (coffsets == NULL) {\n     BLOSC_TRACE_ERROR(\"Cannot get the offset for chunk %d for the frame.\", nchunk);\n     return -3;\n   }\n+\n+  // Validate coffsets buffer size before attempting to decode any item from it.\n+  // blosc_getitem() uses an unbounded srcsize (INT32_MAX), so we must use the\n+  // size-aware contextual variant to avoid out-of-bounds reads on malformed input.\n+  if (coffsets_cbytes < BLOSC_MIN_HEADER_LENGTH) {\n+    BLOSC_TRACE_ERROR(\"Invalid c-offsets chunk size.\");\n+    return -4;\n+  }\n \n   // Get the 64-bit offset\n-  int rc = blosc_getitem(coffsets, nchunk, 1, &offset);\n+  blosc2_context dctx;\n+  memset(&dctx, 0, sizeof(blosc2_context));\n+  dctx.nthreads = 1;\n+  dctx.schunk = g_schunk;\n+  int rc = blosc2_getitem_ctx(&dctx, coffsets, coffsets_cbytes, nchunk, 1, &offset);\n+  free_thread_context(dctx.serial_context);\n   if (rc < 0) {\n     BLOSC_TRACE_ERROR(\"Problems retrieving a chunk offset.\");\n     return -4;\n"
         ],
         "kwargs": {},
-        "timestamp": 420191.810278185,
+        "timestamp": 1869843.748837345,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -257,7 +414,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 420257.224016395,
+        "timestamp": 1869914.690926387,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

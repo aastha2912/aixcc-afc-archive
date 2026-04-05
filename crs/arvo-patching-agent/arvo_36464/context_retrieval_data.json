@@ -5,13 +5,24 @@
     {
       "tool_name": "read_source",
       "args": [
-        "mruby/mrbgems/mruby-compiler/core/codegen.c",
+        "mrbgems/mruby-compiler/core/codegen.c",
         3284
       ],
       "kwargs": {},
-      "timestamp": 440279.644141126,
+      "timestamp": 1877267.627866907,
       "success": true,
-      "result_summary": "Ok({'contents': '3185   }\\n3186   else {\\n3187     if (prev->irep->rlen == UINT16_MAX) {\\n3188       codegen_error(s, \"too many nested blocks/methods\");\\n3189     }\\n3190     s->irep = irep = mrb_add_..."
+      "result_summary": "Err(CRSError(path 'mrbgems/mruby-compiler/core/codegen.c' does not exist in directory tree. Similar paths: mruby/mrbgems/mruby-compiler/core/codegen.c, extra=None))"
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "src/vm.c",
+        1138
+      ],
+      "kwargs": {},
+      "timestamp": 1877267.628108845,
+      "success": true,
+      "result_summary": "Err(CRSError(path 'src/vm.c' does not exist in directory tree. Similar paths: mruby/src/vm.c, extra=None))"
     },
     {
       "tool_name": "read_source",
@@ -20,21 +31,56 @@
         1138
       ],
       "kwargs": {},
-      "timestamp": 440279.646422487,
+      "timestamp": 1877269.098128489,
       "success": true,
       "result_summary": "Ok({'contents': '1039   if (mrb->c != c) {\\n1040     if (mrb->c->fib) {\\n1041       mrb_write_barrier(mrb, (struct RBasic*)mrb->c->fib);\\n1042     }\\n1043     mrb->c = c;\\n1044   }\\n1045   else if (c-..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "mruby/mrbgems/mruby-compiler/core/codegen.c",
+        3284
+      ],
+      "kwargs": {},
+      "timestamp": 1877269.101600019,
+      "success": true,
+      "result_summary": "Ok({'contents': '3185   }\\n3186   else {\\n3187     if (prev->irep->rlen == UINT16_MAX) {\\n3188       codegen_error(s, \"too many nested blocks/methods\");\\n3189     }\\n3190     s->irep = irep = mrb_add_..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "mruby/mrbgems/mruby-compiler/core/codegen.c",
+        80
+      ],
+      "kwargs": {},
+      "timestamp": 1877283.733869675,
+      "success": true,
+      "result_summary": "Ok({'contents': '  1 /*\\n  2 ** codegen.c - mruby code generator\\n  3 **\\n  4 ** See Copyright Notice in mruby.h\\n  5 */\\n  6 \\n  7 #include <ctype.h>\\n  8 #include <string.h>\\n  9 #include <math.h>\\n..."
     }
   ],
-  "find_references": [],
+  "find_references": [
+    {
+      "tool_name": "find_references",
+      "args": [
+        "irep->plen",
+        "mruby/mrbgems/mruby-compiler/core/codegen.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1877282.366399698,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/mruby/mrbgems/mruby-compiler/core/codegen.c', refs=[FileReference(line=120, content='      for (int i=0; i<s->irep->plen; i++) {', enclosing_definition='N/A'), FileR..."
+    }
+  ],
   "apply_patch": [
     {
       "tool_name": "apply_patch",
       "args": [
         "mruby/mrbgems/mruby-compiler/core/codegen.c",
-        "@@ -3281,9 +3281,11 @@\n   irep->flags = 0;\n   if (s->iseq) {\n     size_t catchsize = sizeof(struct mrb_irep_catch_handler) * irep->clen;\n-    irep->iseq = (const mrb_code *)codegen_realloc(s, s->iseq, sizeof(mrb_code)*s->pc + catchsize);\n+    size_t iseq_bytes = sizeof(mrb_code) * s->pc;\n+\n+    irep->iseq = (const mrb_code *)codegen_realloc(s, s->iseq, iseq_bytes + catchsize);\n     irep->ilen = s->pc;\n     if (irep->clen > 0) {\n-      memcpy((void *)(irep->iseq + irep->ilen), s->catch_table, catchsize);\n+      memcpy((uint8_t*)irep->iseq + iseq_bytes, s->catch_table, catchsize);\n     }\n   }\n   else {\n"
+        "@@ -3270,6 +3270,61 @@ scope_new(mrb_state *mrb, codegen_scope *prev, node *nlv)\n }\n \n static void\n+validate_irep(codegen_scope *s)\n+{\n+  mrb_irep *irep = s->irep;\n+  uint32_t pc;\n+\n+  for (pc = 0; pc < s->pc; pc++) {\n+    mrb_code insn = s->iseq[pc];\n+    uint8_t op = GET_OPCODE(insn);\n+    uint32_t b = 0;\n+\n+    switch (op) {\n+    case OP_LOADL:\n+    case OP_LOADL16:\n+      b = GETARG_Bx(insn);\n+      if (b >= irep->plen) {\n+        codegen_error(s, \"invalid OP_LOADL operand\");\n+      }\n+      break;\n+\n+    case OP_LOADSYM:\n+    case OP_GETGV:\n+    case OP_SETGV:\n+    case OP_GETSV:\n+    case OP_SETSV:\n+    case OP_GETIV:\n+    case OP_SETIV:\n+    case OP_GETCV:\n+    case OP_SETCV:\n+    case OP_GETCONST:\n+    case OP_SETCONST:\n+    case OP_GETMCNST:\n+    case OP_SETMCNST:\n+    case OP_SEND:\n+    case OP_SENDB:\n+    case OP_SENDV:\n+    case OP_SUPER:\n+    case OP_ARGARY:\n+    case OP_ENTER:\n+    case OP_KEY_P:\n+    case OP_KARG:\n+    case OP_SSEND:\n+    case OP_SSENDB:\n+      b = GETARG_B(insn);\n+      if (b >= irep->slen) {\n+        codegen_error(s, \"invalid symbol operand\");\n+      }\n+      break;\n+\n+    default:\n+      break;\n+    }\n+  }\n+}\n+\n+static void\n scope_finish(codegen_scope *s)\n {\n   mrb_state *mrb = s->mrb;\n@@ -3294,6 +3349,7 @@ scope_finish(codegen_scope *s)\n   s->catch_table = NULL;\n   irep->pool = (const mrb_pool_value*)codegen_realloc(s, s->pool, sizeof(mrb_pool_value)*irep->plen);\n   irep->syms = (const mrb_sym*)codegen_realloc(s, s->syms, sizeof(mrb_sym)*irep->slen);\n+  validate_irep(s);\n   irep->reps = (const mrb_irep**)codegen_realloc(s, s->reps, sizeof(mrb_irep*)*irep->rlen);\n   if (s->filename_sym) {\n     mrb_sym fname = mrb_parser_get_filename(s->parser, s->filename_index);\n"
       ],
       "kwargs": {},
-      "timestamp": 440283.627498446,
+      "timestamp": 1877291.485489765,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
@@ -44,7 +90,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 440305.331324903,
+      "timestamp": 1877326.699551473,
       "success": true,
       "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
     }

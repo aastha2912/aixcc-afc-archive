@@ -1,5 +1,5 @@
 {
-  "vuln_id": 64,
+  "vuln_id": 357,
   "crash_result": {
     "output": "==789==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000214 at pc 0x0000009b7564 bp 0x7ffffc791030 sp 0x7ffffc791028\nREAD of size 1 at 0x602000000214 thread T0\nSCARINESS: 12 (1-byte-read-heap-buffer-overflow)\n    #0 0x9b7563 in operator!= /src/assimp/include/assimp/texture.h:102:16\n    #1 0x9b7563 in Assimp::MDLImporter::ReplaceTextureWithColor(aiTexture const*) /src/assimp/code/AssetLib/MDL/MDLMaterialLoader.cpp:107:22\n    #2 0x9bb8cd in Assimp::MDLImporter::ParseSkinLump_3DG",
     "stack": "#0 0x9b7563 in operator!= assimp/include/assimp/texture.h:102:16\n#1 0x9b7563 in Assimp::MDLImporter::ReplaceTextureWithColor(aiTexture const*) assimp/code/AssetLib/MDL/MDLMaterialLoader.cpp:107:22\n#2 0x9bb8cd in Assimp::MDLImporter::ParseSkinLump_3DGS_MDL7(unsigned char const*, unsigned char const**, aiMaterial*, unsigned int, unsigned int, unsigned int) assimp/code/AssetLib/MDL/MDLMaterialLoader.cpp:539:22\n#3 0x89defe in Assimp::HMPImporter::ReadFirstSkin(unsigned int, unsigned char const*, uns",
@@ -22,63 +22,59 @@
     "dedup": "operator!=--Assimp::MDLImporter::ReplaceTextureWithColor(aiTexture const*)--Assimp::MDLImporter::ParseSkinLump_3DGS_MDL7(unsigned char const*, unsigned char const**, aiMaterial*, unsigned int, unsigned int, unsigned int)"
   },
   "analyzed_vuln": {
-    "function": "ParseSkinLump_3DGS_MDL7",
+    "function": "ReplaceTextureWithColor",
     "file": "assimp/code/AssetLib/MDL/MDLMaterialLoader.cpp",
-    "description": "Heap OOB read is caused by calling ReplaceTextureWithColor() on textures whose pixel buffer can be smaller than one aiTexel. ParseTextureColorData() allocates pcData as new aiTexel[mWidth*mHeight] with unchecked dimensions; with crafted MDL7/HMP skin metadata this can produce a tiny allocation (seen as 1 byte in ASan due to overflow/size confusion in element count), but ParseSkinLump_3DGS_MDL7 still unconditionally invokes ReplaceTextureWithColor(). ReplaceTextureWithColor() then iterates aiTexel elements and dereferences *(pcTexel-1)/ *pcTexel, causing read past the allocated heap region (crash in aiTexel::operator!= at texture.h:102).",
-    "conditions": "From assimp_fuzzer input, HMP7 parsing reaches HMPImporter::ReadFirstSkin(), which forwards attacker-controlled skin type/width/height to MDLImporter::ParseSkinLump_3DGS_MDL7(). The path must create an embedded color texture branch (not external-file/referrer/DDS-only), so ParseTextureColorData() is called with those dimensions. If width*height is malformed (e.g., overflow/invalid tiny effective allocation) and no validation rejects it, pcNew is still passed to ReplaceTextureWithColor(), which assumes at least valid aiTexel array bounds and performs linear aiTexel comparisons, triggering heap-buffer-overflow read."
+    "description": "Heap OOB read is caused by `MDLImporter::ReplaceTextureWithColor()` iterating from `pcTexture->pcData + 1` up to `&pcTexture->pcData[iNumPixels]` without handling the single-pixel case. When `mWidth*mHeight == 1`, `pcTexel` starts at one-past-end and the loop condition `pcTexel != pcTexelEnd` is true, so it dereferences `*pcTexel` (and `*(pcTexel-1)`), reading beyond the allocation. The crash appears in `aiTexel::operator!=`, but the root cause is the incorrect iterator/end logic in `ReplaceTextureWithColor`.",
+    "conditions": "PoV drives HMP->MDL7 skin parsing (`HMPImporter::ReadFirstSkin` -> `MDLImporter::ParseSkinLump_3DGS_MDL7`) to create an embedded texture via `ParseTextureColorData` with dimensions such that exactly one `aiTexel` is allocated (`mWidth*mHeight==1`). `ParseSkinLump_3DGS_MDL7` then unconditionally calls `ReplaceTextureWithColor(pcNew.get())`, which performs the invalid read for 1-pixel textures. Thus attacker-controlled model data must reach MDL7 skin texture parsing with nonzero width/height whose product is 1."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.03804605,
-      "total_input_tokens": 22371,
-      "total_output_tokens": 526,
-      "total_cached_tokens": 5376,
+      "total_cost": 0.0323974,
+      "total_input_tokens": 20588,
+      "total_output_tokens": 475,
+      "total_cached_tokens": 6528,
       "llm_calls": [
         {
-          "timestamp": 1773376924.1417353,
+          "timestamp": 1774823070.7109184,
           "model": "gpt-5.3-codex",
-          "cost": 0.01181425,
-          "input_tokens": 5295,
-          "output_tokens": 182,
-          "total_tokens": 5477,
-          "cached_tokens": 0,
+          "cost": 0.00970585,
+          "input_tokens": 5383,
+          "output_tokens": 150,
+          "total_tokens": 5533,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 5,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_uqDqPcwMOKRa6grTgNqu15F3"
+              "tool_call_id": "call_OxdYh0zav81bYJc2V78PRMNt"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_lLnRGoKtF7F7KO9sBb6CDHwV"
+              "tool_call_id": "call_4w2bNshlOS1lPzazC8bgjbKO"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_r5XkDS3ZF6QjC5qdIoQYwJ4Y"
+              "tool_call_id": "call_R56JwTrLaYp6S9P2YwrQRRMy"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_nAuw0EUC0drW4QtWe8GuoDb0"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_ufLOBdfPCXmTXxjNtaRGUAxd"
+              "tool_call_id": "call_kNeQOmT8xtp05RR1odMXTN6T"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773376933.862647,
+          "timestamp": 1774823076.0779197,
           "model": "gpt-5.3-codex",
-          "cost": 0.0262318,
-          "input_tokens": 17076,
-          "output_tokens": 344,
-          "total_tokens": 17420,
+          "cost": 0.022691549999999998,
+          "input_tokens": 15205,
+          "output_tokens": 325,
+          "total_tokens": 15530,
           "cached_tokens": 5376,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -88,7 +84,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_AFL6rf9AQ7SV1qpcxDOWZuhi"
+              "tool_call_id": "call_6CCQ5yqULYAgChJDpmom6thu"
             }
           ],
           "finish_reason": "tool_calls"
@@ -97,48 +93,44 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.0309862,
-      "total_input_tokens": 42772,
-      "total_output_tokens": 438,
-      "total_cached_tokens": 31744,
+      "total_cost": 0.02451505,
+      "total_input_tokens": 35367,
+      "total_output_tokens": 383,
+      "total_cached_tokens": 27136,
       "llm_calls": [
         {
-          "timestamp": 1773376936.06848,
+          "timestamp": 1774823077.8192596,
           "model": "gpt-5.3-codex",
-          "cost": 0.0075852,
-          "input_tokens": 4856,
-          "output_tokens": 122,
-          "total_tokens": 4978,
+          "cost": 0.0105602,
+          "input_tokens": 6740,
+          "output_tokens": 99,
+          "total_tokens": 6839,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 2,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_sLbuetzrfmsoNtJipq9ggoQg"
+              "tool_call_id": "call_qOR6tB2KK9vH0PyENmRU2wwR"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_bRdLQBYlqm6UtPYtFDJhCDKR"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_iqAL4G8sPlWuKfLGIx1yj0mr"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Gm2x2oDG8CWbnrRLWrcu6LCb"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773376940.0751154,
+          "timestamp": 1774823183.9676201,
           "model": "gpt-5.3-codex",
-          "cost": 0.01787345,
-          "input_tokens": 12359,
-          "output_tokens": 279,
-          "total_tokens": 12638,
-          "cached_tokens": 4864,
+          "cost": 0.009221799999999999,
+          "input_tokens": 9284,
+          "output_tokens": 247,
+          "total_tokens": 9531,
+          "cached_tokens": 6656,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -147,19 +139,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_N8s78jCLhHzEZE19Htwiqb8L"
+              "tool_call_id": "call_cZsHKZU9hP8HLsOVKqjzbodl"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773376941.201341,
+          "timestamp": 1774823185.0382164,
           "model": "gpt-5.3-codex",
-          "cost": 0.0027096999999999998,
-          "input_tokens": 12726,
+          "cost": 0.0023124499999999997,
+          "input_tokens": 9619,
           "output_tokens": 14,
-          "total_tokens": 12740,
-          "cached_tokens": 12544,
+          "total_tokens": 9633,
+          "cached_tokens": 9344,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -168,19 +160,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_6LOc2CRwAlrhgkzDeTHk4Wgy"
+              "tool_call_id": "call_MnhEQ6GaSMniiIY3B3o2Pv4T"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773377009.9547021,
+          "timestamp": 1774823293.976639,
           "model": "gpt-5.3-codex",
-          "cost": 0.0028178499999999993,
-          "input_tokens": 12831,
+          "cost": 0.0024206,
+          "input_tokens": 9724,
           "output_tokens": 23,
-          "total_tokens": 12854,
-          "cached_tokens": 12672,
+          "total_tokens": 9747,
+          "cached_tokens": 9472,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -189,7 +181,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_B4S8sD5oXZjDgruZ5bZrSljp"
+              "tool_call_id": "call_Cw0U77pwe3y5lgmcF772oRAR"
             }
           ],
           "finish_reason": "tool_calls"
@@ -197,15 +189,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.06903224999999999,
-      "total_input_tokens": 65143,
-      "total_output_tokens": 964,
+      "total_cost": 0.05691245,
+      "total_input_tokens": 55955,
+      "total_output_tokens": 858,
       "total_llm_calls": 6
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/code/AssetLib/MDL/MDLMaterialLoader.cpp\n+++ b/code/AssetLib/MDL/MDLMaterialLoader.cpp\n@@ -216,7 +216,17 @@\n \n     // allocate storage for the texture image\n     if (do_read) {\n-        pcNew->pcData = new aiTexel[pcNew->mWidth * pcNew->mHeight];\n+        const size_t numPixels = static_cast<size_t>(pcNew->mWidth) * static_cast<size_t>(pcNew->mHeight);\n+        if (numPixels == 0 || numPixels > (SIZE_MAX / sizeof(aiTexel))) {\n+            ASSIMP_LOG_ERROR(\"Invalid embedded texture dimensions, aborting texture decode\");\n+            pcNew->mWidth = 0;\n+            pcNew->mHeight = 0;\n+            pcNew->pcData = nullptr;\n+            *piSkip = 0;\n+            return;\n+        }\n+\n+        pcNew->pcData = new aiTexel[numPixels];\n     }\n \n     // R5G6B5 format (with or without MIPs)\n",
+    "patch": "--- a/code/AssetLib/MDL/MDLMaterialLoader.cpp\n+++ b/code/AssetLib/MDL/MDLMaterialLoader.cpp\n@@ -100,10 +100,11 @@\n         return clrOut;\n \n     const unsigned int iNumPixels = pcTexture->mHeight * pcTexture->mWidth;\n-    const aiTexel *pcTexel = pcTexture->pcData + 1;\n+    const aiTexel *pcTexel = pcTexture->pcData;\n     const aiTexel *const pcTexelEnd = &pcTexture->pcData[iNumPixels];\n \n-    while (pcTexel != pcTexelEnd) {\n+    ++pcTexel;\n+    while (pcTexel < pcTexelEnd) {\n         if (*pcTexel != *(pcTexel - 1)) {\n             pcTexel = nullptr;\n             break;\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -219,40 +211,32 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "ReplaceTextureWithColor",
+          "assimp/code/AssetLib/MDL/MDLMaterialLoader.cpp",
+          1,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1855469.621157986,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n94 aiColor4D MDLImporter::ReplaceTextureWithColor(const aiTexture *pcTexture) {, extra=None))"
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
           "assimp/code/AssetLib/MDL/MDLMaterialLoader.cpp",
-          90
+          100
         ],
         "kwargs": {},
-        "timestamp": 409224.684440368,
+        "timestamp": 1855366.39603611,
         "success": true,
         "result_summary": "Ok({'contents': '  1 /*\\n  2 ---------------------------------------------------------------------------\\n  3 Open Asset Import Library (assimp)\\n  4 --------------------------------------------------..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "assimp/code/AssetLib/MDL/MDLMaterialLoader.cpp",
-          520
-        ],
-        "kwargs": {},
-        "timestamp": 409224.685381181,
-        "success": true,
-        "result_summary": "Ok({'contents': '421             for (unsigned int i = 0; i < pScene->mNumTextures; ++i)\\n422                 this->pScene->mTextures[i] = pc[i];\\n423 \\n424             pScene->mTextures[pScene->mNumT..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "assimp/code/AssetLib/MDL/MDLMaterialLoader.cpp",
-          200
-        ],
-        "kwargs": {},
-        "timestamp": 409224.686045394,
-        "success": true,
-        "result_summary": "Ok({'contents': '101 \\n102     const unsigned int iNumPixels = pcTexture->mHeight * pcTexture->mWidth;\\n103     const aiTexel *pcTexel = pcTexture->pcData + 1;\\n104     const aiTexel *const pcTexelEnd..."
       }
     ],
     "find_references": [],
@@ -261,10 +245,10 @@
         "tool_name": "apply_patch",
         "args": [
           "assimp/code/AssetLib/MDL/MDLMaterialLoader.cpp",
-          "@@ -216,8 +216,20 @@ void MDLImporter::ParseTextureColorData(const unsigned char *szData,\n \n     // allocate storage for the texture image\n     if (do_read) {\n-        pcNew->pcData = new aiTexel[pcNew->mWidth * pcNew->mHeight];\n+        const size_t numPixels = static_cast<size_t>(pcNew->mWidth) * static_cast<size_t>(pcNew->mHeight);\n+        if (numPixels == 0 || numPixels > (SIZE_MAX / sizeof(aiTexel))) {\n+            ASSIMP_LOG_ERROR(\"Invalid embedded texture dimensions, aborting texture decode\");\n+            pcNew->mWidth = 0;\n+            pcNew->mHeight = 0;\n+            pcNew->pcData = nullptr;\n+            *piSkip = 0;\n+            return;\n+        }\n+\n+        pcNew->pcData = new aiTexel[numPixels];\n     }\n \n     // R5G6B5 format (with or without MIPs)\n"
+          "@@ -99,10 +99,11 @@ aiColor4D MDLImporter::ReplaceTextureWithColor(const aiTexture *pcTexture) {\n     if (!pcTexture->mHeight || !pcTexture->mWidth)\n         return clrOut;\n \n     const unsigned int iNumPixels = pcTexture->mHeight * pcTexture->mWidth;\n-    const aiTexel *pcTexel = pcTexture->pcData + 1;\n+    const aiTexel *pcTexel = pcTexture->pcData;\n     const aiTexel *const pcTexelEnd = &pcTexture->pcData[iNumPixels];\n \n-    while (pcTexel != pcTexelEnd) {\n+    ++pcTexel;\n+    while (pcTexel < pcTexelEnd) {\n         if (*pcTexel != *(pcTexel - 1)) {\n             pcTexel = nullptr;\n             break;\n         }\n"
         ],
         "kwargs": {},
-        "timestamp": 409228.670042248,
+        "timestamp": 1855472.563165534,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -274,7 +258,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 409296.394816805,
+        "timestamp": 1855581.489715172,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

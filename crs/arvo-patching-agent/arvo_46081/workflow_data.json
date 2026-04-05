@@ -1,5 +1,5 @@
 {
-  "vuln_id": 132,
+  "vuln_id": 446,
   "crash_result": {
     "output": "==129458==ERROR: AddressSanitizer: heap-use-after-free on address 0x602000001fd0 at pc 0x000000a198c0 bp 0x7ffe76f514d0 sp 0x7ffe76f514c8\nREAD of size 1 at 0x602000001fd0 thread T0\nSCARINESS: 40 (1-byte-read-heap-use-after-free)\n    #0 0xa198bf in LocaleCompare /src/imagemagick/MagickCore/locale.c:1416:30\n    #1 0xbf42b1 in CompareSplayTreeString /src/imagemagick/MagickCore/splay-tree.c:420:10\n    #2 0xbf334d in SplaySplayTree /src/imagemagick/MagickCore/splay-tree.c:1616:17\n    #3 0xbf5952 in G",
     "stack": "#0 0xa198bf in LocaleCompare imagemagick/MagickCore/locale.c:1416:30\n#1 0xbf42b1 in CompareSplayTreeString imagemagick/MagickCore/splay-tree.c:420:10\n#2 0xbf334d in SplaySplayTree imagemagick/MagickCore/splay-tree.c:1616:17\n#3 0xbf5952 in GetNextKeyInSplayTree imagemagick/MagickCore/splay-tree.c:785:3\n#4 0xaaeea7 in GetNextImageProperty imagemagick/MagickCore/property.c:3560:25\n#5 0xd772c6 in WriteMIFFImage imagemagick/coders/miff.c:2383:16\n#6 0x8ef1cc in WriteImage imagemagick/MagickCore/consti",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "WriteMIFFImage",
     "file": "imagemagick/coders/miff.c",
-    "description": "Heap use-after-free in property iteration caused by mutating the same splay-tree being iterated. In WriteMIFFImage(), the code calls SetImageProperty(image,\"quantum:format\",\"floating-point\",...) and then iterates image properties with ResetImagePropertyIterator/GetNextImageProperty. During the loop, GetImageProperty(property) can invoke GetICCProperty, which calls SetImageProperty on an existing key and reaches AddValueToSplayTree() replacement path. AddValueToSplayTree frees the old key/value for that node and replaces them, but the iterator state (next/key used by GetNextKeyInSplayTree/SplaySplayTree) still references the freed key, later compared in LocaleCompare, triggering UAF.",
-    "conditions": "Trigger requires an image whose property lookups during MIFF write cause GetImageProperty->GetICCProperty to update an already-present property key/value while WriteMIFFImage is iterating properties. Data flow: fuzzer reads attacker blob into Image (BlobToImage/ReadImage), then writes as MIFF (Image::write -> ImagesToBlob -> WriteMIFFImage). While walking properties, a re-entrant SetImageProperty on the same splay-tree invalidates iterator key pointers; subsequent GetNextImageProperty compares freed key memory and crashes."
+    "description": "WriteMIFFImage iterates image properties with ResetImagePropertyIterator/GetNextImageProperty, but during that same iteration it calls GetImageProperty(property), which for synthetic keys like ICC metadata triggers GetICCProperty -> SetImageProperty. SetImageProperty updates the same image->properties splay tree and AddValueToSplayTree frees/replaces an existing key/value when key matches. This mutates and frees nodes/strings while the iterator still holds pointers into the tree, causing stale key pointers and a heap-use-after-free later in splay-tree comparison (LocaleCompare via CompareSplayTreeString).",
+    "conditions": "Trigger requires encoding to MIFF with an image that has profiles/properties such that querying a property during header write causes lazy property materialization (notably ICC-derived properties). In encoder_miff_fuzzer, crafted input is read into an image containing ICC profile data; during WriteMIFFImage, SetImageProperty(\"quantum:format\",...) and especially GetImageProperty on iterated keys cause in-loop property tree mutation. The iterator then continues over freed key memory, leading to UAF read in LocaleCompare."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.04098185,
-      "total_input_tokens": 37967,
-      "total_output_tokens": 615,
-      "total_cached_tokens": 21632,
+      "total_cost": 0.06300454999999999,
+      "total_input_tokens": 48185,
+      "total_output_tokens": 450,
+      "total_cached_tokens": 17536,
       "llm_calls": [
         {
-          "timestamp": 1773421334.0187302,
+          "timestamp": 1774858239.0084062,
           "model": "gpt-5.3-codex",
-          "cost": 0.0173103,
-          "input_tokens": 9826,
-          "output_tokens": 181,
-          "total_tokens": 10007,
-          "cached_tokens": 1536,
+          "cost": 0.0193935,
+          "input_tokens": 9914,
+          "output_tokens": 146,
+          "total_tokens": 10060,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,64 +51,52 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_y56MFSMJn4PSYxNeZk6PZ4Bp"
+              "tool_call_id": "call_HHoagFlHq5GcLjNpwCfEQ6bD"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_PsHfEshd7mU5TBNBL1mY8JNW"
+              "tool_name": "read_source",
+              "tool_call_id": "call_wmitmi0snTP6KOuABT4uQ8yr"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_OxLI668l4vSb9QgSsbHYhYXV"
+              "tool_name": "read_source",
+              "tool_call_id": "call_zSCmDXQQD0i7gY9bZ8kEEVX8"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_8DnuceNRh5W4XgfcfzyAO6rG"
+              "tool_name": "read_source",
+              "tool_call_id": "call_uuUepSgVGw8lLomkqqN1XvKj"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773421957.6866984,
+          "timestamp": 1774859204.1172912,
           "model": "gpt-5.3-codex",
-          "cost": 0.0042063,
-          "input_tokens": 10186,
-          "output_tokens": 136,
-          "total_tokens": 10322,
-          "cached_tokens": 9856,
+          "cost": 0.0275996,
+          "input_tokens": 16464,
+          "output_tokens": 43,
+          "total_tokens": 16507,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_2mwO6rU8RPQMkfDuh8g9REVU"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_E89ZdK6DUHil0mXlFhxMeWoV"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_f3Fut4AnAfqWPPzPnKMpbNOB"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_7dwsz1qcAPrlWqt0xdVzpIyB"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_WbFP5RMPan0axSoAl4JCjITY"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773421968.50747,
+          "timestamp": 1774859345.2240827,
           "model": "gpt-5.3-codex",
-          "cost": 0.01946525,
-          "input_tokens": 17955,
-          "output_tokens": 298,
-          "total_tokens": 18253,
-          "cached_tokens": 10240,
+          "cost": 0.01601145,
+          "input_tokens": 21807,
+          "output_tokens": 261,
+          "total_tokens": 22068,
+          "cached_tokens": 16384,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -117,7 +105,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_m3RmohPZ8XDFDkYEPDmClC4E"
+              "tool_call_id": "call_Bsapf5WP9AWbgt3slnAtA4k1"
             }
           ],
           "finish_reason": "tool_calls"
@@ -125,49 +113,20 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 5,
-      "total_cost": 0.052704749999999995,
-      "total_input_tokens": 71093,
-      "total_output_tokens": 926,
-      "total_cached_tokens": 53760,
+      "total_llm_calls": 6,
+      "total_cost": 0.05889765,
+      "total_input_tokens": 98395,
+      "total_output_tokens": 994,
+      "total_cached_tokens": 80768,
       "llm_calls": [
         {
-          "timestamp": 1773421971.0715547,
+          "timestamp": 1774859347.4678085,
           "model": "gpt-5.3-codex",
-          "cost": 0.018383749999999997,
-          "input_tokens": 9489,
-          "output_tokens": 127,
-          "total_tokens": 9616,
-          "cached_tokens": 0,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 3,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_V2NmaaQk6WOMHLp2TB2oVNtL"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_6zU8JzfpwDl811wJPmX2v7bv"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_EjxIZdKKATZeqLRhvqEvabRa"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773422060.1788785,
-          "model": "gpt-5.3-codex",
-          "cost": 0.01193535,
-          "input_tokens": 12025,
-          "output_tokens": 415,
-          "total_tokens": 12440,
-          "cached_tokens": 9472,
+          "cost": 0.017875199999999997,
+          "input_tokens": 11104,
+          "output_tokens": 76,
+          "total_tokens": 11180,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -176,23 +135,65 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ss41mVusOl4MlvhicpTqWFUs"
+              "tool_call_id": "call_8BeS6Cxudy9rxwlh0fPcHkY7"
             },
             {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_87sVOLu5JzetEAHk7GpYPaM2"
+              "tool_name": "read_source",
+              "tool_call_id": "call_A7X2hsUozc43rLctOjrtuvwO"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773422061.6244214,
+          "timestamp": 1774859353.112645,
           "model": "gpt-5.3-codex",
-          "cost": 0.007004899999999999,
-          "input_tokens": 14806,
+          "cost": 0.015733900000000002,
+          "input_tokens": 15762,
+          "output_tokens": 392,
+          "total_tokens": 16154,
+          "cached_tokens": 11008,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_CyPGLyYOGkNSXgBVDZQDS0xZ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774859357.1055346,
+          "model": "gpt-5.3-codex",
+          "cost": 0.006594,
+          "input_tokens": 16320,
+          "output_tokens": 231,
+          "total_tokens": 16551,
+          "cached_tokens": 16000,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_21JztsgjBkG23LWMG7zVSzOc"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774859359.9023523,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00389795,
+          "input_tokens": 16717,
           "output_tokens": 32,
-          "total_tokens": 14838,
-          "cached_tokens": 12288,
+          "total_tokens": 16749,
+          "cached_tokens": 16384,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -201,19 +202,19 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_po58jdz9LGSjOcfXuqoTeT57"
+              "tool_call_id": "call_yE7bBRIoXbHqmDu02ohMmhqY"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773422067.3963048,
+          "timestamp": 1774859362.8224118,
           "model": "gpt-5.3-codex",
-          "cost": 0.011415249999999998,
-          "input_tokens": 17139,
-          "output_tokens": 329,
-          "total_tokens": 17468,
-          "cached_tokens": 14720,
+          "cost": 0.009926,
+          "input_tokens": 19064,
+          "output_tokens": 198,
+          "total_tokens": 19262,
+          "cached_tokens": 16640,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -222,19 +223,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_01HcGzO2O4IdU4ZFWowiVObZ"
+              "tool_call_id": "call_3wUsKlwqErdmBsM9Whr9ifL1"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773422068.6436021,
+          "timestamp": 1774859365.207727,
           "model": "gpt-5.3-codex",
-          "cost": 0.0039655,
-          "input_tokens": 17634,
-          "output_tokens": 23,
-          "total_tokens": 17657,
-          "cached_tokens": 17280,
+          "cost": 0.0048706,
+          "input_tokens": 19428,
+          "output_tokens": 65,
+          "total_tokens": 19493,
+          "cached_tokens": 19072,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -243,7 +244,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_pGVT73sfiiG6SmRFxnFP9VgQ"
+              "tool_call_id": "call_xhHoZVo3SRzEyHfcmXds9IQp"
             }
           ],
           "finish_reason": "tool_calls"
@@ -251,10 +252,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.0936866,
-      "total_input_tokens": 109060,
-      "total_output_tokens": 1541,
-      "total_llm_calls": 8
+      "total_cost": 0.12190219999999999,
+      "total_input_tokens": 146580,
+      "total_output_tokens": 1444,
+      "total_llm_calls": 9
     }
   },
   "patch_result": {
@@ -263,34 +264,7 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "WriteMIFFImage",
-          "imagemagick/coders/miff.c",
-          2383,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 454301.409539197,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1996         }, extra=None))"
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "GetNextImageProperty",
-          "imagemagick/MagickCore/property.c",
-          3560,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 454342.73341754,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n3551 %  The format of the GetNextImageProperty method is:, extra=None))"
-      }
-    ],
+    "read_definition": [],
     "read_source": [
       {
         "tool_name": "read_source",
@@ -299,31 +273,31 @@
           2350
         ],
         "kwargs": {},
-        "timestamp": 454259.744221219,
+        "timestamp": 1891636.044825697,
         "success": true,
         "result_summary": "Ok({'contents': '2251       {\\n2252         if (image->scene != 0)\\n2253           {\\n2254             (void) FormatLocaleString(buffer,MagickPathExtent,\"scene=%.20g\\\\n\",\\n2255               (double) ..."
       },
       {
         "tool_name": "read_source",
         "args": [
-          "imagemagick/MagickCore/property.c",
-          3551
+          "imagemagick/coders/miff.c",
+          2383
         ],
         "kwargs": {},
-        "timestamp": 454348.756793763,
+        "timestamp": 1891636.046759182,
         "success": true,
-        "result_summary": "Ok({'contents': '3452       if (LocaleCompare(\"standard-deviation\",property) == 0)\\n3453         {\\n3454           double\\n3455             mean,\\n3456             standard_deviation;\\n3457 \\n3458    ..."
+        "result_summary": "Ok({'contents': '2284       {\\n2285         (void) FormatLocaleString(buffer,MagickPathExtent,\"dispose=%s\\\\n\",\\n2286           CommandOptionToMnemonic(MagickDisposeOptions,image->dispose));\\n2287     ..."
       },
       {
         "tool_name": "read_source",
         "args": [
           "imagemagick/coders/miff.c",
-          2360
+          2348
         ],
         "kwargs": {},
-        "timestamp": 454350.200167948,
+        "timestamp": 1891648.477635121,
         "success": true,
-        "result_summary": "Ok({'contents': '2261               \"iterations=%.20g\\\\n\",(double) image->iterations);\\n2262             (void) WriteBlobString(image,buffer);\\n2263           }\\n2264         if (image->delay != 0)\\n2..."
+        "result_summary": "Ok({'contents': '2249       }\\n2250     else\\n2251       {\\n2252         if (image->scene != 0)\\n2253           {\\n2254             (void) FormatLocaleString(buffer,MagickPathExtent,\"scene=%.20g\\\\n\",\\..."
       }
     ],
     "find_references": [],
@@ -332,10 +306,10 @@
         "tool_name": "apply_patch",
         "args": [
           "imagemagick/coders/miff.c",
-          "@@ -2356,10 +2356,25 @@\n     if (quantum_info->format == FloatingPointQuantumFormat)\n       (void) SetImageProperty(image,\"quantum:format\",\"floating-point\",\n         exception);\n+    {\n+      char\n+        **properties;\n+\n+      size_t\n+        number_properties;\n+\n+      properties=GetImageProperties(image,\"*\",&number_properties,exception);\n+      if (properties != (char **) NULL)\n+        {\n+          for (i=0; i < (ssize_t) number_properties; i++)\n+          {\n+            property=properties[i];\n+            if (property == (const char *) NULL)\n+              continue;\n+            (void) FormatLocaleString(buffer,MagickPathExtent,\"%s=\",property);\n+            (void) WriteBlobString(image,buffer);\n+            value=GetImageProperty(image,property,exception);\n@@ -2388,6 +2403,12 @@\n             }\n         }\n-      (void) WriteBlobByte(image,'\\n');\n-      property=GetNextImageProperty(image);\n+            (void) WriteBlobByte(image,'\\n');\n+            properties[i]=(char *) RelinquishMagickMemory(properties[i]);\n+          }\n+          properties=(char **) RelinquishMagickMemory(properties);\n+        }\n     }\n+\n     (void) WriteBlobString(image,\"\\f\\n:\\032\");\n"
+          "@@ -2356,10 +2356,18 @@\n     if (quantum_info->format == FloatingPointQuantumFormat)\n       (void) SetImageProperty(image,\"quantum:format\",\"floating-point\",\n         exception);\n+    /*\n+      Materialize potentially synthetic properties before iterating the\n+      property tree. Some property getters (e.g. ICC-derived) can call\n+      SetImageProperty(), mutating the same splay tree and invalidating\n+      iterator state.\n+    */\n+    (void) GetImageProperty(image,\"icc:description\",exception);\n+    (void) GetImageProperty(image,\"icc:manufacturer\",exception);\n+    (void) GetImageProperty(image,\"icc:model\",exception);\n+    (void) GetImageProperty(image,\"icc:copyright\",exception);\n     ResetImagePropertyIterator(image);\n-    property=GetNextImageProperty(image);\n-    while (property != (const char *) NULL)\n+    for (property=GetNextImageProperty(image); property != (const char *) NULL; )\n     {\n       (void) FormatLocaleString(buffer,MagickPathExtent,\"%s=\",property);\n       (void) WriteBlobString(image,buffer);\n@@ -2388,7 +2396,7 @@\n             }\n         }\n       (void) WriteBlobByte(image,'\\n');\n-      property=GetNextImageProperty(image);\n+      property=GetNextImageProperty(image);\n     }\n     (void) WriteBlobString(image,\"\\f\\n:\\032\");\n     if (image->montage != (char *) NULL)\n"
         ],
         "kwargs": {},
-        "timestamp": 454348.79986561,
+        "timestamp": 1891641.739264415,
         "success": true,
         "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 2356): The patch context lines have introduced a typographic error. The context you provided removed `}`. Please double check..."
       },
@@ -343,12 +317,23 @@
         "tool_name": "apply_patch",
         "args": [
           "imagemagick/coders/miff.c",
-          "@@ -2356,7 +2356,16 @@\n     if (quantum_info->format == FloatingPointQuantumFormat)\n       (void) SetImageProperty(image,\"quantum:format\",\"floating-point\",\n         exception);\n-    ResetImagePropertyIterator(image);\n+    {\n+      char\n+        **properties;\n+\n+      size_t\n+        number_properties;\n+\n+      properties=GetImageProperties(image,\"*\",&number_properties,exception);\n+      if (properties == (char **) NULL)\n+        number_properties=0;\n+      \n     property=GetNextImageProperty(image);\n     while (property != (const char *) NULL)\n     {\n@@ -2388,7 +2397,15 @@\n             }\n         }\n       (void) WriteBlobByte(image,'\\n');\n-      property=GetNextImageProperty(image);\n+      property=GetNextImageProperty(image);\n+    }\n+      for (i=0; i < (ssize_t) number_properties; i++)\n+        properties[i]=(char *) RelinquishMagickMemory(properties[i]);\n+      properties=(char **) RelinquishMagickMemory(properties);\n+    }\n+\n+\n     }\n     (void) WriteBlobString(image,\"\\f\\n:\\032\");\n"
+          "@@ -2356,6 +2356,16 @@\n     if (quantum_info->format == FloatingPointQuantumFormat)\n       (void) SetImageProperty(image,\"quantum:format\",\"floating-point\",\n         exception);\n+    /*\n+      Materialize synthetic ICC properties before iterating image properties.\n+      Some getters lazily call SetImageProperty(), which mutates the property\n+      splay tree and can invalidate the iterator.\n+    */\n+    (void) GetImageProperty(image,\"icc:description\",exception);\n+    (void) GetImageProperty(image,\"icc:manufacturer\",exception);\n+    (void) GetImageProperty(image,\"icc:model\",exception);\n+    (void) GetImageProperty(image,\"icc:copyright\",exception);\n+\n     ResetImagePropertyIterator(image);\n     property=GetNextImageProperty(image);\n     while (property != (const char *) NULL)\n"
         ],
         "kwargs": {},
-        "timestamp": 454356.018372525,
+        "timestamp": 1891645.725133748,
         "success": true,
         "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 2356): The patch context lines have introduced a typographic error. The context you provided removed `}`. Please double check..."
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "imagemagick/coders/miff.c",
+          "@@ -2358,6 +2358,15 @@\n         exception);\n+    /*\n+      Materialize synthetic ICC properties before iterating image properties.\n+      Some getters lazily call SetImageProperty(), which mutates the property\n+      splay tree and can invalidate the iterator.\n+    */\n+    (void) GetImageProperty(image,\"icc:description\",exception);\n+    (void) GetImageProperty(image,\"icc:manufacturer\",exception);\n+    (void) GetImageProperty(image,\"icc:model\",exception);\n+    (void) GetImageProperty(image,\"icc:copyright\",exception);\n+\n     ResetImagePropertyIterator(image);\n     property=GetNextImageProperty(image);\n     while (property != (const char *) NULL)\n"
+        ],
+        "kwargs": {},
+        "timestamp": 1891651.439352803,
+        "success": true,
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 2358): The patch context lines have introduced a typographic error. The context you provided removed `)`. Please double check..."
       }
     ],
     "test_patch": [],

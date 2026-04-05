@@ -9,34 +9,23 @@
         2240
       ],
       "kwargs": {},
-      "timestamp": 407727.728045055,
+      "timestamp": 1854733.211804274,
       "success": true,
       "result_summary": "Ok({'contents': '2141 \\t/*\\n2142 \\t * Time to try a fallback if available\\n2143 \\t */\\n2144 #ifdef DEBUG_XINCLUDE\\n2145 \\txmlGenericError(xmlGenericErrorContext, \"error looking for fallback\\\\n\");\\n214..."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "libxml2/xinclude.c",
-        2200
-      ],
-      "kwargs": {},
-      "timestamp": 407727.729427069,
-      "success": true,
-      "result_summary": "Ok({'contents': '2101 \\t    xmlFree(eschref);\\n2102     }\\n2103     if (URI == NULL) {\\n2104 \\txmlXIncludeErr(ctxt, ctxt->incTab[nr]->ref,\\n2105 \\t               XML_XINCLUDE_HREF_URI, \"failed build U..."
     }
   ],
   "find_references": [
     {
       "tool_name": "find_references",
       "args": [
-        "xmlXIncludeIncludeNode",
+        "XML_PARSE_NOXINCNODE",
         "libxml2/xinclude.c",
         false
       ],
       "kwargs": {},
-      "timestamp": 407735.578209885,
+      "timestamp": 1854745.984509461,
       "success": true,
-      "result_summary": "Ok([FileReferences(file_name='libxml2/xinclude.c', refs=[FileReference(line=2468, content='\\t    xmlXIncludeIncludeNode(ctxt, i);', enclosing_definition='xmlXIncludeDoProcess')])])"
+      "result_summary": "Ok([FileReferences(file_name='libxml2/xinclude.c', refs=[FileReference(line=2229, content='    if (ctxt->parseFlags & XML_PARSE_NOXINCNODE) {', enclosing_definition='xmlXIncludeIncludeNode')])])"
     }
   ],
   "apply_patch": [
@@ -44,10 +33,10 @@
       "tool_name": "apply_patch",
       "args": [
         "libxml2/xinclude.c",
-        "@@ -2190,7 +2190,7 @@\n static int\n xmlXIncludeIncludeNode(xmlXIncludeCtxtPtr ctxt, int nr) {\n-    xmlNodePtr cur, end, list, tmp;\n+    xmlNodePtr cur, end, list, tmp, parent;\n@@ -2227,6 +2227,7 @@ xmlXIncludeIncludeNode(xmlXIncludeCtxtPtr ctxt, int nr) {\n     }\n \n     if (ctxt->parseFlags & XML_PARSE_NOXINCNODE) {\n+        parent = cur->parent;\n \t/*\n \t * Add the list of nodes\n \t */\n@@ -2238,6 +2239,11 @@ xmlXIncludeIncludeNode(xmlXIncludeCtxtPtr ctxt, int nr) {\n \t}\n \txmlUnlinkNode(cur);\n \txmlFreeNode(cur);\n+\n+        if (parent != NULL) {\n+            tmp = parent->children;\n+            while (tmp != NULL) {\n+                xmlReconciliateNs(parent->doc, tmp);\n+                tmp = tmp->next;\n+            }\n+        }\n     } else {\n         xmlNodePtr child, next;\n"
+        "@@ -2190,6 +2190,32 @@\n static int\n xmlXIncludeIncludeNode(xmlXIncludeCtxtPtr ctxt, int nr) {\n     xmlNodePtr cur, end, list, tmp;\n+\n+    /*\n+     * Reconcile namespace pointers after moving nodes out of an xi:include\n+     * element that might own namespace declarations. If the include node is\n+     * freed (XML_PARSE_NOXINCNODE), descendants still referencing namespaces\n+     * declared on that node would otherwise keep dangling xmlNs pointers.\n+     */\n+    static void\n+    xmlXIncludeReconciliateNsList(xmlDocPtr doc, xmlNodePtr list) {\n+        xmlNodePtr node;\n+\n+        for (node = list; node != NULL; node = node->next) {\n+            if (node->type == XML_ELEMENT_NODE) {\n+                xmlNodePtr child;\n+\n+                xmlReconciliateNs(doc, node);\n+                for (child = node->children; child != NULL; child = child->next) {\n+                    if (child->type == XML_ELEMENT_NODE) {\n+                        xmlXIncludeReconciliateNsList(doc, child);\n+                    }\n+                }\n+            }\n+        }\n+    }\n \n     if (ctxt == NULL)\n \treturn(-1);\n@@ -2236,6 +2262,7 @@ xmlXIncludeIncludeNode(xmlXIncludeCtxtPtr ctxt, int nr) {\n \t    list = list->next;\n \n \t    xmlAddPrevSibling(cur, end);\n+\t    xmlXIncludeReconciliateNsList(cur->doc, end);\n \t}\n \txmlUnlinkNode(cur);\n \txmlFreeNode(cur);"
       ],
       "kwargs": {},
-      "timestamp": 407739.863298274,
+      "timestamp": 1854751.662715637,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
@@ -57,7 +46,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 407786.772214377,
+      "timestamp": 1854855.935555339,
       "success": true,
       "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
     }

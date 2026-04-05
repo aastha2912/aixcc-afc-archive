@@ -1,5 +1,5 @@
 {
-  "vuln_id": 151,
+  "vuln_id": 463,
   "crash_result": {
     "output": "==70663==ERROR: AddressSanitizer: heap-use-after-free on address 0x60300001c704 at pc 0x00000082e02d bp 0x7fff26ed1440 sp 0x7fff26ed1438\nREAD of size 4 at 0x60300001c704 thread T0\nSCARINESS: 45 (4-byte-read-heap-use-after-free)\n    #0 0x82e02c in timelib_error_container_dtor /src/php-src/ext/date/lib/timelib.c:159:26\n    #1 0x751048 in zm_post_zend_deactivate_date /src/php-src/ext/date/php_date.c:443:3\n    #2 0xf01fd4 in zend_post_deactivate_modules /src/php-src/Zend/zend_API.c:3467:4\n    #3 0xd",
     "stack": "#0 0x82e02c in timelib_error_container_dtor php-src/ext/date/lib/timelib.c:159:26\n#1 0x751048 in zm_post_zend_deactivate_date php-src/ext/date/php_date.c:443:3\n#2 0xf01fd4 in zend_post_deactivate_modules php-src/Zend/zend_API.c:3467:4\n#3 0xd26dd7 in php_request_shutdown php-src/main/main.c:1959:3\n#4 0x13bc32e in fuzzer_request_shutdown php-src/sapi/fuzzer/fuzzer-sapi.c:204:2\n#5 0x13bcab4 in fuzzer_do_request_from_buffer php-src/sapi/fuzzer/fuzzer-sapi.c:288:2\n#6 0x13baf84 in LLVMFuzzerTestOneInp",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "update_errors_warnings",
     "file": "php-src/ext/date/php_date.c",
-    "description": "`update_errors_warnings()` stores `*last_errors` into global `DATEG(last_errors)` when warnings/errors exist, but then unconditionally calls `timelib_error_container_dtor(*last_errors)` and nulls only the local pointer. This leaves `DATEG(last_errors)` dangling (pointing to freed memory). Later, during module post-deactivate (`zm_post_zend_deactivate_date`), `timelib_error_container_dtor(DATEG(last_errors))` is called again, causing a heap-use-after-free (read in `timelib_error_container_dtor` at timelib.c:159, then double-dtor behavior).",
-    "conditions": "PoV creates a `DateTime` with an invalid string (`\"\\xff\"`), producing parse warnings/errors via `timelib_strtotime` in `php_date_initialize`. Data flow: harness executes PHP snippet -> `DateTime::__construct` -> `php_date_initialize` -> `update_errors_warnings(&err)`. If `err` has warning_count or error_count, `DATEG(last_errors)` is assigned the same container and then freed immediately. On request/module shutdown path (`zend_post_deactivate_modules` -> `zm_post_zend_deactivate_date`), the stale global is destructed again, triggering UAF."
+    "description": "`update_errors_warnings()` stores `*last_errors` into the global `DATEG(last_errors)` when warnings/errors exist, but then unconditionally calls `timelib_error_container_dtor(*last_errors)` and nulls only the local pointer. This leaves `DATEG(last_errors)` dangling (UAF). Later, request/module shutdown (`zm_post_zend_deactivate_date`) calls `timelib_error_container_dtor(DATEG(last_errors))` again, causing use-after-free/double-dtor access in `timelib_error_container_dtor`.",
+    "conditions": "Trigger any DateTime parse path that produces at least one warning/error so `(*last_errors)->warning_count || error_count` is true (e.g., PoC `<?new DateTime('\\xff');`). Data flow: fuzz input executes PHP code -> `DateTime::__construct` -> `php_date_initialize` -> `timelib_strtotime(...,&err,...)` allocates error container -> `update_errors_warnings(&err)` assigns global then frees same container -> at post-deactivate shutdown, global `DATEG(last_errors)` is destroyed again, producing heap-use-after-free."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.03940825,
-      "total_input_tokens": 19359,
-      "total_output_tokens": 395,
-      "total_cached_tokens": 0,
+      "total_cost": 0.028639450000000004,
+      "total_input_tokens": 19535,
+      "total_output_tokens": 367,
+      "total_cached_tokens": 6784,
       "llm_calls": [
         {
-          "timestamp": 1773432250.365244,
+          "timestamp": 1774867589.6210122,
           "model": "gpt-5.3-codex",
-          "cost": 0.011158,
-          "input_tokens": 5568,
+          "cost": 0.0094976,
+          "input_tokens": 5656,
           "output_tokens": 101,
-          "total_tokens": 5669,
-          "cached_tokens": 0,
+          "total_tokens": 5757,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_r9DZ9Sl5kaDeS5ivA677EuO7"
+              "tool_call_id": "call_Sky2TImlKIATAzwrsdamuCSJ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_aC45ajYjCJaThVr6yxYJSSFX"
+              "tool_call_id": "call_8gq6pEQ6m1X48YoOVNcrLZlS"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_0esq1BLVbxIRFwmkKHApoAIB"
+              "tool_call_id": "call_lT4m9RvB5uiu5sFn1hrXheaW"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773432265.3601856,
+          "timestamp": 1774867595.8848474,
           "model": "gpt-5.3-codex",
-          "cost": 0.028250249999999998,
-          "input_tokens": 13791,
-          "output_tokens": 294,
-          "total_tokens": 14085,
-          "cached_tokens": 0,
+          "cost": 0.019141850000000002,
+          "input_tokens": 13879,
+          "output_tokens": 266,
+          "total_tokens": 14145,
+          "cached_tokens": 5632,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_uQqU3PemoZwXWXau58Y43Ej8"
+              "tool_call_id": "call_OFGVI3Twp51CHJm7MNTpIMK4"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,49 +88,45 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.039676699999999995,
-      "total_input_tokens": 35034,
-      "total_output_tokens": 298,
-      "total_cached_tokens": 16384,
+      "total_llm_calls": 8,
+      "total_cost": 0.08851534999999999,
+      "total_input_tokens": 105113,
+      "total_output_tokens": 441,
+      "total_cached_tokens": 64512,
       "llm_calls": [
         {
-          "timestamp": 1773432267.364383,
+          "timestamp": 1774867597.5481148,
           "model": "gpt-5.3-codex",
-          "cost": 0.00734895,
-          "input_tokens": 4841,
-          "output_tokens": 107,
-          "total_tokens": 4948,
+          "cost": 0.01054095,
+          "input_tokens": 6937,
+          "output_tokens": 73,
+          "total_tokens": 7010,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 2,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_3bp0x9agQbAH6PXrrKXeVlL1"
-            },
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_aN0ttkUGNZ2Np5xMNsXtWmoM"
+              "tool_call_id": "call_IryOg1baRAtwcnXBwKIgEAzx"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Nf4rS0WWfd27opYnabGR6njH"
+              "tool_call_id": "call_SDsAeIvOo9bjdQmL9ml6tj1Y"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773433088.7572446,
+          "timestamp": 1774867599.9629931,
           "model": "gpt-5.3-codex",
-          "cost": 0.011764199999999999,
-          "input_tokens": 9868,
-          "output_tokens": 154,
-          "total_tokens": 10022,
-          "cached_tokens": 4864,
+          "cost": 0.011741099999999999,
+          "input_tokens": 11850,
+          "output_tokens": 135,
+          "total_tokens": 11985,
+          "cached_tokens": 6912,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +135,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_i0vKTS5btUcA4Qj6sBy2y42F"
+              "tool_call_id": "call_D86D5f565zTpF27Rtnskl7GK"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773433095.2678668,
+          "timestamp": 1774867617.594827,
           "model": "gpt-5.3-codex",
-          "cost": 0.0023653,
-          "input_tokens": 10110,
+          "cost": 0.00257495,
+          "input_tokens": 12073,
           "output_tokens": 14,
-          "total_tokens": 10124,
-          "cached_tokens": 9856,
+          "total_tokens": 12087,
+          "cached_tokens": 11904,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,18 +156,39 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_SN9FIXwLd9DRcsIi43kLfPmp"
+              "tool_call_id": "call_rFyR8rjKMh32xfOHCkI7XyP8"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773433884.4853356,
+          "timestamp": 1774868446.8997383,
           "model": "gpt-5.3-codex",
-          "cost": 0.01819825,
-          "input_tokens": 10215,
-          "output_tokens": 23,
-          "total_tokens": 10238,
+          "cost": 0.0030527,
+          "input_tokens": 12226,
+          "output_tokens": 29,
+          "total_tokens": 12255,
+          "cached_tokens": 11904,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_hVz4VVjPtmxEk3NhRCPrwuO5"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774869314.2849555,
+          "model": "gpt-5.3-codex",
+          "cost": 0.026801250000000002,
+          "input_tokens": 15027,
+          "output_tokens": 36,
+          "total_tokens": 15063,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -180,8 +197,71 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
+              "tool_name": "find_references",
+              "tool_call_id": "call_dnmaHTno5LE4rM0CA5FK3Geb"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774869774.9172094,
+          "model": "gpt-5.3-codex",
+          "cost": 0.005167049999999999,
+          "input_tokens": 15495,
+          "output_tokens": 117,
+          "total_tokens": 15612,
+          "cached_tokens": 14976,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_bzSExobs4NNiXwDDW4LqrK5h"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774869786.3516998,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0032773999999999998,
+          "input_tokens": 15700,
+          "output_tokens": 14,
+          "total_tokens": 15714,
+          "cached_tokens": 15488,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_ixDTKk0yfSKEfpl7Dpvsr23H"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774870745.4630337,
+          "model": "gpt-5.3-codex",
+          "cost": 0.025359949999999996,
+          "input_tokens": 15805,
+          "output_tokens": 23,
+          "total_tokens": 15828,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
               "tool_name": "terminate",
-              "tool_call_id": "call_pPtb5PcUVAUSC76dlCCvgBVi"
+              "tool_call_id": "call_sE7915udse18Ygifm19QgafK"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,15 +269,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.07908494999999999,
-      "total_input_tokens": 54393,
-      "total_output_tokens": 693,
-      "total_llm_calls": 6
+      "total_cost": 0.1171548,
+      "total_input_tokens": 124648,
+      "total_output_tokens": 808,
+      "total_llm_calls": 10
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/ext/date/php_date.c\n+++ b/ext/date/php_date.c\n@@ -2375,6 +2375,8 @@\n \n \tif ((*last_errors)->warning_count || (*last_errors)->error_count) {\n \t\tDATEG(last_errors) = *last_errors;\n+\t\t*last_errors = NULL;\n+\t\treturn;\n \t}\n \n \ttimelib_error_container_dtor(*last_errors);\n",
+    "patch": "--- a/ext/date/php_date.c\n+++ b/ext/date/php_date.c\n@@ -2375,6 +2375,7 @@\n \n \tif ((*last_errors)->warning_count || (*last_errors)->error_count) {\n \t\tDATEG(last_errors) = *last_errors;\n+\t\t*last_errors = NULL;\n \t}\n \n \ttimelib_error_container_dtor(*last_errors);\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -217,37 +297,48 @@
         "tool_name": "read_source",
         "args": [
           "php-src/ext/date/php_date.c",
+          2380
+        ],
+        "kwargs": {},
+        "timestamp": 1899886.125512279,
+        "success": true,
+        "result_summary": "Ok({'contents': '2281 \\t}\\n2282 \\tif (old_obj->interval) {\\n2283 \\t\\tnew_obj->interval = timelib_rel_time_clone(old_obj->interval);\\n2284 \\t}\\n2285 \\treturn &new_obj->std;\\n2286 } /* }}} */\\n2287 \\n22..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "php-src/ext/date/php_date.c",
           430
         ],
         "kwargs": {},
-        "timestamp": 464556.300634543,
+        "timestamp": 1899886.127557401,
         "success": true,
         "result_summary": "Ok({'contents': '331 \\t}\\n332 \\n333 static void date_object_free_storage_date(zend_object *object);\\n334 static void date_object_free_storage_timezone(zend_object *object);\\n335 static void date_objec..."
       },
       {
         "tool_name": "read_source",
         "args": [
-          "php-src/ext/date/php_date.c",
-          2380
+          "php-src/compile_error.txt",
+          1
         ],
         "kwargs": {},
-        "timestamp": 464556.309301849,
+        "timestamp": 1901600.593769569,
         "success": true,
-        "result_summary": "Ok({'contents': '2281 \\t}\\n2282 \\tif (old_obj->interval) {\\n2283 \\t\\tnew_obj->interval = timelib_rel_time_clone(old_obj->interval);\\n2284 \\t}\\n2285 \\treturn &new_obj->std;\\n2286 } /* }}} */\\n2287 \\n22..."
+        "result_summary": "Ok({'contents': \"  1 ---------------------------------------------------------------\\n  2 Compiling libFuzzer to /usr/lib/libFuzzingEngine.a...  done.\\n  3 --------------------------------------------..."
       }
     ],
     "find_references": [
       {
         "tool_name": "find_references",
         "args": [
-          "update_errors_warnings",
+          "error_count",
           "php-src/ext/date/php_date.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 465373.725759112,
+        "timestamp": 1902060.925545767,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='php-src/ext/date/php_date.c', refs=[FileReference(line=2432, content='\\tupdate_errors_warnings(&err);', enclosing_definition='php_date_initialize'), FileReference(line=32..."
+        "result_summary": "Ok([FileReferences(file_name='php-src/ext/date/php_date.c', refs=[FileReference(line=1065, content='\\tif (error->error_count) {', enclosing_definition='php_parse_date'), FileReference(line=1116, conte..."
       }
     ],
     "apply_patch": [
@@ -255,12 +346,23 @@
         "tool_name": "apply_patch",
         "args": [
           "php-src/ext/date/php_date.c",
-          "@@ -2373,12 +2373,14 @@ static void update_errors_warnings(timelib_error_container **last_errors) /* {{\n \t\treturn;\n \t}\n \n \tif ((*last_errors)->warning_count || (*last_errors)->error_count) {\n \t\tDATEG(last_errors) = *last_errors;\n+\t\t*last_errors = NULL;\n+\t\treturn;\n \t}\n \n \ttimelib_error_container_dtor(*last_errors);\n \t*last_errors = NULL;\n } /* }}} */\n"
+          "@@ -2373,12 +2373,14 @@\n \t\treturn;\n \t}\n \n \tif ((*last_errors)->warning_count || (*last_errors)->error_count) {\n \t\tDATEG(last_errors) = *last_errors;\n+\t\t*last_errors = NULL;\n+\t\treturn;\n \t}\n \n \ttimelib_error_container_dtor(*last_errors);\n \t*last_errors = NULL;\n } /* }}} */"
         ],
         "kwargs": {},
-        "timestamp": 465377.416158865,
+        "timestamp": 1899890.46848829,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "php-src/ext/date/php_date.c",
+          "@@ -2376,8 +2376,7 @@\n \tif ((*last_errors)->warning_count || (*last_errors)->error_count) {\n \t\tDATEG(last_errors) = *last_errors;\n \t\t*last_errors = NULL;\n-\t\treturn;\n \t}\n \n \ttimelib_error_container_dtor(*last_errors);\n \t*last_errors = NULL;"
+        ],
+        "kwargs": {},
+        "timestamp": 1902070.279610491,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
     ],
     "test_patch": [
@@ -268,7 +370,15 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 466170.88080037,
+        "timestamp": 1900733.991266556,
+        "success": true,
+        "result_summary": "Err(CRSError(the code failed to build, extra={'validation_status': 'build_failed', 'build_error': '\\n- **Build failed**.\\n- Error details are in: **`/src/php-src/compile_error.txt`**.', 'suggestion': ..."
+      },
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1903032.385091496,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

@@ -1,5 +1,5 @@
 {
-  "vuln_id": 107,
+  "vuln_id": 413,
   "crash_result": {
     "output": "==83725==ERROR: AddressSanitizer: heap-use-after-free on address 0x60300001da10 at pc 0x000000d15f76 bp 0x7ffdb2daadc0 sp 0x7ffdb2daadb8\nREAD of size 4 at 0x60300001da10 thread T0\nSCARINESS: 45 (4-byte-read-heap-use-after-free)\n    #0 0xd15f75 in zend_gc_addref /src/php-src/Zend/zend_types.h:1210:9\n    #1 0xd6e25d in ZEND_ASSIGN_OP_SPEC_VAR_TMPVAR_HANDLER /src/php-src/Zend/zend_vm_execute.h:25866:3\n    #2 0xfffb9f in fuzzer_execute_ex /src/php-src/sapi/fuzzer/fuzzer-execute-common.h:57:14\n    #3",
     "stack": "#0 0xd15f75 in zend_gc_addref php-src/Zend/zend_types.h:1210:9\n#1 0xd6e25d in ZEND_ASSIGN_OP_SPEC_VAR_TMPVAR_HANDLER php-src/Zend/zend_vm_execute.h:25866:3\n#2 0xfffb9f in fuzzer_execute_ex php-src/sapi/fuzzer/fuzzer-execute-common.h:57:14\n#3 0xd20716 in zend_execute php-src/Zend/zend_vm_execute.h:61021:2\n#4 0x100092f in fuzzer_do_request_from_buffer php-src/sapi/fuzzer/fuzzer-sapi.c:274:5\n#5 0xfff9be in LLVMFuzzerTestOneInput php-src/sapi/fuzzer/fuzzer-execute.c:27:2\n#6 0x4813c3 in fuzzer::Fuzze",
@@ -24,58 +24,54 @@
   "analyzed_vuln": {
     "function": "ZEND_ASSIGN_OP_SPEC_VAR_TMPVAR_HANDLER",
     "file": "php-src/Zend/zend_vm_execute.h",
-    "description": "Use-after-free in compound assignment handler: after zend_binary_op(var_ptr, var_ptr, value), the code unconditionally does ZVAL_COPY(EX_VAR(opline->result.var), var_ptr). For '/=' with string-to-number conversion, div_function() may call zval_ptr_dtor(result) when result==op1 (in-place op), freeing the original string held by var_ptr before writing the numeric result. The handler then copies from stale var_ptr, and ZVAL_COPY triggers GC_ADDREF on freed memory (crash in zend_gc_addref).",
-    "conditions": "Triggered by ASSIGN_OP on a VAR with TMPVAR RHS where RETURN_VALUE_USED(opline) is true (so result copy path runs), and an operator path that may dtor/free the old LHS when result==op1 (here division after prior concat-created string). Fuzzer input drives execution through ZEND_ASSIGN_OP_SPEC_VAR_TMPVAR_HANDLER -> zend_binary_op -> div_function freeing LHS string, then back to handler which copies var_ptr into result, causing UAF."
+    "description": "In the ASSIGN_OP var/tmpvar VM handler, the engine performs an in-place binary op (`zend_binary_op(var_ptr, var_ptr, value)`) and then unconditionally does `ZVAL_COPY(..., var_ptr)` when the result is used. For `/=` with string operands, `div_function()` may call `zval_ptr_dtor(result)` when `result == op1`, which frees the original string held by `var_ptr` before writing the numeric result. The handler still treats `var_ptr` as a valid source zval and increments refcount via `ZVAL_COPY`, causing a heap-use-after-free in `zend_gc_addref`. Root cause is stale pointer/state usage after in-place op mutates/frees op1, not `zend_gc_addref` itself.",
+    "conditions": "Trigger requires an ASSIGN_OP path handled by `ZEND_ASSIGN_OP_SPEC_VAR_TMPVAR_HANDLER` where return value is used (so `RETURN_VALUE_USED(opline)` is true) and the in-place op can destroy/rewrite the LHS zval storage (e.g., `/=` on a string value produced via prior concat/coercion). Fuzzed PHP code reaches this via execute harness, causing `zend_binary_op` -> `div_function` to dtor/free the old string, then handler copies from stale `var_ptr`, leading to UAF."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.0346794,
-      "total_input_tokens": 22580,
-      "total_output_tokens": 389,
-      "total_cached_tokens": 6528,
+      "total_cost": 0.0296513,
+      "total_input_tokens": 19534,
+      "total_output_tokens": 425,
+      "total_cached_tokens": 6656,
       "llm_calls": [
         {
-          "timestamp": 1773397465.2561588,
+          "timestamp": 1774844407.6060784,
           "model": "gpt-5.3-codex",
-          "cost": 0.009516849999999999,
-          "input_tokens": 5395,
-          "output_tokens": 135,
-          "total_tokens": 5530,
+          "cost": 0.00927885,
+          "input_tokens": 5483,
+          "output_tokens": 107,
+          "total_tokens": 5590,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_bX8195StZrjKNkiImlBa3yzM"
+              "tool_call_id": "call_E6vYkC36FYJSLL7jc8UmiS9o"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_nZF3nV2kYK8roaEzkIlu7U61"
+              "tool_call_id": "call_cJRbdKuWLsLCvRoogT9az6Ie"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_gjow5LisYEK7Gd3VHhMLQ5sA"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_9cPPhzoIU2W0CnslzVQHV8bt"
+              "tool_call_id": "call_W6TMRwC8ILK7xPWvxi25zrfs"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773397478.1861224,
+          "timestamp": 1774844413.9172432,
           "model": "gpt-5.3-codex",
-          "cost": 0.02516255,
-          "input_tokens": 17185,
-          "output_tokens": 254,
-          "total_tokens": 17439,
-          "cached_tokens": 5376,
+          "cost": 0.02037245,
+          "input_tokens": 14051,
+          "output_tokens": 318,
+          "total_tokens": 14369,
+          "cached_tokens": 5504,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -84,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_o9IjwasILpaixDatMwvAzvRH"
+              "tool_call_id": "call_ntumCidEjkNKPVtVpG0rhuQ4"
             }
           ],
           "finish_reason": "tool_calls"
@@ -93,18 +89,18 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.02050825,
-      "total_input_tokens": 29095,
-      "total_output_tokens": 348,
-      "total_cached_tokens": 22400,
+      "total_cost": 0.025265450000000002,
+      "total_input_tokens": 37359,
+      "total_output_tokens": 346,
+      "total_cached_tokens": 28544,
       "llm_calls": [
         {
-          "timestamp": 1773397480.336917,
+          "timestamp": 1774844415.780462,
           "model": "gpt-5.3-codex",
-          "cost": 0.0069412,
-          "input_tokens": 4744,
+          "cost": 0.01055845,
+          "input_tokens": 6811,
           "output_tokens": 90,
-          "total_tokens": 4834,
+          "total_tokens": 6901,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -114,23 +110,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_vPpeNkRsGa4YAgGuZEiIuyO5"
+              "tool_call_id": "call_ZGDXOYVDx3F9vnmIP7xBqPpw"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_hNq9CmeVLcNjFDRh94mPwykF"
+              "tool_call_id": "call_JRRBzZ1crET1AEaHZH6by4rO"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773397620.5115306,
+          "timestamp": 1774844574.8713498,
           "model": "gpt-5.3-codex",
-          "cost": 0.0094178,
-          "input_tokens": 7876,
-          "output_tokens": 221,
-          "total_tokens": 8097,
-          "cached_tokens": 4736,
+          "cost": 0.00978145,
+          "input_tokens": 9943,
+          "output_tokens": 219,
+          "total_tokens": 10162,
+          "cached_tokens": 6784,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +135,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_CBz6aEruOHfUnDCV6C7RnZdZ"
+              "tool_call_id": "call_D0M1jL1UonRH0FBY6if65WVN"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773397621.9656198,
+          "timestamp": 1774844576.2584581,
           "model": "gpt-5.3-codex",
-          "cost": 0.00202055,
-          "input_tokens": 8185,
+          "cost": 0.0024086999999999997,
+          "input_tokens": 10250,
           "output_tokens": 14,
-          "total_tokens": 8199,
-          "cached_tokens": 7936,
+          "total_tokens": 10264,
+          "cached_tokens": 9984,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +156,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_iP1klt9dRFuhb30vGU7dV2hT"
+              "tool_call_id": "call_s0L5ntucDpBncyWCK6VemfH0"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773397711.3001564,
+          "timestamp": 1774844677.154855,
           "model": "gpt-5.3-codex",
-          "cost": 0.0021287,
-          "input_tokens": 8290,
+          "cost": 0.00251685,
+          "input_tokens": 10355,
           "output_tokens": 23,
-          "total_tokens": 8313,
-          "cached_tokens": 8064,
+          "total_tokens": 10378,
+          "cached_tokens": 10112,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,7 +177,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_aX7btlrpcPUb4aqV5yVqqPBl"
+              "tool_call_id": "call_5E8xvkBcA1ZXKHQrC9b6DAmp"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,9 +185,9 @@
       ]
     },
     "total": {
-      "total_cost": 0.05518765,
-      "total_input_tokens": 51675,
-      "total_output_tokens": 737,
+      "total_cost": 0.05491675,
+      "total_input_tokens": 56893,
+      "total_output_tokens": 771,
       "total_llm_calls": 6
     }
   },
@@ -220,7 +216,7 @@
           25866
         ],
         "kwargs": {},
-        "timestamp": 429769.242312832,
+        "timestamp": 1876704.367846686,
         "success": true,
         "result_summary": "Ok({'contents': '25767 \\t\\t\\t} else {\\n25768 \\t\\t\\t\\tvar_ptr = zend_fetch_dimension_address_inner_RW(ht, dim EXECUTE_DATA_CC);\\n25769 \\t\\t\\t}\\n25770 \\t\\t\\tif (UNEXPECTED(!var_ptr)) {\\n25771 \\t\\t\\t\\tgo..."
       }
@@ -234,7 +230,7 @@
           false
         ],
         "kwargs": {},
-        "timestamp": 429905.721784321,
+        "timestamp": 1876859.967790647,
         "success": true,
         "result_summary": "Ok([FileReferences(file_name='php-src/Zend/zend_vm_execute.h', refs=[FileReference(line=59090, content='\\t\\t\\t\\tZEND_ASSIGN_OP_SPEC_VAR_TMPVAR_HANDLER(ZEND_OPCODE_HANDLER_ARGS_PASSTHRU);', enclosing_d..."
       }
@@ -244,10 +240,10 @@
         "tool_name": "apply_patch",
         "args": [
           "php-src/Zend/zend_vm_execute.h",
-          "@@ -25862,9 +25862,15 @@\n \t\tzend_binary_op(var_ptr, var_ptr, value OPLINE_CC);\n \t} while (0);\n \n \tif (UNEXPECTED(RETURN_VALUE_USED(opline))) {\n-\t\tZVAL_COPY(EX_VAR(opline->result.var), var_ptr);\n+\t\tzval *result = EX_VAR(opline->result.var);\n+\t\tif (UNEXPECTED(result == var_ptr)) {\n+\t\t\tZ_TRY_ADDREF_P(var_ptr);\n+\t\t} else {\n+\t\t\tZVAL_COPY(result, var_ptr);\n+\t\t}\n \t}\n \n \tzval_ptr_dtor_nogc(EX_VAR(opline->op2.var));\n \tzval_ptr_dtor_nogc(EX_VAR(opline->op1.var));\n"
+          "@@ -25862,9 +25862,13 @@\n \t\tzend_binary_op(var_ptr, var_ptr, value OPLINE_CC);\n \t} while (0);\n \n \tif (UNEXPECTED(RETURN_VALUE_USED(opline))) {\n-\t\tZVAL_COPY(EX_VAR(opline->result.var), var_ptr);\n+\t\tzval *result = EX_VAR(opline->result.var);\n+\t\tif (UNEXPECTED(result == var_ptr)) {\n+\t\t\tZ_TRY_ADDREF_P(var_ptr);\n+\t\t} else {\n+\t\t\tZVAL_COPY(result, var_ptr);\n+\t\t}\n \t}\n \n \tzval_ptr_dtor_nogc(EX_VAR(opline->op2.var));\n \tzval_ptr_dtor_nogc(EX_VAR(opline->op1.var));"
         ],
         "kwargs": {},
-        "timestamp": 429909.403998174,
+        "timestamp": 1876863.666888803,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -257,7 +253,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 429997.71772208,
+        "timestamp": 1876964.676310687,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

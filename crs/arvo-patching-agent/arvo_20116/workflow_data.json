@@ -1,5 +1,5 @@
 {
-  "vuln_id": 204,
+  "vuln_id": 331,
   "crash_result": {
     "output": "==658==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x61500000007c at pc 0x00000110ae82 bp 0x7ffc6b841a00 sp 0x7ffc6b8419f8\nWRITE of size 4 at 0x61500000007c thread T0\nSCARINESS: 36 (4-byte-write-heap-buffer-overflow)\n    #0 0x110ae81 in arrow::UnionType::UnionType(std::__1::vector<std::__1::shared_ptr<arrow::Field>, std::__1::allocator<std::__1::shared_ptr<arrow::Field> > > const&, std::__1::vector<signed char, std::__1::allocator<signed char> > const&, arrow::UnionMode::type) /src/",
     "stack": "#0 0x110ae81 in arrow::UnionType::UnionType(std::__1::vector<std::__1::shared_ptr<arrow::Field>, std::__1::allocator<std::__1::shared_ptr<arrow::Field> > > const&, std::__1::vector<signed char, std::__1::allocator<signed char> > const&, arrow::UnionMode::type) arrow/cpp/src/arrow/type.cc:362:27\n#1 0x113d1d4 in __compressed_pair_elem<const std::__1::vector<std::__1::shared_ptr<arrow::Field>, std::__1::allocator<std::__1::shared_ptr<arrow::Field> > > &, const std::__1::vector<signed char, std::__1",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "UnionFromFlatbuffer",
     "file": "arrow/cpp/src/arrow/ipc/metadata_internal.cc",
-    "description": "`UnionFromFlatbuffer` deserializes union type IDs from IPC metadata and blindly casts each `int32_t` type id to `int8_t` (`type_codes.push_back(static_cast<int8_t>(id))`) without validating range/sign. This allows negative wrapped type codes to reach `arrow::UnionType::UnionType` in `arrow/cpp/src/arrow/type.cc`, which then indexes `child_ids_[type_code]` (line ~362). A negative `type_code` causes an out-of-bounds write before the vector buffer (heap-buffer-overflow).",
-    "conditions": "In the IPC stream fuzz path (`FuzzIpcStream` -> `GetSchema` -> `FieldFromFlatbuffer` -> `ConcreteTypeFromFlatbuffer` -> `UnionFromFlatbuffer`), attacker-controlled flatbuffer union `typeIds` must include a value outside int8_t valid nonnegative range (e.g., >127 or negative), so truncation to `int8_t` yields a negative `type_code`. `union_()` then constructs `UnionType` and writes `child_ids_[type_code]`, triggering the crash."
+    "description": "UnionFromFlatbuffer deserializes flatbuffer union typeIds into int8_t without validating range/sign, then passes them to union_ / UnionType::UnionType. Negative or out-of-range values (after int32->int8 truncation) are used as indices into child_ids_ in UnionType::UnionType (child_ids_[type_code] = child_id), causing heap-buffer-overflow writes before/after the vector.",
+    "conditions": "Trigger requires an IPC stream/schema containing a Union type with crafted typeIds in flatbuffer metadata (or values that overflow when cast to int8_t). The fuzz harness arrow::ipc::internal::FuzzIpcStream -> GetSchema -> FieldFromFlatbuffer -> ConcreteTypeFromFlatbuffer -> UnionFromFlatbuffer reaches this path. Because UnionFromFlatbuffer accepts untrusted typeIds and does not reject values outside [0, UnionType::kMaxTypeCode], UnionType constructor receives invalid type_codes and performs OOB write."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.029804249999999997,
-      "total_input_tokens": 22303,
-      "total_output_tokens": 349,
-      "total_cached_tokens": 8960,
+      "total_cost": 0.02759225,
+      "total_input_tokens": 22479,
+      "total_output_tokens": 313,
+      "total_cached_tokens": 10240,
       "llm_calls": [
         {
-          "timestamp": 1773523942.1083274,
+          "timestamp": 1774817064.185949,
           "model": "gpt-5.3-codex",
-          "cost": 0.016898,
-          "input_tokens": 9032,
+          "cost": 0.0152376,
+          "input_tokens": 9120,
           "output_tokens": 78,
-          "total_tokens": 9110,
-          "cached_tokens": 0,
+          "total_tokens": 9198,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,23 +51,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_WK6KuyQVWVjcHHrm2ocq7ouL"
+              "tool_call_id": "call_tD9d7Whai1hSFuSEkyrlmfkR"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_7re4WjxpqxJ6eKdpFGsRJdu0"
+              "tool_call_id": "call_TCYGwdqVC6AKBmZr7n8Oixxg"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773523953.2753534,
+          "timestamp": 1774817069.3201487,
           "model": "gpt-5.3-codex",
-          "cost": 0.01290625,
-          "input_tokens": 13271,
-          "output_tokens": 271,
-          "total_tokens": 13542,
-          "cached_tokens": 8960,
+          "cost": 0.01235465,
+          "input_tokens": 13359,
+          "output_tokens": 235,
+          "total_tokens": 13594,
+          "cached_tokens": 9088,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -76,7 +76,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_4Lr86aDS1jlahvnQ2AZGFz64"
+              "tool_call_id": "call_QIoHaeLZWRK4R8wgd7ercCLo"
             }
           ],
           "finish_reason": "tool_calls"
@@ -85,18 +85,18 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.0269885,
-      "total_input_tokens": 41478,
-      "total_output_tokens": 343,
-      "total_cached_tokens": 32000,
+      "total_cost": 0.0379162,
+      "total_input_tokens": 56300,
+      "total_output_tokens": 538,
+      "total_cached_tokens": 43264,
       "llm_calls": [
         {
-          "timestamp": 1773523955.115819,
+          "timestamp": 1774817071.4411833,
           "model": "gpt-5.3-codex",
-          "cost": 0.009723699999999998,
-          "input_tokens": 7006,
+          "cost": 0.0160377,
+          "input_tokens": 10614,
           "output_tokens": 78,
-          "total_tokens": 7084,
+          "total_tokens": 10692,
           "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -106,23 +106,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_PgOlgwuPpgLvFLneAkn2NKQ4"
+              "tool_call_id": "call_lVOwPM9XhE9Rl2DQm0myBQIB"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_TD3ak8Lx0hXcfEpCPjWXIrFC"
+              "tool_call_id": "call_4fvspQ4J0ApGn8mhVQopIrNl"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773523964.4121914,
+          "timestamp": 1774817075.9669797,
           "model": "gpt-5.3-codex",
-          "cost": 0.011984350000000001,
-          "input_tokens": 11245,
-          "output_tokens": 228,
-          "total_tokens": 11473,
-          "cached_tokens": 6912,
+          "cost": 0.01518195,
+          "input_tokens": 14853,
+          "output_tokens": 423,
+          "total_tokens": 15276,
+          "cached_tokens": 10624,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -131,19 +131,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_PRf0v1GGQxRh36AOIOSeMZsL"
+              "tool_call_id": "call_sNvr6sxRwCwhcerIUoabsrHt"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773523965.2963417,
+          "timestamp": 1774817077.0911188,
           "model": "gpt-5.3-codex",
-          "cost": 0.00248535,
-          "input_tokens": 11561,
+          "cost": 0.0032942,
+          "input_tokens": 15364,
           "output_tokens": 14,
-          "total_tokens": 11575,
-          "cached_tokens": 11392,
+          "total_tokens": 15378,
+          "cached_tokens": 15104,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -152,19 +152,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_FpGP2H5J4aQ240mVZh6hKlBn"
+              "tool_call_id": "call_moHFZNkjJXUPVGMjcwbBXWTT"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773524197.7547042,
+          "timestamp": 1774817242.7685628,
           "model": "gpt-5.3-codex",
-          "cost": 0.0027951,
-          "input_tokens": 11666,
+          "cost": 0.00340235,
+          "input_tokens": 15469,
           "output_tokens": 23,
-          "total_tokens": 11689,
-          "cached_tokens": 11392,
+          "total_tokens": 15492,
+          "cached_tokens": 15232,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -173,7 +173,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_6Z6xEasxdE4pkcXigLVAC9tl"
+              "tool_call_id": "call_phBCPJXKkXwD0N8EUql5vVgA"
             }
           ],
           "finish_reason": "tool_calls"
@@ -181,15 +181,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.056792749999999996,
-      "total_input_tokens": 63781,
-      "total_output_tokens": 692,
+      "total_cost": 0.06550845,
+      "total_input_tokens": 78779,
+      "total_output_tokens": 851,
       "total_llm_calls": 6
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/arrow/cpp/src/arrow/ipc/metadata_internal.cc\n+++ b/arrow/cpp/src/arrow/ipc/metadata_internal.cc\n@@ -166,8 +166,13 @@\n       type_codes.push_back(i);\n     }\n   } else {\n+    constexpr int32_t kMinTypeCode = 0;\n+    constexpr int32_t kMaxTypeCode = std::numeric_limits<int8_t>::max();\n     for (int32_t id : (*fb_type_ids)) {\n-      // TODO(wesm): can these values exceed 127?\n+      if (id < kMinTypeCode || id > kMaxTypeCode) {\n+        return Status::Invalid(\"Union type id out of range: \", id,\n+                               \" (must be between 0 and \", kMaxTypeCode, \")\");\n+      }\n       type_codes.push_back(static_cast<int8_t>(id));\n     }\n   }\n",
+    "patch": "--- a/arrow/cpp/src/arrow/ipc/metadata_internal.cc\n+++ b/arrow/cpp/src/arrow/ipc/metadata_internal.cc\n@@ -161,17 +161,28 @@\n \n   const flatbuffers::Vector<int32_t>* fb_type_ids = union_data->typeIds();\n   if (fb_type_ids == nullptr) {\n-    // TODO validate that children.size() <= 127?\n+    if (children.size() > static_cast<size_t>(UnionType::kMaxTypeCode) + 1) {\n+      return Status::Invalid(\"Union type has too many children for int8 type codes: \",\n+                             children.size());\n+    }\n     for (int8_t i = 0; i < static_cast<int8_t>(children.size()); ++i) {\n       type_codes.push_back(i);\n     }\n   } else {\n     for (int32_t id : (*fb_type_ids)) {\n-      // TODO(wesm): can these values exceed 127?\n+      if (id < 0 || id > UnionType::kMaxTypeCode) {\n+        return Status::Invalid(\"Union type id out of range: \", id,\n+                               \", expected [0, \", UnionType::kMaxTypeCode, \"]\");\n+      }\n       type_codes.push_back(static_cast<int8_t>(id));\n     }\n   }\n \n+  if (type_codes.size() != children.size()) {\n+    return Status::Invalid(\"Union type ids length does not match number of children: \",\n+                           type_codes.size(), \" != \", children.size());\n+  }\n+\n   *out = union_(children, type_codes, mode);\n   return Status::OK();\n }\n",
     "build_artifacts_count": 1,
     "tested_povs_count": 1,
     "last_validation": {
@@ -208,24 +208,24 @@
       {
         "tool_name": "read_source",
         "args": [
-          "arrow/cpp/src/arrow/ipc/metadata_internal.cc",
-          175
-        ],
-        "kwargs": {},
-        "timestamp": 556243.879492431,
-        "success": true,
-        "result_summary": "Ok({'contents': ' 76       return MetadataVersion::V4;\\n 77     case flatbuf::MetadataVersion::V4:\\n 78       // Arrow >= 0.8\\n 79       return MetadataVersion::V4;\\n 80     // Add cases as other vers..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
           "arrow/cpp/src/arrow/type.cc",
           362
         ],
         "kwargs": {},
-        "timestamp": 556243.880739385,
+        "timestamp": 1849360.017238201,
         "success": true,
         "result_summary": "Ok({'contents': '263 // ----------------------------------------------------------------------\\n264 // Date types\\n265 \\n266 DateType::DateType(Type::type type_id) : TemporalType(type_id) {}\\n267 \\n26..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "arrow/cpp/src/arrow/ipc/metadata_internal.cc",
+          175
+        ],
+        "kwargs": {},
+        "timestamp": 1849360.018338076,
+        "success": true,
+        "result_summary": "Ok({'contents': ' 76       return MetadataVersion::V4;\\n 77     case flatbuf::MetadataVersion::V4:\\n 78       // Arrow >= 0.8\\n 79       return MetadataVersion::V4;\\n 80     // Add cases as other vers..."
       }
     ],
     "find_references": [],
@@ -234,10 +234,10 @@
         "tool_name": "apply_patch",
         "args": [
           "arrow/cpp/src/arrow/ipc/metadata_internal.cc",
-          "@@ -166,10 +166,15 @@ Status UnionFromFlatbuffer(const flatbuf::Union* union_data,\n       type_codes.push_back(i);\n     }\n   } else {\n+    constexpr int32_t kMinTypeCode = 0;\n+    constexpr int32_t kMaxTypeCode = std::numeric_limits<int8_t>::max();\n     for (int32_t id : (*fb_type_ids)) {\n-      // TODO(wesm): can these values exceed 127?\n+      if (id < kMinTypeCode || id > kMaxTypeCode) {\n+        return Status::Invalid(\"Union type id out of range: \", id,\n+                               \" (must be between 0 and \", kMaxTypeCode, \")\");\n+      }\n       type_codes.push_back(static_cast<int8_t>(id));\n     }\n   }\n"
+          "@@ -160,15 +160,27 @@ Status UnionFromFlatbuffer(const flatbuf::Union* union_data,\n   std::vector<int8_t> type_codes;\n \n   const flatbuffers::Vector<int32_t>* fb_type_ids = union_data->typeIds();\n   if (fb_type_ids == nullptr) {\n-    // TODO validate that children.size() <= 127?\n+    if (children.size() > static_cast<size_t>(UnionType::kMaxTypeCode) + 1) {\n+      return Status::Invalid(\"Union type has too many children for int8 type codes: \",\n+                             children.size());\n+    }\n     for (int8_t i = 0; i < static_cast<int8_t>(children.size()); ++i) {\n       type_codes.push_back(i);\n     }\n   } else {\n     for (int32_t id : (*fb_type_ids)) {\n-      // TODO(wesm): can these values exceed 127?\n+      if (id < 0 || id > UnionType::kMaxTypeCode) {\n+        return Status::Invalid(\"Union type id out of range: \", id,\n+                               \", expected [0, \", UnionType::kMaxTypeCode, \"]\");\n+      }\n       type_codes.push_back(static_cast<int8_t>(id));\n     }\n   }\n+\n+  if (type_codes.size() != children.size()) {\n+    return Status::Invalid(\"Union type ids length does not match number of children: \",\n+                           type_codes.size(), \" != \", children.size());\n+  }\n \n   *out = union_(children, type_codes, mode);\n   return Status::OK();\n }"
         ],
         "kwargs": {},
-        "timestamp": 556253.009548136,
+        "timestamp": 1849364.565770745,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -247,7 +247,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 556485.280038492,
+        "timestamp": 1849530.246654397,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

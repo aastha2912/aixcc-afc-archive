@@ -1,5 +1,5 @@
 {
-  "vuln_id": 52,
+  "vuln_id": 335,
   "crash_result": {
     "output": "AddressSanitizer:DEADLYSIGNAL\n=================================================================\n==640==ERROR: AddressSanitizer: SEGV on unknown address 0x61e0003d1558 (pc 0x00000100fc7a bp 0x7ffe735e6d50 sp 0x7ffe735e6c40 T0)\n==640==The signal is caused by a READ memory access.\nSCARINESS: 20 (wild-addr-read)\n    #0 0x100fc7a in Visit<arrow::Int8Type> /src/arrow/cpp/src/arrow/array/validate.cc\n    #1 0x100fc7a in VisitArrayInline<arrow::internal::(anonymous namespace)::BoundsCheckVisitor> /src/ar",
     "stack": "#0 0x100fc7a in Visit<arrow::Int8Type> arrow/cpp/src/arrow/array/validate.cc\n#1 0x100fc7a in VisitArrayInline<arrow::internal::(anonymous namespace)::BoundsCheckVisitor> arrow/cpp/src/arrow/visitor_inline.h:110:5\n#2 0x100fc7a in CheckBounds arrow/cpp/src/arrow/array/validate.cc:458:12\n#3 0x100fc7a in Visit arrow/cpp/src/arrow/array/validate.cc:398:9\n#4 0x100fc7a in arrow::Status arrow::VisitArrayInline<arrow::internal::(anonymous namespace)::ValidateArrayDataVisitor>(arrow::Array const&, arrow::",
@@ -22,56 +22,60 @@
     "dedup": "Visit<arrow::Int8Type>--VisitArrayInline<arrow::internal::(anonymous namespace)::BoundsCheckVisitor>--CheckBounds"
   },
   "analyzed_vuln": {
-    "function": "Visit",
+    "function": "Visit(const DictionaryArray& array)",
     "file": "arrow/cpp/src/arrow/array/validate.cc",
-    "description": "In ValidateArrayDataVisitor::Visit(const DictionaryArray&), dictionary index validation calls CheckBounds(*array.indices(), 0, array.dictionary()->length() - 1) without handling an empty dictionary. When dictionary()->length() is 0, max_value becomes -1. BoundsCheckVisitor then visits signed int8 indices and reads values from a malformed/fuzzed indices array, leading to an invalid memory read/SEGV in BoundsCheckVisitor::Visit(const NumericArray<T>&) (crash seen in Visit<arrow::Int8Type>). Root cause is insufficient structural validation/sanitization of dictionary array internals before numeric value iteration in this DictionaryArray validation path.",
-    "conditions": "The IPC fuzz input must deserialize into a RecordBatch containing a DictionaryArray (here nested under list validation) whose indices storage is malformed/out-of-bounds and whose dictionary length can be zero (or otherwise inconsistent), so ValidateFull() reaches ValidateArrayDataVisitor::Visit(DictionaryArray) -> CheckBounds -> BoundsCheckVisitor numeric iteration. During array.Value(i) on int8 indices, a wild read occurs and crashes."
+    "description": "Root cause is missing dictionary-presence validation before bounds checking dictionary indices. In ValidateArrayDataVisitor::Visit(const DictionaryArray&), code unconditionally does CheckBounds(*array.indices(), 0, array.dictionary()->length() - 1). For malformed IPC input, a DictionaryArray can reference an invalid/corrupted dictionary state, and BoundsCheckVisitor then dereferences index/value buffers through array.Value(i), causing a wild read/SEGV in Visit<arrow::Int8Type>. The bug is the unsafe assumption that dictionary/indices backing data are valid and readable before iterating them.",
+    "conditions": "Trigger path: fuzzed IPC stream -> RecordBatchStreamReader -> RecordBatch::ValidateFull() -> internal::ValidateArrayData on nested list/dictionary structures. Input must construct a DictionaryArray (here within list nesting) whose indices array metadata/buffers are inconsistent with actual accessible memory (or dictionary state invalid), so Visit(DictionaryArray) calls CheckBounds on untrusted indices without first validating dictionary existence/buffer integrity. During CheckBounds, BoundsCheckVisitor iterates non-null indices and reads Value(i), leading to out-of-bounds/wild memory read and crash."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.0273532,
-      "total_input_tokens": 21696,
-      "total_output_tokens": 365,
-      "total_cached_tokens": 9984,
+      "total_cost": 0.0419846,
+      "total_input_tokens": 23428,
+      "total_output_tokens": 416,
+      "total_cached_tokens": 3072,
       "llm_calls": [
         {
-          "timestamp": 1773370750.5222576,
+          "timestamp": 1774818786.54965,
           "model": "gpt-5.3-codex",
-          "cost": 0.01403255,
-          "input_tokens": 8521,
-          "output_tokens": 110,
-          "total_tokens": 8631,
+          "cost": 0.01462055,
+          "input_tokens": 8609,
+          "output_tokens": 141,
+          "total_tokens": 8750,
           "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_U3TUZfcmgRIOJvPVjNSa1SfW"
+              "tool_call_id": "call_b8JDsSWv4uRXAAPcxS4v49Xv"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_2aCjqs8LzRsM61qHaJBRFeAJ"
+              "tool_call_id": "call_Vw4MrcqeRavDDUCpoS6yyymF"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_DSADg0Befw7skE81Rf5b9E2B"
+              "tool_call_id": "call_HiWN1idfqJa0Tl181AWexjGX"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Kh7jrrIaTzyqjxFNcbnZrLOd"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773370766.0947394,
+          "timestamp": 1774818792.0756285,
           "model": "gpt-5.3-codex",
-          "cost": 0.01332065,
-          "input_tokens": 13175,
-          "output_tokens": 255,
-          "total_tokens": 13430,
-          "cached_tokens": 8448,
+          "cost": 0.027364049999999997,
+          "input_tokens": 14819,
+          "output_tokens": 275,
+          "total_tokens": 15094,
+          "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +84,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_2t5iL8TId7R5JyxRREqoAUQb"
+              "tool_call_id": "call_eq8b6OsfczK225VMWrMsSYnv"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,19 +92,19 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 3,
-      "total_cost": 0.0271425,
-      "total_input_tokens": 33110,
-      "total_output_tokens": 392,
-      "total_cached_tokens": 23040,
+      "total_llm_calls": 4,
+      "total_cost": 0.04500825,
+      "total_input_tokens": 45887,
+      "total_output_tokens": 503,
+      "total_cached_tokens": 26880,
       "llm_calls": [
         {
-          "timestamp": 1773370768.4876437,
+          "timestamp": 1774818793.8059754,
           "model": "gpt-5.3-codex",
-          "cost": 0.012674199999999998,
-          "input_tokens": 8676,
-          "output_tokens": 80,
-          "total_tokens": 8756,
+          "cost": 0.01449245,
+          "input_tokens": 9747,
+          "output_tokens": 76,
+          "total_tokens": 9823,
           "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -110,23 +114,48 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_YrwdYtfFpx63V4Wr3mynjLyj"
+              "tool_call_id": "call_jl2wNz5ObLiDMHwzknOvPHP4"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_UeCNZbJOp4vIhx5EnTQqne7j"
+              "tool_call_id": "call_qnnhZv97pYhzWdUbljvItnYT"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773370772.8273017,
+          "timestamp": 1774818908.8166866,
           "model": "gpt-5.3-codex",
-          "cost": 0.01107505,
-          "input_tokens": 12071,
-          "output_tokens": 247,
-          "total_tokens": 12318,
-          "cached_tokens": 8576,
+          "cost": 0.01586795,
+          "input_tokens": 9925,
+          "output_tokens": 80,
+          "total_tokens": 10005,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_1IbevT0VURsj8TPdPXzPyWIB"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_FB3hblNjcRXgqDZYM7JrStTD"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774818911.98003,
+          "model": "gpt-5.3-codex",
+          "cost": 0.010814299999999999,
+          "input_tokens": 12954,
+          "output_tokens": 262,
+          "total_tokens": 13216,
+          "cached_tokens": 9856,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,19 +164,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_qVqJCTjvohJQVEXQX2qUkUWv"
+              "tool_call_id": "call_5uBMCtRx20lou4mup6rSuFTx"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773370775.3150752,
+          "timestamp": 1774818914.2386258,
           "model": "gpt-5.3-codex",
-          "cost": 0.0033932500000000004,
-          "input_tokens": 12363,
-          "output_tokens": 65,
-          "total_tokens": 12428,
-          "cached_tokens": 12160,
+          "cost": 0.0038335500000000002,
+          "input_tokens": 13261,
+          "output_tokens": 85,
+          "total_tokens": 13346,
+          "cached_tokens": 13056,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,7 +185,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_SFHQ0OtbNUYfjoroW4FOGZaE"
+              "tool_call_id": "call_IMplH7sRNpgeqEJrKGwRBMRP"
             }
           ],
           "finish_reason": "tool_calls"
@@ -164,10 +193,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.0544957,
-      "total_input_tokens": 54806,
-      "total_output_tokens": 757,
-      "total_llm_calls": 5
+      "total_cost": 0.08699285,
+      "total_input_tokens": 69315,
+      "total_output_tokens": 919,
+      "total_llm_calls": 6
     }
   },
   "patch_result": {
@@ -181,24 +210,46 @@
       {
         "tool_name": "read_source",
         "args": [
-          "arrow/cpp/src/arrow/array/validate.cc",
-          380
+          "cpp/src/arrow/array/validate.cc",
+          458
         ],
         "kwargs": {},
-        "timestamp": 403057.2514454,
+        "timestamp": 1851195.50659662,
         "success": true,
-        "result_summary": "Ok({'contents': '281       return Status::Invalid(\"Expected \", type.num_children(),\\n282                              \" child arrays in array \"\\n283                              \"of type \",\\n284      ..."
+        "result_summary": "Err(CRSError(path 'cpp/src/arrow/array/validate.cc' does not exist in directory tree. Similar paths: arrow/cpp/src/arrow/array/validate.cc, extra=None))"
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "cpp/src/arrow/array/validate.cc",
+          398
+        ],
+        "kwargs": {},
+        "timestamp": 1851195.506863057,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'cpp/src/arrow/array/validate.cc' does not exist in directory tree. Similar paths: arrow/cpp/src/arrow/array/validate.cc, extra=None))"
       },
       {
         "tool_name": "read_source",
         "args": [
           "arrow/cpp/src/arrow/array/validate.cc",
-          440
+          398
         ],
         "kwargs": {},
-        "timestamp": 403057.252713089,
+        "timestamp": 1851197.392394527,
         "success": true,
-        "result_summary": "Ok({'contents': '341   Status Visit(const ListArray& array) { return ValidateListArray(array); }\\n342 \\n343   Status Visit(const LargeListArray& array) { return ValidateListArray(array); }\\n344 \\n345 ..."
+        "result_summary": "Ok({'contents': '299 \\n300 ///////////////////////////////////////////////////////////////////////////\\n301 // ValidateArrayData: expensive validation checks\\n302 \\n303 namespace {\\n304 \\n305 struct B..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "arrow/cpp/src/arrow/array/validate.cc",
+          458
+        ],
+        "kwargs": {},
+        "timestamp": 1851197.394616191,
+        "success": true,
+        "result_summary": "Ok({'contents': '359       if (code < 0 || child_ids[code] == UnionType::kInvalidChildId) {\\n360         return Status::Invalid(\"Union value at position \", i, \" has invalid type id \",\\n361            ..."
       }
     ],
     "find_references": [],

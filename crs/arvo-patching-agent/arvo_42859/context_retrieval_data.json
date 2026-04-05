@@ -1,18 +1,34 @@
 {
   "source_questions": [],
-  "read_definition": [],
-  "read_source": [
+  "read_definition": [
     {
-      "tool_name": "read_source",
+      "tool_name": "read_definition",
       "args": [
-        "php-src/Zend/zend_execute_API.c",
-        260
+        "i_zval_ptr_dtor",
+        "php-src/Zend/zend_variables.h",
+        1,
+        true
       ],
       "kwargs": {},
-      "timestamp": 445221.043782396,
+      "timestamp": 1884589.142818185,
       "success": true,
-      "result_summary": "Ok({'contents': '161 \\n162 \\tzend_hash_init(&EG(included_files), 8, NULL, NULL, 0);\\n163 \\n164 \\tEG(ticks_count) = 0;\\n165 \\n166 \\tZVAL_UNDEF(&EG(user_error_handler));\\n167 \\tZVAL_UNDEF(&EG(user_excep..."
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n40 static zend_always_inline void i_zval_ptr_dtor(zval *zval_ptr), extra=None))"
     },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "i_zval_ptr_dtor",
+        "php-src/Zend/zend_variables.h",
+        40,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1884599.57862222,
+      "success": true,
+      "result_summary": "Ok({'contents': '40 static zend_always_inline void i_zval_ptr_dtor(zval *zval_ptr)\\n41 {\\n42 \\tif (Z_REFCOUNTED_P(zval_ptr)) {\\n43 \\t\\tzend_refcounted *ref = Z_COUNTED_P(zval_ptr);\\n44 \\t\\tif (!GC_DEL..."
+    }
+  ],
+  "read_source": [
     {
       "tool_name": "read_source",
       "args": [
@@ -20,20 +36,20 @@
         220
       ],
       "kwargs": {},
-      "timestamp": 445221.045889885,
+      "timestamp": 1884556.092389521,
       "success": true,
       "result_summary": "Ok({'contents': '121 \\treturn (function->type == ZEND_INTERNAL_FUNCTION) ? ZEND_HASH_APPLY_KEEP : ZEND_HASH_APPLY_REMOVE;\\n122 }\\n123 /* }}} */\\n124 \\n125 static int clean_non_persistent_class_full(zv..."
     },
     {
       "tool_name": "read_source",
       "args": [
-        "php-src/Zend/zend_types.h",
-        1345
+        "php-src/Zend/zend_execute_API.c",
+        280
       ],
       "kwargs": {},
-      "timestamp": 445221.047611017,
+      "timestamp": 1884556.094093298,
       "success": true,
-      "result_summary": "Ok({'contents': '1246 \\t\\tZ_TYPE_INFO_P(z) = IS_PTR;\\t\\t\\t\\t\\t\\t\\t\\t\\\\\\n1247 \\t} while (0)\\n1248 \\n1249 #define ZVAL_FUNC(z, f) do {\\t\\t\\t\\t\\t\\t\\t\\t\\t\\\\\\n1250 \\t\\tZ_FUNC_P(z) = (f);\\t\\t\\t\\t\\t\\t\\t\\t\\t\\..."
+      "result_summary": "Ok({'contents': '181 \\n182 \\tEG(exception) = NULL;\\n183 \\tEG(prev_exception) = NULL;\\n184 \\n185 \\tEG(fake_scope) = NULL;\\n186 \\tEG(trampoline).common.function_name = NULL;\\n187 \\n188 \\tEG(ht_iterators..."
     }
   ],
   "find_references": [],
@@ -42,10 +58,10 @@
       "tool_name": "apply_patch",
       "args": [
         "php-src/Zend/zend_execute_API.c",
-        "@@ -286,7 +286,14 @@ ZEND_API void zend_shutdown_executor_values(bool fast_shutdown)\n \tEG(active) = 0;\n \n \tif (!fast_shutdown) {\n-\t\tzend_hash_graceful_reverse_destroy(&EG(symbol_table));\n+\t\t/* During shutdown after a bailout/unclean execution state, symbol table\n+\t\t * entries may be corrupted. Using the normal destructor can dereference\n+\t\t * invalid refcounted pointers while releasing zvals. Switch to the\n+\t\t * unclean destructor in that case, which uses i_zval_ptr_dtor() and\n+\t\t * avoids invoking user-level cleanup paths.\n+\t\t */\n+\t\tif (CG(unclean_shutdown)) {\n+\t\t\tEG(symbol_table).pDestructor = zend_unclean_zval_ptr_dtor;\n+\t\t}\n+\t\tzend_hash_graceful_reverse_destroy(&EG(symbol_table));\n \n \t\t/* Constants may contain objects, destroy them before the object store. */\n \t\tif (EG(full_tables_cleanup)) {\n"
+        "@@ -227,10 +227,21 @@\n static void zend_unclean_zval_ptr_dtor(zval *zv) /* {{{ */\n {\n \tif (Z_TYPE_P(zv) == IS_INDIRECT) {\n \t\tzv = Z_INDIRECT_P(zv);\n \t}\n-\ti_zval_ptr_dtor(zv);\n+\t/* During unclean shutdown/fuzzed states we may observe corrupted zvals in\n+\t * the symbol table. Avoid dereferencing an invalid GC pointer from\n+\t * i_zval_ptr_dtor() by first validating the refcounted payload. */\n+\tif (Z_REFCOUNTED_P(zv)) {\n+\t\tzend_refcounted *ref = Z_COUNTED_P(zv);\n+\t\tif (EXPECTED(ref != NULL) && EXPECTED(GC_TYPE(ref) == Z_TYPE_P(zv))) {\n+\t\t\ti_zval_ptr_dtor(zv);\n+\t\t} else {\n+\t\t\tZVAL_UNDEF(zv);\n+\t\t}\n+\t} else {\n+\t\ti_zval_ptr_dtor(zv);\n+\t}\n }\n /* }}} */"
       ],
       "kwargs": {},
-      "timestamp": 445225.849140881,
+      "timestamp": 1884605.034143631,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
@@ -55,7 +71,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 446014.25145037,
+      "timestamp": 1885485.653458565,
       "success": true,
       "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
     }

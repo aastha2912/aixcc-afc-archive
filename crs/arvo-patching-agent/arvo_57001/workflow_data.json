@@ -1,5 +1,5 @@
 {
-  "vuln_id": 163,
+  "vuln_id": 480,
   "crash_result": {
     "output": "AddressSanitizer:DEADLYSIGNAL\n=================================================================\n==788==ERROR: AddressSanitizer: SEGV on unknown address 0x748e839f38ec (pc 0x000000b76fac bp 0x7ffdb0ca28f0 sp 0x7ffdb0ca25c0 T0)\n==788==The signal is caused by a WRITE memory access.\nSCARINESS: 30 (wild-addr-write)\n    #0 0xb76fac in Assimp::SortByPTypeProcess::Execute(aiScene*) /src/assimp/code/PostProcessing/SortByPTypeProcess.cpp:189:17\n    #1 0xaecd75 in Assimp::BaseProcess::ExecuteOnScene(Assimp",
     "stack": "#0 0xb76fac in Assimp::SortByPTypeProcess::Execute(aiScene*) assimp/code/PostProcessing/SortByPTypeProcess.cpp:189:17\n#1 0xaecd75 in Assimp::BaseProcess::ExecuteOnScene(Assimp::Importer*) assimp/code/Common/BaseProcess.cpp:82:9\n#2 0x4f92b7 in Assimp::Importer::ApplyPostProcessing(unsigned int) assimp/code/Common/Importer.cpp:842:22\n#3 0x4f2368 in Assimp::Importer::ReadFile(char const*, unsigned int) assimp/code/Common/Importer.cpp:751:13\n#4 0x4ee8a2 in Assimp::Importer::ReadFileFromMemory(void c",
@@ -24,50 +24,54 @@
   "analyzed_vuln": {
     "function": "SortByPTypeProcess::Execute",
     "file": "assimp/code/PostProcessing/SortByPTypeProcess.cpp",
-    "description": "In SortByPTypeProcess::Execute, face index counts are trusted without validation. The loop at line ~189 does `++aiNumPerPType[pFirstFace->mNumIndices - 1]` when `mNumIndices <= 3`. If a malformed mesh has a face with `mNumIndices == 0`, this underflows to index `UINT_MAX`, causing an out-of-bounds write to the 4-element stack array `aiNumPerPType` (wild write/SEGV). Crash is observed at this write site.",
-    "conditions": "Fuzzer harness calls `Importer::ReadFileFromMemory(..., aiProcessPreset_TargetRealtime_Quality, ...)`, which enables post-processing including SortByPTypeProcess. A parsed scene must contain at least one mesh with mixed primitive types (so this code path runs) and at least one face with `mNumIndices == 0`. That malformed face reaches SortByPTypeProcess::Execute and triggers the OOB write via `mNumIndices - 1` indexing."
+    "description": "The root cause is an out-of-bounds write in primitive-type counting: `++aiNumPerPType[pFirstFace->mNumIndices - 1]` is executed for all faces with `mNumIndices <= 3`, but does not reject `mNumIndices == 0`. A zero-index face produces index `-1` (unsigned wrap), writing before the 4-element stack array `aiNumPerPType`, causing memory corruption/SEGV. Crash is at line 189, and the missing validation is in this same function.",
+    "conditions": "Trigger requires a scene reaching `aiProcess_SortByPType` with at least one mesh that enters the split path (`num != 1`, i.e., mixed/invalid primitive flags) and has non-null faces where at least one `aiFace` has `mNumIndices == 0`. Fuzzed input is parsed by an importer into such malformed mesh/face data, then `Importer::ApplyPostProcessing` runs `SortByPTypeProcess::Execute`, which performs the unchecked decrement-based index and corrupts stack memory."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.0187621,
-      "total_input_tokens": 9094,
-      "total_output_tokens": 333,
-      "total_cached_tokens": 1152,
+      "total_cost": 0.022041949999999998,
+      "total_input_tokens": 13365,
+      "total_output_tokens": 379,
+      "total_cached_tokens": 4224,
       "llm_calls": [
         {
-          "timestamp": 1773465071.8801036,
+          "timestamp": 1774875091.765739,
           "model": "gpt-5.3-codex",
-          "cost": 0.00445585,
-          "input_tokens": 2943,
-          "output_tokens": 80,
-          "total_tokens": 3023,
+          "cost": 0.00507185,
+          "input_tokens": 3031,
+          "output_tokens": 113,
+          "total_tokens": 3144,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Vg09ZShiOFg3YXCrEMUsGRwq"
+              "tool_call_id": "call_7SYbUyULMmvkQynKHXNPPaJx"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_eaNoMr0Nzm7bMXrhAnIRDG5t"
+              "tool_call_id": "call_TZanrRtyTQDKlvsIUvOswoJA"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_F1iHVz822qT1MuM5rr5vTAt1"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773465080.3450341,
+          "timestamp": 1774875097.0701804,
           "model": "gpt-5.3-codex",
-          "cost": 0.01430625,
-          "input_tokens": 6151,
-          "output_tokens": 253,
-          "total_tokens": 6404,
-          "cached_tokens": 0,
+          "cost": 0.0169701,
+          "input_tokens": 10334,
+          "output_tokens": 266,
+          "total_tokens": 10600,
+          "cached_tokens": 3072,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -76,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_cw9DC1ThWhid2jOA3o2Hy0pT"
+              "tool_call_id": "call_xx6P3JSs3ZyJtTIQOoYqSVgF"
             }
           ],
           "finish_reason": "tool_calls"
@@ -84,20 +88,20 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 3,
-      "total_cost": 0.0206528,
-      "total_input_tokens": 15984,
-      "total_output_tokens": 370,
-      "total_cached_tokens": 7936,
+      "total_llm_calls": 5,
+      "total_cost": 0.0269332,
+      "total_input_tokens": 33160,
+      "total_output_tokens": 558,
+      "total_cached_tokens": 24704,
       "llm_calls": [
         {
-          "timestamp": 1773465082.378611,
+          "timestamp": 1774875099.2441108,
           "model": "gpt-5.3-codex",
-          "cost": 0.00727825,
-          "input_tokens": 3431,
+          "cost": 0.00593495,
+          "input_tokens": 4161,
           "output_tokens": 91,
-          "total_tokens": 3522,
-          "cached_tokens": 0,
+          "total_tokens": 4252,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -106,22 +110,22 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_NVCBi1Wy0DO8EFqaWaW4xytm"
+              "tool_call_id": "call_5hL0uv43gHqeYtpqvRLxg6Ty"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_bWyMor2ull6c3bOOEj1CTYSN"
+              "tool_call_id": "call_9QIljqYkNTbWiMTbrxipkLvS"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773465097.0565531,
+          "timestamp": 1774875143.0335827,
           "model": "gpt-5.3-codex",
-          "cost": 0.0111447,
-          "input_tokens": 6146,
-          "output_tokens": 215,
-          "total_tokens": 6361,
+          "cost": 0.012436200000000001,
+          "input_tokens": 6876,
+          "output_tokens": 216,
+          "total_tokens": 7092,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -131,19 +135,61 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_P8xNuYJlP6Ks9PLkwzSIiORz"
+              "tool_call_id": "call_CpaQTkdgxEyukyQBPNGhlqeP"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773465098.666451,
+          "timestamp": 1774875146.0044887,
           "model": "gpt-5.3-codex",
-          "cost": 0.00222985,
-          "input_tokens": 6407,
-          "output_tokens": 64,
-          "total_tokens": 6471,
-          "cached_tokens": 6272,
+          "cost": 0.0046011,
+          "input_tokens": 7138,
+          "output_tokens": 214,
+          "total_tokens": 7352,
+          "cached_tokens": 6912,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_JCF504uRevHIFuoa8qG9TbI2"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774875147.2451684,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0019264,
+          "input_tokens": 7440,
+          "output_tokens": 14,
+          "total_tokens": 7454,
+          "cached_tokens": 7168,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_geornHBpsXlOseOkQiYWsLeF"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774875353.3208816,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00203455,
+          "input_tokens": 7545,
+          "output_tokens": 23,
+          "total_tokens": 7568,
+          "cached_tokens": 7296,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -152,7 +198,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_zLfTAcvECoJfzPBV6hcjhlcG"
+              "tool_call_id": "call_2ob7TwgNCEuTMtabcvbNAszV"
             }
           ],
           "finish_reason": "tool_calls"
@@ -160,15 +206,25 @@
       ]
     },
     "total": {
-      "total_cost": 0.0394149,
-      "total_input_tokens": 25078,
-      "total_output_tokens": 703,
-      "total_llm_calls": 5
+      "total_cost": 0.048975149999999995,
+      "total_input_tokens": 46525,
+      "total_output_tokens": 937,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
-    "success": false,
-    "failure_reason": "the agent did not produce a result"
+    "success": true,
+    "patch": "--- a/code/PostProcessing/SortByPTypeProcess.cpp\n+++ b/code/PostProcessing/SortByPTypeProcess.cpp\n@@ -185,6 +185,12 @@\n \n         unsigned int numPolyVerts = 0;\n         for (; pFirstFace != pLastFace; ++pFirstFace) {\n+            if (pFirstFace->mNumIndices == 0) {\n+                // Ignore invalid empty faces. They do not map to any primitive\n+                // type bucket and would underflow the array index below.\n+                continue;\n+            }\n+\n             if (pFirstFace->mNumIndices <= 3)\n                 ++aiNumPerPType[pFirstFace->mNumIndices - 1];\n             else {\n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
   },
   "context_retrieval": {
     "source_questions": [],
@@ -181,7 +237,7 @@
           189
         ],
         "kwargs": {},
-        "timestamp": 497371.050449353,
+        "timestamp": 1907387.822565263,
         "success": true,
         "result_summary": "Ok({'contents': ' 90         if (newSize == 0) {\\n 91             clearMeshesInNode(node);\\n 92             return;\\n 93         }\\n 94         \\n 95         // Try to reuse the old array if possible\\..."
       }
@@ -195,13 +251,34 @@
           false
         ],
         "kwargs": {},
-        "timestamp": 497382.523775815,
+        "timestamp": 1907427.549223064,
         "success": true,
         "result_summary": "Ok([FileReferences(file_name='assimp/code/PostProcessing/SortByPTypeProcess.cpp', refs=[FileReference(line=178, content='        unsigned int aiNumPerPType[4] = { 0, 0, 0, 0 };', enclosing_definition=..."
       }
     ],
-    "apply_patch": [],
-    "test_patch": [],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "code/PostProcessing/SortByPTypeProcess.cpp",
+          "@@ -185,8 +185,14 @@ void SortByPTypeProcess::Execute(aiScene *pScene) {\n \n         unsigned int numPolyVerts = 0;\n         for (; pFirstFace != pLastFace; ++pFirstFace) {\n-            if (pFirstFace->mNumIndices <= 3)\n+            if (pFirstFace->mNumIndices == 0) {\n+                // Ignore invalid empty faces. They do not map to any primitive\n+                // type bucket and would underflow the array index below.\n+                continue;\n+            }\n+\n+            if (pFirstFace->mNumIndices <= 3)\n                 ++aiNumPerPType[pFirstFace->mNumIndices - 1];\n             else {\n                 ++aiNumPerPType[3];\n"
+        ],
+        "kwargs": {},
+        "timestamp": 1907434.603261513,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1907640.697344215,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
     "undo_last_patch": [],
     "list_current_edits": []
   }

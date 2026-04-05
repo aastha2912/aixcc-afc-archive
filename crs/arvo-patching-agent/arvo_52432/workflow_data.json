@@ -1,5 +1,5 @@
 {
-  "vuln_id": 153,
+  "vuln_id": 465,
   "crash_result": {
     "output": "==4383==ERROR: AddressSanitizer: SEGV on unknown address (pc 0x000000423204 bp 0x000000000000 sp 0x7fff375606a0 T0)\n==4383==The signal is caused by a READ memory access.\n==4383==Hint: this fault was caused by a dereference of a high value address (see register values below).  Disassemble the provided pc to learn which register was used.\nSCARINESS: 20 (wild-addr-read)\n    #0 0x423204 in atomic_compare_exchange_strong<__sanitizer::atomic_uint8_t> /src/llvm-project/compiler-rt/lib/asan/../sanitizer",
     "stack": "#0 0x423204 in atomic_compare_exchange_strong<__sanitizer::atomic_uint8_t> llvm-project/compiler-rt/lib/asan/../sanitizer_common/sanitizer_atomic_clang.h:81:10\n#1 0x423204 in AtomicallySetQuarantineFlagIfAllocated llvm-project/compiler-rt/lib/asan/asan_allocator.cpp:610:10\n#2 0x423204 in __asan::Allocator::Deallocate(void*, unsigned long, unsigned long, __sanitizer::BufferedStackTrace*, __asan::AllocType) llvm-project/compiler-rt/lib/asan/asan_allocator.cpp:685:10\n#3 0x4a2105 in __interceptor_fr",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "unkn_box_read",
     "file": "gpac/src/isomedia/box_code_base.c",
-    "description": "The PoV triggers an invalid free due to uninitialized `GF_UnknownBox::data`. In `unkn_box_read`, when an unknown box has zero payload (`bytesToRead == 0`), the function returns early without initializing `ptr->data`/`ptr->dataSize`. Later during teardown, `unkn_box_del` unconditionally checks `if (ptr->data) gf_free(ptr->data);`, so a garbage non-NULL pointer may be freed, causing the ASan crash in `free` (wild pointer read). Crash is observed in `unkn_box_del` via `gf_isom_box_del` recursion, but root cause is missing field initialization in `unkn_box_read`/constructor path for zero-size unknown boxes.",
-    "conditions": "Input must create a `uuid`/unknown box parsed as `GF_UnknownBox` with declared size equal to header size (no payload), e.g. the provided 24-byte uuid box. Parsing succeeds with `unkn_box_read` taking the `!bytesToRead` early return path, leaving `data` uninitialized. On `gf_isom_close` -> `gf_isom_delete_movie` cleanup, `gf_isom_box_del` calls `unkn_box_del`, which attempts to free the uninitialized pointer and crashes."
+    "description": "The root cause is a type confusion in unknown-box parsing: `unkn_box_read` may parse the unknown box payload as sub-boxes (`gf_isom_box_array_read(s, sub_bs)`) and, on success, frees `ptr->data` and leaves `s->child_boxes` populated, but it does not change the box deleter/registry away from `unkn_box_del`. During teardown, `gf_isom_box_del` calls `unkn_box_del` (freeing the `GF_UnknownBox` object), then recursively deletes `child_boxes`, whose entries include pointers into/aliasing the already-freed parent object for this PoC path, leading to an invalid/double free seen in ASan (`gf_free` from `unkn_box_del`).",
+    "conditions": "Trigger requires an input that creates an `unknown`/UUID box whose payload is heuristically accepted as nested boxes (first bytes look like plausible box header, e.g. PoC UUID data), so `unkn_box_read` enters the sub-box parsing path and keeps parsed children. On file close (`gf_isom_close` -> `gf_isom_delete_movie`), recursive box destruction (`gf_isom_box_del`/`gf_isom_box_array_del`) invokes `unkn_box_del` in an unsafe ownership state, causing free of an invalid pointer and ASan SEGV in allocator deallocation logic."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 5,
-      "total_cost": 0.026732299999999997,
-      "total_input_tokens": 23602,
-      "total_output_tokens": 860,
-      "total_cached_tokens": 16896,
+      "total_cost": 0.0394625,
+      "total_input_tokens": 43494,
+      "total_output_tokens": 622,
+      "total_cached_tokens": 28800,
       "llm_calls": [
         {
-          "timestamp": 1773434595.0086076,
+          "timestamp": 1774869343.8531325,
           "model": "gpt-5.3-codex",
-          "cost": 0.00609385,
-          "input_tokens": 3407,
-          "output_tokens": 139,
-          "total_tokens": 3546,
+          "cost": 0.005743849999999999,
+          "input_tokens": 3495,
+          "output_tokens": 103,
+          "total_tokens": 3598,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -50,28 +50,28 @@
           "tool_call_count": 3,
           "tool_calls": [
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_IK96HAUD4wSYVreM5VMGEo0i"
+              "tool_name": "read_source",
+              "tool_call_id": "call_xnVVo57tQg7JesN5KabDS2Sn"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_5pBhpQs1wJWttDlnLH6fLj8z"
+              "tool_name": "read_source",
+              "tool_call_id": "call_EV64rXGYVvHkeeJ1cahxF3z7"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_kgUY4j6Qd3whzIHURuYUtZkr"
+              "tool_name": "read_source",
+              "tool_call_id": "call_ZC9hdrvTjtwdVuFW9YCGsu74"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773434605.3996618,
+          "timestamp": 1774869357.3113146,
           "model": "gpt-5.3-codex",
-          "cost": 0.0030128,
-          "input_tokens": 3672,
-          "output_tokens": 145,
-          "total_tokens": 3817,
-          "cached_tokens": 3456,
+          "cost": 0.0080815,
+          "input_tokens": 3746,
+          "output_tokens": 109,
+          "total_tokens": 3855,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -79,86 +79,70 @@
           "tool_call_count": 3,
           "tool_calls": [
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_gONdFUOAk6pPP2YbsPuqJPoG"
+              "tool_name": "read_source",
+              "tool_call_id": "call_BE87EKlKRLIZaCkXqLZoN4UF"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_b0BRPlsVvQaHPEUdXCoiiOEA"
+              "tool_name": "read_source",
+              "tool_call_id": "call_JQi5kUtYlsFuWqD02gmFlKJM"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_qnRc7zEU3SZAUrXiRErfpygo"
+              "tool_name": "read_source",
+              "tool_call_id": "call_ivZTLBMOWaBPw4M3cR5eajMu"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773434614.8732147,
+          "timestamp": 1774869359.1648374,
           "model": "gpt-5.3-codex",
-          "cost": 0.0031171000000000003,
-          "input_tokens": 3962,
-          "output_tokens": 145,
-          "total_tokens": 4107,
+          "cost": 0.01573635,
+          "input_tokens": 11997,
+          "output_tokens": 42,
+          "total_tokens": 12039,
           "cached_tokens": 3712,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_2V9ETae5FNGrvONIAMPGmuQs"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_DzbA3XNyOUIy534WxGa0w8oo"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_Lmms8ENmZGyzSW96fUdgAB9b"
+              "tool_name": "find_references",
+              "tool_call_id": "call_v9ZBAerOSvobsgYnpWlDYbog"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773434621.9048684,
+          "timestamp": 1774869377.1791623,
           "model": "gpt-5.3-codex",
-          "cost": 0.0036799,
-          "input_tokens": 4666,
-          "output_tokens": 126,
-          "total_tokens": 4792,
-          "cached_tokens": 3968,
+          "cost": 0.0030142,
+          "input_tokens": 12084,
+          "output_tokens": 44,
+          "total_tokens": 12128,
+          "cached_tokens": 11904,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "find_references",
-              "tool_call_id": "call_FQRTphC1IgP1i6OTOnB245y6"
-            },
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_VnuMgBqKfWLsjYvGzUcjm1nG"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_oSnDdTqIWjjUqfXt2x8dKiJf"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_t7qa4rPf2HCp7pILqSTt7Hnw"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773434668.0514376,
+          "timestamp": 1774869396.213267,
           "model": "gpt-5.3-codex",
-          "cost": 0.010828649999999999,
-          "input_tokens": 7895,
-          "output_tokens": 305,
-          "total_tokens": 8200,
-          "cached_tokens": 4608,
+          "cost": 0.0068866,
+          "input_tokens": 12172,
+          "output_tokens": 324,
+          "total_tokens": 12496,
+          "cached_tokens": 12032,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -167,7 +151,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_wHq54pxrm7D0lEi7BZ0e59m7"
+              "tool_call_id": "call_n9SHZFOwFlHC1wR1P9oKVmQ7"
             }
           ],
           "finish_reason": "tool_calls"
@@ -176,90 +160,106 @@
     },
     "patching": {
       "total_llm_calls": 6,
-      "total_cost": 0.0208467,
-      "total_input_tokens": 31994,
-      "total_output_tokens": 485,
-      "total_cached_tokens": 26624,
+      "total_cost": 0.02400965,
+      "total_input_tokens": 35643,
+      "total_output_tokens": 658,
+      "total_cached_tokens": 30208,
       "llm_calls": [
         {
-          "timestamp": 1773434670.7186577,
+          "timestamp": 1774869399.0419128,
           "model": "gpt-5.3-codex",
-          "cost": 0.00528745,
-          "input_tokens": 3735,
-          "output_tokens": 98,
-          "total_tokens": 3833,
+          "cost": 0.0075502,
+          "input_tokens": 4716,
+          "output_tokens": 137,
+          "total_tokens": 4853,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_GAx3UPFQIx9EXrfnJ1IN3ygU"
+              "tool_call_id": "call_5HYHXucREN6S9jYTxUHCTvbQ"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_KN4PtRGfojvWbdWLuKanZ9yz"
+              "tool_call_id": "call_dkvegqkFlfNnQCeWccJRd9ui"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_sZkH5YCGC28dcfWOF7XxnQbO"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773434673.6441207,
+          "timestamp": 1774869415.1055284,
           "model": "gpt-5.3-codex",
-          "cost": 0.00145985,
-          "input_tokens": 3919,
-          "output_tokens": 32,
-          "total_tokens": 3951,
-          "cached_tokens": 3712,
+          "cost": 0.0032578,
+          "input_tokens": 4980,
+          "output_tokens": 143,
+          "total_tokens": 5123,
+          "cached_tokens": 4736,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 1,
+          "tool_call_count": 3,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_wZTMEJ5Etjpr4yeuBK5nEWUv"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ZE4dCt3jIO0fdsVOwBqUC2E8"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_isIWZEIyqkO0MzT3mpfjobUj"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_9uy9AHnLIV7qMklf1tWOPRCT"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773434676.823742,
+          "timestamp": 1774869439.316731,
           "model": "gpt-5.3-codex",
-          "cost": 0.0021892500000000002,
-          "input_tokens": 4003,
-          "output_tokens": 88,
-          "total_tokens": 4091,
-          "cached_tokens": 3840,
+          "cost": 0.0033831,
+          "input_tokens": 5274,
+          "output_tokens": 144,
+          "total_tokens": 5418,
+          "cached_tokens": 4992,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 3,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_dGW7EgYuDNcxUoNGEnUPiWZA"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_i3ofhui5m3JHmCx6VPJMlh9z"
             },
             {
-              "tool_name": "find_references",
-              "tool_call_id": "call_Bqu9EMilcUEVkXVatOuW58mU"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_pbUbXGjUPxJah1N4YMbLY9FC"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_cQ6sw8pI5xpB8gtnUFGgEUwP"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773434680.9140947,
+          "timestamp": 1774869470.5491462,
           "model": "gpt-5.3-codex",
-          "cost": 0.0084014,
-          "input_tokens": 6532,
-          "output_tokens": 230,
-          "total_tokens": 6762,
-          "cached_tokens": 3968,
+          "cost": 0.0061579,
+          "input_tokens": 6666,
+          "output_tokens": 197,
+          "total_tokens": 6863,
+          "cached_tokens": 5248,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -268,19 +268,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_PrLQ1CejEpCcN6u7LAMgAeh9"
+              "tool_call_id": "call_AVgUHFH3b8bS0TjCWhzS03fl"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773434683.1497433,
+          "timestamp": 1774869471.9265633,
           "model": "gpt-5.3-codex",
-          "cost": 0.0017002999999999999,
-          "input_tokens": 6850,
+          "cost": 0.00167545,
+          "input_tokens": 6951,
           "output_tokens": 14,
-          "total_tokens": 6864,
-          "cached_tokens": 6656,
+          "total_tokens": 6965,
+          "cached_tokens": 6784,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -289,18 +289,18 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_JkBxnQhKi1bBDWAFK8VvPd1r"
+              "tool_call_id": "call_Fb3rloJrjp7AmA4tETvf1pLQ"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773434940.0130503,
+          "timestamp": 1774869775.662891,
           "model": "gpt-5.3-codex",
-          "cost": 0.00180845,
-          "input_tokens": 6955,
+          "cost": 0.0019852000000000003,
+          "input_tokens": 7056,
           "output_tokens": 23,
-          "total_tokens": 6978,
+          "total_tokens": 7079,
           "cached_tokens": 6784,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -310,7 +310,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_4nNIcLOMMenWK6BGlrk0hOy9"
+              "tool_call_id": "call_ASHDzLSJIiRayA3wDM5B3VX4"
             }
           ],
           "finish_reason": "tool_calls"
@@ -318,15 +318,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.047578999999999996,
-      "total_input_tokens": 55596,
-      "total_output_tokens": 1345,
+      "total_cost": 0.06347215,
+      "total_input_tokens": 79137,
+      "total_output_tokens": 1280,
       "total_llm_calls": 11
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/gpac/src/isomedia/box_code_base.c\n+++ b/gpac/src/isomedia/box_code_base.c\n@@ -821,6 +821,10 @@\n \tif (ptr->size > 0xFFFFFFFF) return GF_ISOM_INVALID_FILE;\n \tbytesToRead = (u32) (ptr->size);\n \n+\t/* ensure deterministic teardown even when there is no payload */\n+\tptr->data = NULL;\n+\tptr->dataSize = 0;\n+\n \tif (!bytesToRead) return GF_OK;\n \tif (bytesToRead>1000000) {\n \t\tGF_LOG(GF_LOG_WARNING, GF_LOG_CONTAINER, (\"[iso file] Unknown box %s (0x%08X) with payload larger than 1 MBytes, ignoring\\n\", gf_4cc_to_str(ptr->original_4cc), ptr->original_4cc ));\n",
+    "patch": "--- a/gpac/src/isomedia/box_code_base.c\n+++ b/gpac/src/isomedia/box_code_base.c\n@@ -857,11 +857,12 @@\n \t\te = gf_isom_box_array_read(s, sub_bs);\n \t}\n \tgf_bs_del(sub_bs);\n-\tif (e==GF_OK) {\n+\tif ((e==GF_OK) && !s->child_boxes) {\n \t\tgf_free(ptr->data);\n \t\tptr->data = NULL;\n \t\tptr->dataSize = 0;\n-\t} else if (s->child_boxes) {\n+\t}\n+\tif ((e!=GF_OK) && s->child_boxes) {\n \t\tgf_isom_box_array_del(s->child_boxes);\n \t\ts->child_boxes=NULL;\n \t}\n",
     "build_artifacts_count": 1,
     "tested_povs_count": 1,
     "last_validation": {
@@ -344,77 +344,132 @@
       {
         "tool_name": "read_definition",
         "args": [
-          "unkn_box_del",
+          "unkn_box_read",
           "src/isomedia/box_code_base.c",
           0,
           true
         ],
         "kwargs": {},
-        "timestamp": 466960.119055393,
+        "timestamp": 1901694.188328716,
         "success": true,
         "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: gpac/src/isomedia/box_code_base.c, extra=None))"
       },
       {
         "tool_name": "read_definition",
         "args": [
-          "unkn_box_read",
+          "unkn_box_del",
           "src/isomedia/box_code_base.c",
           0,
           true
         ],
         "kwargs": {},
-        "timestamp": 466960.86222732,
+        "timestamp": 1901698.714154913,
         "success": true,
         "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: gpac/src/isomedia/box_code_base.c, extra=None))"
-      }
-    ],
-    "read_source": [
-      {
-        "tool_name": "read_source",
-        "args": [
-          "src/isomedia/box_code_base.c",
-          760
-        ],
-        "kwargs": {},
-        "timestamp": 466962.587440417,
-        "success": true,
-        "result_summary": "Err(CRSError(path 'src/isomedia/box_code_base.c' does not exist in directory tree. Similar paths: gpac/src/isomedia/box_code_base.c, extra=None))"
       },
       {
-        "tool_name": "read_source",
+        "tool_name": "read_definition",
         "args": [
-          "gpac/src/isomedia/box_code_base.c",
-          790
+          "gf_isom_box_del",
+          "src/isomedia/box_funcs.c",
+          0,
+          true
         ],
         "kwargs": {},
-        "timestamp": 466965.404980735,
+        "timestamp": 1901700.584838984,
         "success": true,
-        "result_summary": "Ok({'contents': '691 \\t\\tif (ptr->location) ptr->size += 1 + strlen(ptr->location);\\n692 \\t}\\n693 \\treturn GF_OK;\\n694 }\\n695 \\n696 #endif /*GPAC_DISABLE_ISOM_WRITE*/\\n697 \\n698 void urn_box_del(GF_Bo..."
-      }
-    ],
-    "find_references": [
+        "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: gpac/src/isomedia/box_funcs.c, extra=None))"
+      },
       {
-        "tool_name": "find_references",
+        "tool_name": "read_definition",
+        "args": [
+          "gf_isom_box_del",
+          "gpac/src/isomedia/box_funcs.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1901711.075747215,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n2113 void gf_isom_box_del(GF_Box *a), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
         "args": [
           "unkn_box_read",
           "gpac/src/isomedia/box_code_base.c",
-          false
+          0,
+          true
         ],
         "kwargs": {},
-        "timestamp": 466965.802470922,
+        "timestamp": 1901715.218364614,
         "success": true,
-        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: gpac/src/isomedia/box_funcs.c, extra=None))"
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n815 GF_Err unkn_box_read(GF_Box *s, GF_BitStream *bs), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "unkn_box_del",
+          "gpac/src/isomedia/box_code_base.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1901725.354765405,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n806 void unkn_box_del(GF_Box *s), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "unkn_box_read",
+          "gpac/src/isomedia/box_code_base.c",
+          815,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1901747.557975727,
+        "success": true,
+        "result_summary": "Ok({'contents': '815 GF_Err unkn_box_read(GF_Box *s, GF_BitStream *bs)\\n816 {\\n817 \\tGF_Err e;\\n818 \\tu32 bytesToRead, sub_size, sub_a;\\n819 \\tGF_BitStream *sub_bs;\\n820 \\tGF_UnknownBox *ptr = (GF_Unk..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "unkn_box_del",
+          "gpac/src/isomedia/box_code_base.c",
+          806,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1901750.972792085,
+        "success": true,
+        "result_summary": "Ok({'contents': '806 void unkn_box_del(GF_Box *s)\\n807 {\\n808 \\tGF_UnknownBox *ptr = (GF_UnknownBox *) s;\\n809 \\tif (!s) return;\\n810 \\tif (ptr->data) gf_free(ptr->data);\\n811 \\tgf_free(ptr);\\n812 }',..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "gf_isom_box_del",
+          "gpac/src/isomedia/box_funcs.c",
+          2113,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1901756.008171989,
+        "success": true,
+        "result_summary": "Ok({'contents': '2112 GF_EXPORT\\n2113 void gf_isom_box_del(GF_Box *a)\\n2114 {\\n2115 \\tGF_List *child_boxes;\\n2116 \\tconst struct box_registry_entry *a_box_registry;\\n2117 \\tif (!a) return;\\n2118 \\n211..."
       }
     ],
+    "read_source": [],
+    "find_references": [],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "gpac/src/isomedia/box_code_base.c",
-          "@@ -821,6 +821,10 @@ GF_Err unkn_box_read(GF_Box *s, GF_BitStream *bs)\n \tif (ptr->size > 0xFFFFFFFF) return GF_ISOM_INVALID_FILE;\n \tbytesToRead = (u32) (ptr->size);\n \n+\t/* ensure deterministic teardown even when there is no payload */\n+\tptr->data = NULL;\n+\tptr->dataSize = 0;\n+\n \tif (!bytesToRead) return GF_OK;\n \tif (bytesToRead>1000000) {\n \t\tGF_LOG(GF_LOG_WARNING, GF_LOG_CONTAINER, (\"[iso file] Unknown box %s (0x%08X) with payload larger than 1 MBytes, ignoring\\n\", gf_4cc_to_str(ptr->original_4cc), ptr->original_4cc ));"
+          "@@ -857,11 +857,12 @@\n \t\te = gf_isom_box_array_read(s, sub_bs);\n \t}\n \tgf_bs_del(sub_bs);\n-\tif (e==GF_OK) {\n+\tif ((e==GF_OK) && !s->child_boxes) {\n \t\tgf_free(ptr->data);\n \t\tptr->data = NULL;\n \t\tptr->dataSize = 0;\n-\t} else if (s->child_boxes) {\n+\t}\n+\tif ((e!=GF_OK) && s->child_boxes) {\n \t\tgf_isom_box_array_del(s->child_boxes);\n \t\ts->child_boxes=NULL;\n \t}\n"
         ],
         "kwargs": {},
-        "timestamp": 466969.591636355,
+        "timestamp": 1901759.191498991,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -424,7 +479,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 467227.039539426,
+        "timestamp": 1902062.943315777,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

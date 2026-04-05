@@ -1,5 +1,5 @@
 {
-  "vuln_id": 133,
+  "vuln_id": 443,
   "crash_result": {
     "output": "==5549==ERROR: AddressSanitizer: heap-use-after-free on address 0x60c000000dd8 at pc 0x00000056bafd bp 0x7ffd0d38b9b0 sp 0x7ffd0d38b9a8\nREAD of size 8 at 0x60c000000dd8 thread T0\nSCARINESS: 51 (8-byte-read-heap-use-after-free)\n    #0 0x56bafc in xmlFreeNodeList /src/libxml2/tree.c:3704:22\n    #1 0x65f640 in xmlXIncludeIncludeNode /src/libxml2/xinclude.c\n    #2 0x65caa2 in xmlXIncludeDoProcess /src/libxml2/xinclude.c:2470:6\n    #3 0x65c1e6 in xmlXIncludeProcessTreeFlagsData /src/libxml2/xinclude.",
     "stack": "#0 0x56bafc in xmlFreeNodeList libxml2/tree.c:3704:22\n#1 0x65f640 in xmlXIncludeIncludeNode libxml2/xinclude.c\n#2 0x65caa2 in xmlXIncludeDoProcess libxml2/xinclude.c:2470:6\n#3 0x65c1e6 in xmlXIncludeProcessTreeFlagsData libxml2/xinclude.c:2523:11\n#4 0x65cceb in xmlXIncludeProcessFlagsData libxml2/xinclude.c:2552:12\n#5 0x65cd68 in xmlXIncludeProcessFlags libxml2/xinclude.c:2567:12\n#6 0x4d7be7 in LLVMFuzzerTestOneInput libxml2/fuzz/xml.c:57:9\n#7 0x4d9c95 in ExecuteFilesOnyByOne aflplusplus/utils/a",
@@ -24,133 +24,112 @@
   "analyzed_vuln": {
     "function": "xmlXIncludeIncludeNode",
     "file": "libxml2/xinclude.c",
-    "description": "Use-after-free in XInclude replacement cleanup: xmlXIncludeIncludeNode() iterates over children of the original <xi:include> node and frees each child with xmlFreeNode(child), but continues traversal using next = child->next taken from nodes that can already be freed indirectly (e.g., malformed/nested fallback/include structures). This leads to a stale sibling pointer and later double-processing/free of nodes, surfacing as UAF in xmlFreeNodeList() (tree.c:3704). Root cause is unsafe mutation/free traversal logic in xmlXIncludeIncludeNode, not xmlFreeNodeList itself.",
-    "conditions": "Triggered via xml harness calling xmlXIncludeProcessFlags() on attacker-controlled XML containing xi:include/xi:fallback nesting. During xmlXIncludeDoProcess phase 2, xmlXIncludeLoadFallback copies fallback children into incTab[nr]->inc. In phase 3, xmlXIncludeIncludeNode() marks include node as XML_XINCLUDE_START and removes fallback children; crafted malformed nested include/fallback layout causes child/sibling links to become invalid during in-place unlink+free traversal, then later list cleanup/replacement touches freed node memory, producing heap-use-after-free in xmlFreeNodeList."
+    "description": "`xmlXIncludeIncludeNode` can double-free/use-after-free fallback content because it frees children of the include node with `xmlFreeNode(child)` in a loop even when those children are part of a linked sibling list copied from fallback processing. Freeing one child recursively frees its siblings via `xmlFreeNodeList`, then the loop advances to `next` (already freed), leading to UAF in `xmlFreeNodeList` on the second iteration. The crash appears in `xmlFreeNodeList` but the ownership/free logic bug is in `xmlXIncludeIncludeNode`'s fallback-children removal loop.",
+    "conditions": "Triggered via the xml fuzz harness when XInclude processing is enabled (`xmlXIncludeProcessFlags` in `fuzz/xml.c`) and malformed/nested `<xi:include>` with `<xi:fallback>` causes `xmlXIncludeLoadFallback` to populate `ctxt->incTab[nr]->inc` from `xmlDocCopyNodeList(fallback->children)`, then `xmlXIncludeIncludeNode` enters the non-`XML_PARSE_NOXINCNODE` path with `fallback` set and executes the child-removal loop. Input must produce multiple fallback/include children so `child->next` is non-NULL; then first `xmlFreeNode(child)` frees sibling chain, and loop reuses stale `next`, causing heap-use-after-free."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 5,
-      "total_cost": 0.046376749999999994,
-      "total_input_tokens": 51525,
-      "total_output_tokens": 616,
-      "total_cached_tokens": 33280,
+      "total_llm_calls": 4,
+      "total_cost": 0.02602705,
+      "total_input_tokens": 21511,
+      "total_output_tokens": 711,
+      "total_cached_tokens": 13696,
       "llm_calls": [
         {
-          "timestamp": 1773422749.333554,
+          "timestamp": 1774857986.4439998,
           "model": "gpt-5.3-codex",
-          "cost": 0.007514849999999999,
-          "input_tokens": 4283,
-          "output_tokens": 131,
-          "total_tokens": 4414,
-          "cached_tokens": 1152,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 4,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_NM5DsBLngRzULd5r8PbjDZlp"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_f16Cic0FYMzLRFTx1QwAXvmD"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_RKrF7MTWOgLgg60NbqlH26J5"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_rENgAleU6f1oPuqd4vyWC2FF"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773422777.3224463,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0097475,
-          "input_tokens": 4586,
-          "output_tokens": 123,
-          "total_tokens": 4709,
+          "cost": 0.009539249999999999,
+          "input_tokens": 4371,
+          "output_tokens": 135,
+          "total_tokens": 4506,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 3,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_7f6GZyuRdnDPk43gX1msX0tY"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Fy4vSPoUaKjYNzwRQytESqYA"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_DNk8vVIL88wVtlk0MSCnl2my"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_uiMdka7xupfrbOuUZdnBEUZB"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_4Af8FSLivzO2tcMDDGcNxav9"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_yjvLtSgCAQJ7b2sS6rnEIAsw"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_aUS2O5asHDv3doZjFQXyyR8g"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773422781.7528193,
+          "timestamp": 1774858092.826074,
           "model": "gpt-5.3-codex",
-          "cost": 0.0174524,
-          "input_tokens": 13792,
-          "output_tokens": 41,
-          "total_tokens": 13833,
+          "cost": 0.0032347,
+          "input_tokens": 4618,
+          "output_tokens": 129,
+          "total_tokens": 4747,
+          "cached_tokens": 4224,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_CvXwsZUyGkzGfgrkftQSiufL"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_eJUdmfdeIkMpB3qlpj5kBt98"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_eDHbxSf3NOOuRUYU39qr2MC7"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774858143.2124739,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0031758999999999997,
+          "input_tokens": 4906,
+          "output_tokens": 132,
+          "total_tokens": 5038,
           "cached_tokens": 4608,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 1,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_xLmu62MPfMA7s3NgzELQWTpp"
+              "tool_call_id": "call_r40eQvunKwbYQNRYjq5KfnVq"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_EF145ADX46gjncn6AF6fOl7I"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_1BVuu6wIf6nHXdg54lOutY8d"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773422790.2392354,
+          "timestamp": 1774858193.18279,
           "model": "gpt-5.3-codex",
-          "cost": 0.0033207999999999996,
-          "input_tokens": 13888,
-          "output_tokens": 42,
-          "total_tokens": 13930,
-          "cached_tokens": 13696,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_i4r1GKaKZpiW0YKEw4f1lhRY"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773422801.752193,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0083412,
-          "input_tokens": 14976,
-          "output_tokens": 279,
-          "total_tokens": 15255,
-          "cached_tokens": 13824,
+          "cost": 0.0100772,
+          "input_tokens": 7616,
+          "output_tokens": 315,
+          "total_tokens": 7931,
+          "cached_tokens": 4864,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -159,7 +138,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Y6bqXfYoywy0JaWmlLwE97wQ"
+              "tool_call_id": "call_CEhzMux9ggKW10Co9AiFBDQj"
             }
           ],
           "finish_reason": "tool_calls"
@@ -168,18 +147,18 @@
     },
     "patching": {
       "total_llm_calls": 5,
-      "total_cost": 0.027512799999999997,
-      "total_input_tokens": 38720,
-      "total_output_tokens": 394,
-      "total_cached_tokens": 29056,
+      "total_cost": 0.02685865,
+      "total_input_tokens": 41887,
+      "total_output_tokens": 297,
+      "total_cached_tokens": 32128,
       "llm_calls": [
         {
-          "timestamp": 1773422803.8787298,
+          "timestamp": 1774858195.1864996,
           "model": "gpt-5.3-codex",
-          "cost": 0.008407,
-          "input_tokens": 4140,
+          "cost": 0.010815,
+          "input_tokens": 5516,
           "output_tokens": 83,
-          "total_tokens": 4223,
+          "total_tokens": 5599,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -189,23 +168,23 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_xKF6MRKzdFpTa2fVIDkkNfWZ"
+              "tool_call_id": "call_eXzVzo9zISFJN6dSI007Wuni"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_UKA7iXvYhpiytP8bt2MKohTT"
+              "tool_call_id": "call_PHg9m8mKf8Z8UC7QTbnC2SV1"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773422808.0352068,
+          "timestamp": 1774858218.6251302,
           "model": "gpt-5.3-codex",
-          "cost": 0.00583555,
-          "input_tokens": 6781,
-          "output_tokens": 30,
-          "total_tokens": 6811,
-          "cached_tokens": 4096,
+          "cost": 0.00616245,
+          "input_tokens": 8139,
+          "output_tokens": 42,
+          "total_tokens": 8181,
+          "cached_tokens": 5504,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -213,20 +192,20 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_NeQnWXzwFcHKWRdnaHtORo3w"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_vhx1pRHYW22gnUb001Ts9klF"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773422811.776181,
+          "timestamp": 1774858231.0618465,
           "model": "gpt-5.3-codex",
-          "cost": 0.0087003,
-          "input_tokens": 9010,
-          "output_tokens": 244,
-          "total_tokens": 9254,
-          "cached_tokens": 6656,
+          "cost": 0.00533645,
+          "input_tokens": 9227,
+          "output_tokens": 135,
+          "total_tokens": 9362,
+          "cached_tokens": 8064,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -235,39 +214,18 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_ZyBaFlHeylbAvdrIHDs3btWs"
+              "tool_call_id": "call_DalpJU46jJwCHZC81p5Y9I9o"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773422812.9519122,
+          "timestamp": 1774858232.5393527,
           "model": "gpt-5.3-codex",
-          "cost": 0.0022309,
-          "input_tokens": 9342,
+          "cost": 0.0022183,
+          "input_tokens": 9450,
           "output_tokens": 14,
-          "total_tokens": 9356,
-          "cached_tokens": 9088,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "test_patch",
-              "tool_call_id": "call_t5B8pyDQjUlLCv8OWmmLzAdX"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773422840.2507815,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0023390499999999996,
-          "input_tokens": 9447,
-          "output_tokens": 23,
-          "total_tokens": 9470,
+          "total_tokens": 9464,
           "cached_tokens": 9216,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -276,8 +234,29 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_JwKKT2jRCXNi5hBpxc4xm2iS"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774858282.9128115,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00232645,
+          "input_tokens": 9555,
+          "output_tokens": 23,
+          "total_tokens": 9578,
+          "cached_tokens": 9344,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
               "tool_name": "terminate",
-              "tool_call_id": "call_7An7yhjsb80pA34Xco3SuWDp"
+              "tool_call_id": "call_2DKFwn0O6CxPIVdDPGzpviPm"
             }
           ],
           "finish_reason": "tool_calls"
@@ -285,15 +264,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.07388955,
-      "total_input_tokens": 90245,
-      "total_output_tokens": 1010,
-      "total_llm_calls": 10
+      "total_cost": 0.0528857,
+      "total_input_tokens": 63398,
+      "total_output_tokens": 1008,
+      "total_llm_calls": 9
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/xinclude.c\n+++ b/xinclude.c\n@@ -2251,9 +2251,13 @@\n             xmlUnsetProp(cur, BAD_CAST \"href\");\n \tcur->type = XML_XINCLUDE_START;\n         /* Remove fallback children */\n-        for (child = cur->children; child != NULL; child = next) {\n+        child = cur->children;\n+        cur->children = NULL;\n+        while (child != NULL) {\n             next = child->next;\n-            xmlUnlinkNode(child);\n+            child->parent = NULL;\n+            child->prev = NULL;\n+            child->next = NULL;\n             xmlFreeNode(child);\n         }\n \tend = xmlNewDocNode(cur->doc, cur->ns, cur->name, NULL);\n",
+    "patch": "--- a/xinclude.c\n+++ b/xinclude.c\n@@ -2254,7 +2254,7 @@\n         for (child = cur->children; child != NULL; child = next) {\n             next = child->next;\n             xmlUnlinkNode(child);\n-            xmlFreeNode(child);\n+            xmlFreeNodeList(child);\n         }\n \tend = xmlNewDocNode(cur->doc, cur->ns, cur->name, NULL);\n \tif (end == NULL) {\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -317,9 +296,22 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 455094.718178207,
+        "timestamp": 1890505.521964243,
         "success": true,
         "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n2193 xmlXIncludeIncludeNode(xmlXIncludeCtxtPtr ctxt, int nr) {, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "xmlXIncludeIncludeNode",
+          "libxml2/xinclude.c",
+          2193,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1890517.205629355,
+        "success": true,
+        "result_summary": "Ok({'contents': '2192 static int\\n2193 xmlXIncludeIncludeNode(xmlXIncludeCtxtPtr ctxt, int nr) {\\n2194     xmlNodePtr cur, end, list, tmp;\\n2195 \\n2196     if (ctxt == NULL)\\n2197 \\treturn(-1);\\n2198 ..."
       }
     ],
     "read_source": [
@@ -327,23 +319,12 @@
         "tool_name": "read_source",
         "args": [
           "libxml2/xinclude.c",
-          2400
+          1900
         ],
         "kwargs": {},
-        "timestamp": 455092.531425625,
+        "timestamp": 1890483.76612688,
         "success": true,
-        "result_summary": "Ok({'contents': '2301 \\treturn(0);\\n2302     if ((xmlStrEqual(node->ns->href, XINCLUDE_NS)) ||\\n2303         (xmlStrEqual(node->ns->href, XINCLUDE_OLD_NS))) {\\n2304 \\tif (xmlStrEqual(node->ns->href, X..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "libxml2/xinclude.c",
-          2193
-        ],
-        "kwargs": {},
-        "timestamp": 455096.610352198,
-        "success": true,
-        "result_summary": "Ok({'contents': '2094 \\t/*\\n2095 \\t * Some escaping may be needed\\n2096 \\t */\\n2097 \\tescbase = xmlURIEscape(base);\\n2098 \\teschref = xmlURIEscape(href);\\n2099 \\tURI = xmlBuildURI(eschref, escbase);\\n..."
+        "result_summary": "Ok({'contents': '1801     xmlChar *encoding = NULL;\\n1802     xmlCharEncoding enc = (xmlCharEncoding) 0;\\n1803     xmlParserCtxtPtr pctxt;\\n1804     xmlParserInputPtr inputStream;\\n1805     int xinclu..."
       }
     ],
     "find_references": [],
@@ -352,10 +333,10 @@
         "tool_name": "apply_patch",
         "args": [
           "libxml2/xinclude.c",
-          "@@ -2251,10 +2251,9 @@ xmlXIncludeIncludeNode(xmlXIncludeCtxtPtr ctxt, int nr) {\n             xmlUnsetProp(cur, BAD_CAST \"href\");\n \tcur->type = XML_XINCLUDE_START;\n         /* Remove fallback children */\n-        for (child = cur->children; child != NULL; child = next) {\n-            next = child->next;\n-            xmlUnlinkNode(child);\n-            xmlFreeNode(child);\n+        child = cur->children;\n+        cur->children = NULL;\n+        while (child != NULL) {\n+            next = child->next;\n+            child->parent = NULL;\n+            child->prev = NULL;\n+            child->next = NULL;\n+            xmlFreeNode(child);\n         }\n \tend = xmlNewDocNode(cur->doc, cur->ns, cur->name, NULL);\n \tif (end == NULL) {"
+          "@@ -2253,7 +2253,7 @@\n         /* Remove fallback children */\n         for (child = cur->children; child != NULL; child = next) {\n             next = child->next;\n             xmlUnlinkNode(child);\n-            xmlFreeNode(child);\n+            xmlFreeNodeList(child);\n         }\n \tend = xmlNewDocNode(cur->doc, cur->ns, cur->name, NULL);\n \tif (end == NULL) {"
         ],
         "kwargs": {},
-        "timestamp": 455100.426194063,
+        "timestamp": 1890519.746593865,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -365,7 +346,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 455126.859226608,
+        "timestamp": 1890570.339641555,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

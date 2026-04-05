@@ -1,5 +1,5 @@
 {
-  "vuln_id": 276,
+  "vuln_id": 450,
   "crash_result": {
     "output": "==6616==ERROR: AddressSanitizer: heap-buffer-overflow on address 0xee000f3c at pc 0x08200815 bp 0xffb05218 sp 0xffb05210\nREAD of size 4 at 0xee000f3c thread T0\nSCARINESS: 17 (4-byte-read-heap-buffer-overflow)\n    #0 0x8200814 in Type_MLU_Write /src/lcms/src/cmstypes.c:1591:36\n    #1 0x81bf091 in SaveTags /src/lcms/src/cmsio0.c:1319:18\n    #2 0x81bdeef in cmsSaveProfileToIOhandler /src/lcms/src/cmsio0.c:1392:10\n    #3 0x81bf7b6 in cmsSaveProfileToFile /src/lcms/src/cmsio0.c:1433:11\n    #4 0x81b70",
     "stack": "#0 0x8200814 in Type_MLU_Write lcms/src/cmstypes.c:1591:36\n#1 0x81bf091 in SaveTags lcms/src/cmsio0.c:1319:18\n#2 0x81bdeef in cmsSaveProfileToIOhandler lcms/src/cmsio0.c:1392:10\n#3 0x81bf7b6 in cmsSaveProfileToFile lcms/src/cmsio0.c:1433:11\n#4 0x81b70f1 in LLVMFuzzerTestOneInput cms_profile_fuzzer.c:45:5\n#5 0x80a199e in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned int) llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:611:15\n#6 0x808cdce in fuzzer::RunOneTest(fuzzer::Fuzzer*, ",
@@ -24,58 +24,54 @@
   "analyzed_vuln": {
     "function": "Type_MLU_Write",
     "file": "lcms/src/cmstypes.c",
-    "description": "Heap out-of-bounds read in Type_MLU_Write when serializing an cmsMLU tag: it iterates up to mlu->UsedEntries and reads mlu->Entries[i] without validating that UsedEntries is within the actually allocated entry count for that cmsMLU object. In this PoV, a malformed profile causes object/type confusion so non-MLU data is later written through the MLU writer, leaving a small allocation (40 bytes) but a larger UsedEntries value, and the loop reads past the heap buffer at mlu->Entries[i].",
-    "conditions": "In cms_profile_fuzzer, attacker-controlled ICC bytes are opened via cmsOpenProfileFromFile, cmsReadTag(cmsSigGamutTag) loads crafted tag data, then cmsSaveProfileToFile triggers SaveTags -> tag type handler WritePtr. The crafted tag metadata makes SaveTags select the MLU writer (Type_MLU_Write) for data that is not a valid cmsMLU (or has inconsistent internal fields), so Type_MLU_Write trusts mlu->UsedEntries and performs OOB reads while writing per-entry language/country/len/offset records."
+    "description": "Heap OOB read in `Type_MLU_Write` due to trusting `cmsMLU->UsedEntries` without validating it against the actual allocated `Entries[]` capacity. The writer loops `for (i=0; i<mlu->UsedEntries; i++)` and reads `mlu->Entries[i]` fields; with a malformed/tainted `cmsMLU` object this reads past the end of the entries array (ASan shows read 4 bytes past a 40-byte allocation). Crash happens in write path, but root cause is missing structural consistency check before iterating serialized MLU entries.",
+    "conditions": "In `cms_profile_fuzzer`, attacker-controlled ICC is opened, `cmsReadTag(hProfile, cmsSigGamutTag)` loads tag data, then `cmsSaveProfileToFile` reserializes all tags via `SaveTags` -> type handler write. The PoC causes a tag object interpreted as MLU during save to have inconsistent internal state (`UsedEntries` larger than allocated entries), so `Type_MLU_Write` over-iterates and performs OOB reads. Trigger requires a crafted profile that survives parsing enough to reach save, and taints MLU metadata used during serialization."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.0280406,
-      "total_input_tokens": 27516,
-      "total_output_tokens": 421,
-      "total_cached_tokens": 16512,
+      "total_cost": 0.0249963,
+      "total_input_tokens": 22762,
+      "total_output_tokens": 409,
+      "total_cached_tokens": 13056,
       "llm_calls": [
         {
-          "timestamp": 1773717565.0153074,
+          "timestamp": 1774861190.7300484,
           "model": "gpt-5.3-codex",
-          "cost": 0.00718585,
-          "input_tokens": 4119,
-          "output_tokens": 128,
-          "total_tokens": 4247,
-          "cached_tokens": 1152,
+          "cost": 0.00877625,
+          "input_tokens": 4207,
+          "output_tokens": 101,
+          "total_tokens": 4308,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_j6bRmv8Dm2jN04wqa44e4qcp"
+              "tool_call_id": "call_hYwPUavIq4RYC8h4Wo7heXOn"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_PPovXNe2eAiUieisBEqZJ8de"
+              "tool_call_id": "call_kJPLdTpBX2zcLgt13LxMWldc"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_9w8iLz37COllXGiiUbncR5Yv"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_w4d4R7yC2E8nFHHSTLs5vII0"
+              "tool_call_id": "call_t7lV5rB4sSUo5jH1ULXHPmRL"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773717611.3917522,
+          "timestamp": 1774861327.5705447,
           "model": "gpt-5.3-codex",
-          "cost": 0.01389255,
-          "input_tokens": 11401,
+          "cost": 0.009454200000000001,
+          "input_tokens": 8980,
           "output_tokens": 28,
-          "total_tokens": 11429,
-          "cached_tokens": 4096,
+          "total_tokens": 9008,
+          "cached_tokens": 4224,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -84,19 +80,19 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_267u3OsBnhnYVS5iz9FtArsN"
+              "tool_call_id": "call_fIZKxfYb1Z1yHh72x2rgTq64"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773717617.1623096,
+          "timestamp": 1774861332.9958751,
           "model": "gpt-5.3-codex",
-          "cost": 0.0069622,
-          "input_tokens": 11996,
-          "output_tokens": 265,
-          "total_tokens": 12261,
-          "cached_tokens": 11264,
+          "cost": 0.0067658499999999995,
+          "input_tokens": 9575,
+          "output_tokens": 280,
+          "total_tokens": 9855,
+          "cached_tokens": 8832,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -105,7 +101,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_frKm7PONn47Cu88gJG41Uh4X"
+              "tool_call_id": "call_DcPNTF0gLJw6U2RhGTaZjBAr"
             }
           ],
           "finish_reason": "tool_calls"
@@ -113,19 +109,19 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 8,
-      "total_cost": 0.0325605,
-      "total_input_tokens": 61966,
-      "total_output_tokens": 628,
-      "total_cached_tokens": 53760,
+      "total_llm_calls": 7,
+      "total_cost": 0.035381499999999996,
+      "total_input_tokens": 64786,
+      "total_output_tokens": 621,
+      "total_cached_tokens": 55040,
       "llm_calls": [
         {
-          "timestamp": 1773717620.174445,
+          "timestamp": 1774861335.9429855,
           "model": "gpt-5.3-codex",
-          "cost": 0.0057582,
-          "input_tokens": 4140,
-          "output_tokens": 81,
-          "total_tokens": 4221,
+          "cost": 0.007725200000000001,
+          "input_tokens": 5280,
+          "output_tokens": 79,
+          "total_tokens": 5359,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -135,65 +131,48 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_hqaTF4NNpmrDFUf1ciLIR6WC"
+              "tool_call_id": "call_D44dNkTqRIPp5PSX587OqFsk"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_BfzsbAEiamxfnCXwQXgA3vIU"
+              "tool_call_id": "call_6h8vZnz11Su7CDzVLjQaYP0l"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773717638.6797845,
+          "timestamp": 1774861490.0970855,
           "model": "gpt-5.3-codex",
-          "cost": 0.00584605,
-          "input_tokens": 6699,
-          "output_tokens": 41,
-          "total_tokens": 6740,
-          "cached_tokens": 4096,
+          "cost": 0.006777399999999999,
+          "input_tokens": 7900,
+          "output_tokens": 87,
+          "total_tokens": 7987,
+          "cached_tokens": 5248,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 1,
+          "tool_call_count": 2,
           "tool_calls": [
             {
+              "tool_name": "find_references",
+              "tool_call_id": "call_P4MXEx3XvIrhTo3EZv8jKe0x"
+            },
+            {
               "tool_name": "read_definition",
-              "tool_call_id": "call_EDfasFIJo9gJdktkkDgXLXWI"
+              "tool_call_id": "call_NL1IBGQ4uCPIFXyhFoHEo1w0"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773717642.7797985,
+          "timestamp": 1774861745.7708025,
           "model": "gpt-5.3-codex",
-          "cost": 0.00199255,
-          "input_tokens": 6801,
-          "output_tokens": 41,
-          "total_tokens": 6842,
-          "cached_tokens": 6656,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_ZL9ZBJ19wMRTxHPlv3CcWU5q"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773717646.643035,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0019733,
-          "input_tokens": 6878,
+          "cost": 0.00271565,
+          "input_tokens": 8339,
           "output_tokens": 30,
-          "total_tokens": 6908,
-          "cached_tokens": 6656,
+          "total_tokens": 8369,
+          "cached_tokens": 7808,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -202,19 +181,19 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_fX52Zx3kQN2BB4yKB3yi4Cyh"
+              "tool_call_id": "call_8tuVlVeK3exCMMnap790P6F1"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773717650.786953,
+          "timestamp": 1774861749.9251723,
           "model": "gpt-5.3-codex",
-          "cost": 0.0078862,
-          "input_tokens": 9012,
-          "output_tokens": 200,
-          "total_tokens": 9212,
-          "cached_tokens": 6784,
+          "cost": 0.008155349999999999,
+          "input_tokens": 10473,
+          "output_tokens": 195,
+          "total_tokens": 10668,
+          "cached_tokens": 8192,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -223,19 +202,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_caUL4W9qwX7KZxVg9PIv3KJr"
+              "tool_call_id": "call_0foZFhtQuOmTLs3o5wDfCySn"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773717655.2495408,
+          "timestamp": 1774861753.7496612,
           "model": "gpt-5.3-codex",
-          "cost": 0.00465115,
-          "input_tokens": 9253,
-          "output_tokens": 198,
-          "total_tokens": 9451,
-          "cached_tokens": 9088,
+          "cost": 0.00491155,
+          "input_tokens": 10709,
+          "output_tokens": 193,
+          "total_tokens": 10902,
+          "cached_tokens": 10496,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -244,19 +223,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_dY4xhROYdDMe9sHtmDSisSnu"
+              "tool_call_id": "call_4BazuSj5AP7PKnn9OlvHyWVa"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773717656.9090233,
+          "timestamp": 1774861755.936625,
           "model": "gpt-5.3-codex",
-          "cost": 0.00217245,
-          "input_tokens": 9539,
+          "cost": 0.0024941,
+          "input_tokens": 10990,
           "output_tokens": 14,
-          "total_tokens": 9553,
-          "cached_tokens": 9344,
+          "total_tokens": 11004,
+          "cached_tokens": 10752,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -265,19 +244,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_dXU3pyEQggOoHNW2xc9uGKSG"
+              "tool_call_id": "call_agBJ9cSclOPaRrHYKtWFzVPr"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773717680.523574,
+          "timestamp": 1774861906.5131874,
           "model": "gpt-5.3-codex",
-          "cost": 0.0022806,
-          "input_tokens": 9644,
+          "cost": 0.0026022499999999995,
+          "input_tokens": 11095,
           "output_tokens": 23,
-          "total_tokens": 9667,
-          "cached_tokens": 9472,
+          "total_tokens": 11118,
+          "cached_tokens": 10880,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -286,7 +265,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_wblvKaFDRdJSeqi7q5nHhLrW"
+              "tool_call_id": "call_Fdqf03xuBYeqC4R0wn5TWY22"
             }
           ],
           "finish_reason": "tool_calls"
@@ -294,15 +273,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.0606011,
-      "total_input_tokens": 89482,
-      "total_output_tokens": 1049,
-      "total_llm_calls": 11
+      "total_cost": 0.060377799999999995,
+      "total_input_tokens": 87548,
+      "total_output_tokens": 1030,
+      "total_llm_calls": 10
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/cmstypes.c\n+++ b/src/cmstypes.c\n@@ -1581,11 +1581,17 @@\n           return TRUE;\n     }\n \n+    // Defensive check: malformed/corrupted objects must not let us walk past\n+    // the allocated entries table.\n+    if (mlu->UsedEntries > mlu->AllocatedEntries) return FALSE;\n+\n     if (!_cmsWriteUInt32Number(io, mlu ->UsedEntries)) return FALSE;\n     if (!_cmsWriteUInt32Number(io, 12)) return FALSE;\n \n     HeaderSize = 12 * mlu ->UsedEntries + sizeof(_cmsTagBase);\n \n+    if (mlu->PoolUsed > mlu->PoolSize) return FALSE;\n+\n     for (i=0; i < mlu ->UsedEntries; i++) {\n \n         Len    =  mlu ->Entries[i].Len;\n",
+    "patch": "--- a/src/cmstypes.c\n+++ b/src/cmstypes.c\n@@ -1581,11 +1581,17 @@\n           return TRUE;\n     }\n \n+    if (mlu->UsedEntries > mlu->AllocatedEntries) return FALSE;\n+\n     if (!_cmsWriteUInt32Number(io, mlu ->UsedEntries)) return FALSE;\n     if (!_cmsWriteUInt32Number(io, 12)) return FALSE;\n \n     HeaderSize = 12 * mlu ->UsedEntries + sizeof(_cmsTagBase);\n \n+    if (mlu->UsedEntries != 0 && (HeaderSize - sizeof(_cmsTagBase)) / 12 != mlu->UsedEntries)\n+        return FALSE;\n+\n+\n     for (i=0; i < mlu ->UsedEntries; i++) {\n \n         Len    =  mlu ->Entries[i].Len;\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -326,22 +305,9 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 749929.99154425,
+        "timestamp": 1893883.490851507,
         "success": true,
         "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n33 cmsMLU* CMSEXPORT cmsMLUalloc(cmsContext ContextID, cmsUInt32Number nItems), extra=None))"
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "cmsMLUalloc",
-          "lcms/src/cmsnamed.c",
-          33,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 749934.029022525,
-        "success": true,
-        "result_summary": "Err(CRSError(could not find extent for cmsMLUalloc in lcms/src/cmsnamed.c, extra=None))"
       }
     ],
     "read_source": [
@@ -352,7 +318,7 @@
           1591
         ],
         "kwargs": {},
-        "timestamp": 749908.755330024,
+        "timestamp": 1893624.523549665,
         "success": true,
         "result_summary": "Ok({'contents': '1492     cmsUInt32Number  i;\\n1493     wchar_t*         Block;\\n1494     cmsUInt32Number  BeginOfThisString, EndOfThisString, LargestPosition;\\n1495 \\n1496     *nItems = 0;\\n1497     ..."
       },
@@ -363,7 +329,7 @@
           33
         ],
         "kwargs": {},
-        "timestamp": 749935.218732963,
+        "timestamp": 1894034.346278189,
         "success": true,
         "result_summary": "Ok({'contents': '  1 //---------------------------------------------------------------------------------\\n  2 //\\n  3 //  Little Color Management System\\n  4 //  Copyright (c) 1998-2022 Marti Maria Sa..."
       }
@@ -372,14 +338,26 @@
       {
         "tool_name": "find_references",
         "args": [
-          "Type_MLU_Write",
+          "UsedEntries",
           "lcms/src/cmstypes.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 749922.798908362,
+        "timestamp": 1893776.114346441,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='lcms/src/cmstypes.c', refs=[FileReference(line=3395, content='        return Type_MLU_Write(self, io, Text, 1);', enclosing_definition='SaveDescription'), FileReference(l..."
+        "result_summary": "Ok([FileReferences(file_name='lcms/src/cmstypes.c', refs=[FileReference(line=1509, content='    mlu ->UsedEntries = Count;', enclosing_definition='Type_MLU_Read'), FileReference(line=1584, content='  ..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "cmsMLUalloc",
+          "lcms/src",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1894032.835926147,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='lcms/src/cmsvirt.c', refs=[FileReference(line=39, content='    DescriptionMLU  = cmsMLUalloc(ContextID, 1);', enclosing_definition='SetTextTags'), FileReference(line=40, ..."
       }
     ],
     "apply_patch": [
@@ -387,10 +365,10 @@
         "tool_name": "apply_patch",
         "args": [
           "src/cmstypes.c",
-          "@@ -1581,10 +1581,15 @@\n           return TRUE;\n     }\n \n+    // Defensive check: malformed/corrupted objects must not let us walk past\n+    // the allocated entries table.\n+    if (mlu->UsedEntries > mlu->AllocatedEntries) return FALSE;\n+\n     if (!_cmsWriteUInt32Number(io, mlu ->UsedEntries)) return FALSE;\n     if (!_cmsWriteUInt32Number(io, 12)) return FALSE;\n \n     HeaderSize = 12 * mlu ->UsedEntries + sizeof(_cmsTagBase);\n+\n+    if (mlu->PoolUsed > mlu->PoolSize) return FALSE;\n \n     for (i=0; i < mlu ->UsedEntries; i++) {\n"
+          "@@ -1581,10 +1581,16 @@\n           return TRUE;\n     }\n \n+    if (mlu->UsedEntries > mlu->AllocatedEntries) return FALSE;\n+\n     if (!_cmsWriteUInt32Number(io, mlu ->UsedEntries)) return FALSE;\n     if (!_cmsWriteUInt32Number(io, 12)) return FALSE;\n \n     HeaderSize = 12 * mlu ->UsedEntries + sizeof(_cmsTagBase);\n+\n+    if (mlu->UsedEntries != 0 && (HeaderSize - sizeof(_cmsTagBase)) / 12 != mlu->UsedEntries)\n+        return FALSE;\n+\n \n     for (i=0; i < mlu ->UsedEntries; i++) {\n "
         ],
         "kwargs": {},
-        "timestamp": 749943.886900172,
+        "timestamp": 1894042.506119522,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -400,7 +378,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 749967.941298548,
+        "timestamp": 1894193.758667334,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

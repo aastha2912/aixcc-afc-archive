@@ -1,5 +1,5 @@
 {
-  "vuln_id": 121,
+  "vuln_id": 297,
   "crash_result": {
     "output": "==668==ERROR: AddressSanitizer: heap-use-after-free on address 0x612000000940 at pc 0x00000051259d bp 0x7ffcdabde950 sp 0x7ffcdabde100\nREAD of size 258 at 0x612000000940 thread T0\nSCARINESS: 54 (multi-byte-read-heap-use-after-free)\n    #0 0x51259c in __asan_memcpy /src/llvm/projects/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cc:23\n    #1 0x56732e in UA_Array_copy /src/open62541/src/ua_types.c:1048:9\n    #2 0x56adeb in copy_noInit /src/open62541/src/ua_types.c:925:23\n    #3 0x56ba5d in ",
     "stack": "#0 0x51259c in __asan_memcpy llvm/projects/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cc:23\n#1 0x56732e in UA_Array_copy open62541/src/ua_types.c:1048:9\n#2 0x56adeb in copy_noInit open62541/src/ua_types.c:925:23\n#3 0x56ba5d in UA_copy open62541/src/ua_types.c:940:28\n#4 0x56ba5d in UA_String_copy /work/open62541/src_generated/ua_types_generated_handling.h:308\n#5 0x56ba5d in NodeId_copy open62541/src/ua_types.c:226\n#6 0x56c13b in ExtensionObject_copy open62541/src/ua_types.c:364:18\n#7 0x",
@@ -22,85 +22,93 @@
     "dedup": "__asan_memcpy--UA_Array_copy--copy_noInit"
   },
   "analyzed_vuln": {
-    "function": "ExtensionObject_decodeBinary",
+    "function": "Variant_decodeBinaryUnwrapExtensionObject",
     "file": "open62541/src/ua_types_encoding_binary.c",
-    "description": "Heap use-after-free caused by incorrect ownership transfer of the decoded ExtensionObject typeId. In ExtensionObject_decodeBinary(), when encoding==UA_EXTENSIONOBJECT_ENCODED_BYTESTRING, it calls ExtensionObject_decodeBinaryContent(dst, &binTypeId, ctx) and then unconditionally UA_NodeId_deleteMembers(&binTypeId). But ExtensionObject_decodeBinaryContent() may take the 'unknown type' path and assign dst->content.encoded.typeId = *typeId (shallow move/copy of NodeId including string bytes). Freeing binTypeId immediately then leaves dst->content.encoded.typeId pointing to freed memory. Later UA_copy/NodeId_copy reads that dangling string buffer, triggering UAF in UA_Array_copy memcpy.",
-    "conditions": "In fuzz_binary_decode, input is decoded via UA_decodeBinary into a type containing nested ExtensionObjects/Variants. Trigger requires an ExtensionObject with ENCODED_BYTESTRING whose typeId is not recognized (so ExtensionObject_decodeBinaryContent stores it as encoded blob) and whose NodeId uses dynamically allocated identifier data (e.g., string/bytestring). ExtensionObject_decodeBinary then frees binTypeId, but dst retains alias to freed buffer; subsequent deep-copy in tortureEncoding (UA_copy on decoded object) dereferences freed NodeId string data and crashes."
+    "description": "Use-after-free is caused by stale ownership in Variant unwrapping of ExtensionObject. In Variant_decodeBinaryUnwrapExtensionObject, a temporary NodeId (typeId) is decoded and then assigned into dst->type selection logic. On the successful unwrap path (known type + ByteString encoding), the function does not release/reset typeId before decoding payload into dst->data. During nested decoding, ExtensionObject_decodeBinary may free NodeId members that alias the same underlying string/bytes memory, leaving a dangling pointer later copied by UA_copy/UA_Array_copy (seen as UAF in NodeId_copy -> UA_String_copy). Root cause is incorrect lifetime/cleanup handling of decoded NodeId/embedded members in the unwrap path, not the later memcpy crash site.",
+    "conditions": "Triggered by fuzz_binary_decode when input decodes a Variant containing ExtensionObject(s) with ByteString-encoded payload and crafted nested content that causes NodeId/String allocation and subsequent member deletion during decode. Data flow: LLVMFuzzerTestOneInput -> tortureEncoding -> UA_decodeBinary(Variant/containing type) -> Variant_decodeBinaryUnwrapExtensionObject -> nested ExtensionObject_decodeBinary/Array_decodeBinary. The malformed binary must drive the unwrap path (known typeId + encoded ByteString) and then nested decode/cleanup so freed NodeId-backed memory is still referenced and later deep-copied by UA_copy."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.030716,
-      "total_input_tokens": 26792,
-      "total_output_tokens": 501,
-      "total_cached_tokens": 14720,
+      "total_cost": 0.0365218,
+      "total_input_tokens": 29732,
+      "total_output_tokens": 577,
+      "total_cached_tokens": 14976,
       "llm_calls": [
         {
-          "timestamp": 1773414151.094819,
+          "timestamp": 1774810548.2083132,
           "model": "gpt-5.3-codex",
-          "cost": 0.01125635,
-          "input_tokens": 6693,
-          "output_tokens": 97,
-          "total_tokens": 6790,
+          "cost": 0.01178835,
+          "input_tokens": 6781,
+          "output_tokens": 124,
+          "total_tokens": 6905,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_aXHONtIne340JAgkyMKdfXjm"
+              "tool_call_id": "call_tDADyPYFs1Vw61FCMSiEXP5g"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ndmcHRZgrvQnBm26mhvJzh3r"
+              "tool_call_id": "call_eHtEc1LlXaGZGCr84wyDUyYE"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_i0RAFsv9iAoBpHptv9LcBZOh"
+              "tool_call_id": "call_Rd02LYBlU3jOv7YFREsBBLmV"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_r6EEvw7waqDFQRRj8VmzRwdT"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414184.2392046,
+          "timestamp": 1774810586.6767673,
           "model": "gpt-5.3-codex",
-          "cost": 0.00313005,
-          "input_tokens": 6931,
-          "output_tokens": 106,
-          "total_tokens": 7037,
-          "cached_tokens": 6656,
+          "cost": 0.00363195,
+          "input_tokens": 7093,
+          "output_tokens": 136,
+          "total_tokens": 7229,
+          "cached_tokens": 6784,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_pKySxg2M5J6511PzbggDmddI"
+              "tool_call_id": "call_XKl8yvCby3zXlgMAYwzVdnbY"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_vDPwDeG4KqzOP17Y0LfD8r25"
+              "tool_call_id": "call_lleVr3lEjlDrV9A2GRjEqTAw"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_porOZbObk1T5kYojjGJ1aJpj"
+              "tool_call_id": "call_4RxosFep2WwicaAv2ZquOgcL"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_aI8LuU9qC2n5hyXxm0ybBs41"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414191.7767973,
+          "timestamp": 1774810592.480446,
           "model": "gpt-5.3-codex",
-          "cost": 0.0163296,
-          "input_tokens": 13168,
-          "output_tokens": 298,
-          "total_tokens": 13466,
-          "cached_tokens": 6912,
+          "cost": 0.0211015,
+          "input_tokens": 15858,
+          "output_tokens": 317,
+          "total_tokens": 16175,
+          "cached_tokens": 7040,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -109,7 +117,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_3LKY9awUZYzyCFsmqUxGltrf"
+              "tool_call_id": "call_T0WXE0PEIRTZFYB1w3Uyvon1"
             }
           ],
           "finish_reason": "tool_calls"
@@ -118,18 +126,18 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.0272139,
-      "total_input_tokens": 38274,
-      "total_output_tokens": 414,
-      "total_cached_tokens": 28928,
+      "total_cost": 0.031262,
+      "total_input_tokens": 48608,
+      "total_output_tokens": 261,
+      "total_cached_tokens": 36480,
       "llm_calls": [
         {
-          "timestamp": 1773414193.8549962,
+          "timestamp": 1774810593.8680408,
           "model": "gpt-5.3-codex",
-          "cost": 0.0083097,
-          "input_tokens": 5622,
-          "output_tokens": 78,
-          "total_tokens": 5700,
+          "cost": 0.01268295,
+          "input_tokens": 8113,
+          "output_tokens": 79,
+          "total_tokens": 8192,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -139,23 +147,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_s1z2ziyFDODAXH1UTVBNTrSR"
+              "tool_call_id": "call_krfwWcoGlE1TrxtfeeQZcm0z"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_lZSQqF01RdPH2fjlNRskEGMS"
+              "tool_call_id": "call_x0CNqz6a8SFjjbuemDUgc38a"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414202.3492398,
+          "timestamp": 1774810597.0517812,
           "model": "gpt-5.3-codex",
-          "cost": 0.01384985,
-          "input_tokens": 10591,
-          "output_tokens": 299,
-          "total_tokens": 10890,
-          "cached_tokens": 5632,
+          "cost": 0.0126182,
+          "input_tokens": 13308,
+          "output_tokens": 145,
+          "total_tokens": 13453,
+          "cached_tokens": 8064,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -164,19 +172,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_GZBgQukondlGNcEtsulGdTQw"
+              "tool_call_id": "call_OJNd5BT7YgtPfpnlUlbBICn1"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414208.4788136,
+          "timestamp": 1774810598.211563,
           "model": "gpt-5.3-codex",
-          "cost": 0.0024730999999999998,
-          "input_tokens": 10978,
+          "cost": 0.00292635,
+          "input_tokens": 13541,
           "output_tokens": 14,
-          "total_tokens": 10992,
-          "cached_tokens": 10752,
+          "total_tokens": 13555,
+          "cached_tokens": 13312,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -185,19 +193,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_ggxKgRBxjtdx43eGJXALNrfi"
+              "tool_call_id": "call_dCBvMLe8wLvoaDOsK2fsUf1q"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773414244.693577,
+          "timestamp": 1774810639.1619494,
           "model": "gpt-5.3-codex",
-          "cost": 0.00258125,
-          "input_tokens": 11083,
+          "cost": 0.0030345,
+          "input_tokens": 13646,
           "output_tokens": 23,
-          "total_tokens": 11106,
-          "cached_tokens": 10880,
+          "total_tokens": 13669,
+          "cached_tokens": 13440,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -206,7 +214,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_49vr5xSmMekkxbwMdpc7DEcg"
+              "tool_call_id": "call_JYjOoj4qfq146C8fkDf0NgbQ"
             }
           ],
           "finish_reason": "tool_calls"
@@ -214,15 +222,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.0579299,
-      "total_input_tokens": 65066,
-      "total_output_tokens": 915,
+      "total_cost": 0.0677838,
+      "total_input_tokens": 78340,
+      "total_output_tokens": 838,
       "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/ua_types_encoding_binary.c\n+++ b/src/ua_types_encoding_binary.c\n@@ -944,7 +944,17 @@\n \n     if(encoding == UA_EXTENSIONOBJECT_ENCODED_BYTESTRING) {\n         ret = ExtensionObject_decodeBinaryContent(dst, &binTypeId, ctx);\n-        UA_NodeId_deleteMembers(&binTypeId);\n+        if(dst->encoding == UA_EXTENSIONOBJECT_DECODED) {\n+            /* The decoded content took ownership of no members from binTypeId. */\n+            UA_NodeId_deleteMembers(&binTypeId);\n+        } else if(ret != UA_STATUSCODE_GOOD) {\n+            /* On error while decoding unknown encoded content, no ownership is\n+             * transferred and we need to clean up binTypeId here. */\n+            UA_NodeId_deleteMembers(&binTypeId);\n+        } else {\n+            /* Unknown type path: ownership of binTypeId was moved into\n+             * dst->content.encoded.typeId. */\n+        }\n     } else if(encoding == UA_EXTENSIONOBJECT_ENCODED_NOBODY) {\n         dst->encoding = (UA_ExtensionObjectEncoding)encoding;\n         dst->content.encoded.typeId = binTypeId; /* move to dst */\n",
+    "patch": "--- a/src/ua_types_encoding_binary.c\n+++ b/src/ua_types_encoding_binary.c\n@@ -1078,6 +1078,7 @@\n     /* Search for the datatype. Default to ExtensionObject. */\n     if(encoding == UA_EXTENSIONOBJECT_ENCODED_BYTESTRING &&\n        (dst->type = UA_findDataTypeByBinaryInternal(&typeId, ctx)) != NULL) {\n+        UA_NodeId_deleteMembers(&typeId);\n         /* Jump over the length field (TODO: check if length matches) */\n         ctx->pos += 4;\n     } else {\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -242,23 +250,23 @@
         "tool_name": "read_source",
         "args": [
           "open62541/src/ua_types_encoding_binary.c",
-          880
+          1097
         ],
         "kwargs": {},
-        "timestamp": 446482.514026841,
+        "timestamp": 1842882.44540948,
         "success": true,
-        "result_summary": "Ok({'contents': '781 \\n782     /* Encode the encoding byte */\\n783     status ret = ENCODE_DIRECT(&encoding, Byte);\\n784     if(ret != UA_STATUSCODE_GOOD)\\n785         return ret;\\n786 \\n787     /* En..."
+        "result_summary": "Ok({'contents': ' 998         ptr += memSize;\\n 999     }\\n1000     return ret;\\n1001 }\\n1002 \\n1003 enum UA_VARIANT_ENCODINGMASKTYPE {\\n1004     UA_VARIANT_ENCODINGMASKTYPE_TYPEID_MASK = 0x3F,       ..."
       },
       {
         "tool_name": "read_source",
         "args": [
           "open62541/src/ua_types_encoding_binary.c",
-          930
+          941
         ],
         "kwargs": {},
-        "timestamp": 446482.519312053,
+        "timestamp": 1842882.448888639,
         "success": true,
-        "result_summary": "Ok({'contents': ' 831     return NULL;\\n 832 }\\n 833 \\n 834 const UA_DataType *\\n 835 UA_findDataTypeByBinary(const UA_NodeId *typeId) {\\n 836     Ctx ctx;\\n 837     ctx.customTypesArraySize = 0;\\n 83..."
+        "result_summary": "Ok({'contents': ' 842 /* ExtensionObject */\\n 843 ENCODE_BINARY(ExtensionObject) {\\n 844     u8 encoding = (u8)src->encoding;\\n 845 \\n 846     /* No content or already encoded content. Do not return\\n..."
       }
     ],
     "find_references": [],
@@ -267,10 +275,10 @@
         "tool_name": "apply_patch",
         "args": [
           "open62541/src/ua_types_encoding_binary.c",
-          "@@ -944,8 +944,17 @@ DECODE_BINARY(ExtensionObject) {\n \n     if(encoding == UA_EXTENSIONOBJECT_ENCODED_BYTESTRING) {\n         ret = ExtensionObject_decodeBinaryContent(dst, &binTypeId, ctx);\n-        UA_NodeId_deleteMembers(&binTypeId);\n+        if(dst->encoding == UA_EXTENSIONOBJECT_DECODED) {\n+            /* The decoded content took ownership of no members from binTypeId. */\n+            UA_NodeId_deleteMembers(&binTypeId);\n+        } else if(ret != UA_STATUSCODE_GOOD) {\n+            /* On error while decoding unknown encoded content, no ownership is\n+             * transferred and we need to clean up binTypeId here. */\n+            UA_NodeId_deleteMembers(&binTypeId);\n+        } else {\n+            /* Unknown type path: ownership of binTypeId was moved into\n+             * dst->content.encoded.typeId. */\n+        }\n     } else if(encoding == UA_EXTENSIONOBJECT_ENCODED_NOBODY) {\n         dst->encoding = (UA_ExtensionObjectEncoding)encoding;\n         dst->content.encoded.typeId = binTypeId; /* move to dst */"
+          "@@ -1077,6 +1077,7 @@\n \n     /* Search for the datatype. Default to ExtensionObject. */\n     if(encoding == UA_EXTENSIONOBJECT_ENCODED_BYTESTRING &&\n        (dst->type = UA_findDataTypeByBinaryInternal(&typeId, ctx)) != NULL) {\n+        UA_NodeId_deleteMembers(&typeId);\n         /* Jump over the length field (TODO: check if length matches) */\n         ctx->pos += 4;\n     } else {\n"
         ],
         "kwargs": {},
-        "timestamp": 446490.962070088,
+        "timestamp": 1842885.671619067,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -280,7 +288,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 446530.263281168,
+        "timestamp": 1842926.568926043,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

@@ -1,5 +1,5 @@
 {
-  "vuln_id": 74,
+  "vuln_id": 371,
   "crash_result": {
     "output": "UndefinedBehaviorSanitizer:DEADLYSIGNAL\n==1857==ERROR: UndefinedBehaviorSanitizer: SEGV on unknown address 0x77ae49f703f9 (pc 0x0000004c0623 bp 0x7ffca79b1600 sp 0x7ffca79b15e0 T1857)\n==1857==The signal is caused by a WRITE memory access.\n    #0 0x4c0623 in cil_destroy_data /src/selinux/libsepol/src/../cil/src/cil.c:1016:8\n    #1 0x4f81e3 in cil_list_item_destroy /src/selinux/libsepol/src/../cil/src/cil_list.c:93:3\n    #2 0x4f8121 in cil_list_destroy /src/selinux/libsepol/src/../cil/src/cil_list",
     "stack": "#0 0x4c0623 in cil_destroy_data selinux/libsepol/src/../cil/src/cil.c:1016:8\n#1 0x4f81e3 in cil_list_item_destroy selinux/libsepol/src/../cil/src/cil_list.c:93:3\n#2 0x4f8121 in cil_list_destroy selinux/libsepol/src/../cil/src/cil_list.c:72:4\n#3 0x4f80fe in cil_list_destroy selinux/libsepol/src/../cil/src/cil_list.c:69:4\n#4 0x4e6caa in cil_destroy_validatetrans selinux/libsepol/src/../cil/src/cil_build_ast.c:4092:2\n#5 0x4c05d0 in cil_destroy_data selinux/libsepol/src/../cil/src/cil.c:938:3\n#6 0x5",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "cil_gen_validatetrans",
     "file": "selinux/libsepol/cil/src/cil_build_ast.c",
-    "description": "`cil_gen_validatetrans` stores `validtrans->str_expr` using `cil_gen_constraint_expr(..., flavor, ...)` where `flavor` is `CIL_VALIDATETRANS`. This builds list items whose element flavor can be `CIL_VALIDATETRANS` instead of constraint-expression item flavors. During teardown, `cil_destroy_validatetrans` calls `cil_list_destroy(&validtrans->str_expr, CIL_TRUE)`, and `cil_list_item_destroy` then calls `cil_destroy_data(&item->data, item->flavor)`. Because item->flavor is wrong, `cil_destroy_data` dispatches to `cil_destroy_validatetrans` on non-validatetrans data, leading to invalid recursive destruction and a bad write at `cil.c:1016` (`*data = NULL`). Crash manifests in `cil_destroy_data`, but root cause is wrong flavor propagation in `cil_gen_validatetrans`.",
-    "conditions": "Trigger with a malformed `validatetrans` expression that causes `cil_gen_constraint_expr` to produce expression-list items and then fail/cleanup path (or later DB destroy) to free them. PoC `(validatetrans f(eq t3(P)))` reaches this path: parser builds `validtrans->str_expr` with incorrect item flavor derived from parent `validatetrans`, then `cil_db_destroy` -> tree destroy -> `cil_destroy_validatetrans` -> `cil_list_destroy` -> `cil_destroy_data` misinterprets list item data as `struct cil_validatetrans*`, causing SEGV."
+    "description": "`cil_gen_validatetrans` stores an expression list in `validtrans->str_expr` via `cil_gen_constraint_expr(...)` but does not ensure ownership/uniqueness of list elements for later destruction. During teardown, `cil_destroy_validatetrans` calls `cil_list_destroy(&validtrans->str_expr, CIL_TRUE)`, which recursively calls `cil_destroy_data` on list item payloads that are not safely heap-owned for this path (or are reused), leading to invalid memory write when `cil_destroy_data` does `*data = NULL` (crash at cil.c:1016). Root cause is incorrect construction/ownership semantics in validatetrans AST generation, not the generic destroy helper itself.",
+    "conditions": "Trigger with a malformed `validatetrans` constraint expression that still builds enough AST to reach DB destruction, e.g. fuzz input like `(validatetrans f(eq t3(P)))`. Data flows from fuzzer input -> CIL parser -> `cil_gen_validatetrans`/`cil_gen_constraint_expr` producing `validtrans->str_expr` entries -> cleanup path (`cil_db_destroy` -> tree destroy -> `cil_destroy_validatetrans` -> `cil_list_destroy(..., CIL_TRUE)` -> `cil_destroy_data`). Crash requires list items whose `data` pointers are not valid writable owned objects for `cil_destroy_data` nulling/free semantics."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 3,
-      "total_cost": 0.027857200000000002,
-      "total_input_tokens": 23520,
-      "total_output_tokens": 533,
-      "total_cached_tokens": 13184,
+      "total_llm_calls": 2,
+      "total_cost": 0.02268665,
+      "total_input_tokens": 13535,
+      "total_output_tokens": 447,
+      "total_cached_tokens": 4608,
       "llm_calls": [
         {
-          "timestamp": 1773382473.6378007,
+          "timestamp": 1774834742.878178,
           "model": "gpt-5.3-codex",
-          "cost": 0.00749525,
-          "input_tokens": 3363,
+          "cost": 0.005834849999999999,
+          "input_tokens": 3451,
           "output_tokens": 115,
-          "total_tokens": 3478,
-          "cached_tokens": 0,
+          "total_tokens": 3566,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,48 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_3sJmFpxR8XEyAG5HH9eV4LI2"
+              "tool_call_id": "call_YMRQp3dLk180XR5J480SOzDx"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_9xZYgT7wBLWi7k8pghNce87P"
+              "tool_call_id": "call_Hs3Gm0hPtbOtL97SsPHJAOVx"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_FqkKPGVH4QciX0gPADUNwPRW"
+              "tool_call_id": "call_P4WO09SgwCWVZq2zasSdyuSP"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773382479.6937163,
+          "timestamp": 1774834750.3367665,
           "model": "gpt-5.3-codex",
-          "cost": 0.012867400000000001,
-          "input_tokens": 9996,
-          "output_tokens": 44,
-          "total_tokens": 10040,
-          "cached_tokens": 3328,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_cHZwEqannmfrgZ2sexwHx0PH"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773382548.4254827,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00749455,
-          "input_tokens": 10161,
-          "output_tokens": 374,
-          "total_tokens": 10535,
-          "cached_tokens": 9856,
+          "cost": 0.0168518,
+          "input_tokens": 10084,
+          "output_tokens": 332,
+          "total_tokens": 10416,
+          "cached_tokens": 3456,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -101,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_TtXH9ihdshHWiE3UPNRr1hPU"
+              "tool_call_id": "call_rpcyOFPTm22oaeA4u1mcGrmK"
             }
           ],
           "finish_reason": "tool_calls"
@@ -110,106 +89,110 @@
     },
     "patching": {
       "total_llm_calls": 6,
-      "total_cost": 0.05050605,
-      "total_input_tokens": 46531,
-      "total_output_tokens": 628,
-      "total_cached_tokens": 25216,
+      "total_cost": 0.0360647,
+      "total_input_tokens": 55026,
+      "total_output_tokens": 637,
+      "total_cached_tokens": 43904,
       "llm_calls": [
         {
-          "timestamp": 1773382550.7620873,
+          "timestamp": 1774834753.8115804,
           "model": "gpt-5.3-codex",
-          "cost": 0.0060592,
-          "input_tokens": 3736,
-          "output_tokens": 153,
-          "total_tokens": 3889,
+          "cost": 0.0081837,
+          "input_tokens": 4630,
+          "output_tokens": 193,
+          "total_tokens": 4823,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_u8MtphKKeBg4kQtYJJcPTShb"
+              "tool_call_id": "call_NiG46oAGAASH37EyaZAWmyGQ"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_rIdjwc0WHFMbqPN7TAvY42f5"
+              "tool_call_id": "call_uyZ1k7iHH4sTvGWdbYznb369"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_0PiEdYFtwdF5OZAq8msfZOYI"
+              "tool_call_id": "call_3WVgvAbIQxiDvyl0jKnsmeTU"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_wKXMHzO1m7WExdbKs9UOPBXY"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773382561.557341,
+          "timestamp": 1774834843.9301317,
           "model": "gpt-5.3-codex",
-          "cost": 0.00346885,
-          "input_tokens": 4075,
-          "output_tokens": 156,
-          "total_tokens": 4231,
-          "cached_tokens": 3712,
+          "cost": 0.0040103,
+          "input_tokens": 5058,
+          "output_tokens": 187,
+          "total_tokens": 5245,
+          "cached_tokens": 4736,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_jWwGVUXJwNOYX7sL6MGZ5M2f"
+              "tool_call_id": "call_gl9Xjp3alRCppvPmCkgQkzHn"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_DNSeFZwhvFXL2zJpYYBc2Oyz"
+              "tool_call_id": "call_W2e5VMHofULqSBuy3PbHbO1O"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_h8ZQMOfptNldTcQvi23q9WRk"
+              "tool_call_id": "call_OyfuMK2CWkkpFpEdzBe1rSTK"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_hvmeGIcCNLjhoztIKmZavLvz"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773382571.482999,
+          "timestamp": 1774834855.4543047,
           "model": "gpt-5.3-codex",
-          "cost": 0.0029917999999999998,
-          "input_tokens": 4444,
-          "output_tokens": 119,
-          "total_tokens": 4563,
-          "cached_tokens": 4096,
+          "cost": 0.00672,
+          "input_tokens": 7760,
+          "output_tokens": 86,
+          "total_tokens": 7846,
+          "cached_tokens": 5120,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 2,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_mhI22eySiXVlG54aUXApKgmF"
+              "tool_call_id": "call_ZYY76NFrzSbVY9a2ldGFkcWQ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_KuxgnnPzazmwp3tNw6v9osLB"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_WH70ZmJgBhqJcFfFlBkmgQPW"
+              "tool_call_id": "call_sHuQiToFBHXQmHjJlsG46i7I"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773382574.04597,
+          "timestamp": 1774834857.578679,
           "model": "gpt-5.3-codex",
-          "cost": 0.014866250000000001,
-          "input_tokens": 11223,
-          "output_tokens": 163,
-          "total_tokens": 11386,
-          "cached_tokens": 4480,
+          "cost": 0.011380249999999998,
+          "input_tokens": 12343,
+          "output_tokens": 134,
+          "total_tokens": 12477,
+          "cached_tokens": 7680,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -218,19 +201,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_16v8kBUjRr9YSpfHXDxUhUED"
+              "tool_call_id": "call_wqI9briL2DC7chuhfPIJdPSJ"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773382575.868167,
+          "timestamp": 1774834858.873419,
           "model": "gpt-5.3-codex",
-          "cost": 0.0025347,
-          "input_tokens": 11474,
+          "cost": 0.0028311499999999997,
+          "input_tokens": 12565,
           "output_tokens": 14,
-          "total_tokens": 11488,
-          "cached_tokens": 11264,
+          "total_tokens": 12579,
+          "cached_tokens": 12288,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -239,19 +222,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_jjq1LJK4gny48avZAxqHG2SW"
+              "tool_call_id": "call_nOopInUnN9oTJL1KWnfPVRte"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773382618.11166,
+          "timestamp": 1774834922.469227,
           "model": "gpt-5.3-codex",
-          "cost": 0.02058525,
-          "input_tokens": 11579,
+          "cost": 0.0029392999999999997,
+          "input_tokens": 12670,
           "output_tokens": 23,
-          "total_tokens": 11602,
-          "cached_tokens": 0,
+          "total_tokens": 12693,
+          "cached_tokens": 12416,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -260,7 +243,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_VWrjDx92hyNcKk6MA9I5ObP1"
+              "tool_call_id": "call_dP0eXIIMzMUBFpABWNblhdl7"
             }
           ],
           "finish_reason": "tool_calls"
@@ -268,15 +251,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.07836325,
-      "total_input_tokens": 70051,
-      "total_output_tokens": 1161,
-      "total_llm_calls": 9
+      "total_cost": 0.058751349999999994,
+      "total_input_tokens": 68561,
+      "total_output_tokens": 1084,
+      "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/libsepol/cil/src/cil_build_ast.c\n+++ b/libsepol/cil/src/cil_build_ast.c\n@@ -4065,7 +4065,7 @@\n \n \tvalidtrans->class_str = parse_current->next->data;\n \n-\trc = cil_gen_constraint_expr(parse_current->next->next, flavor, &validtrans->str_expr);\n+\trc = cil_gen_constraint_expr(parse_current->next->next, CIL_CONSTRAINT, &validtrans->str_expr);\n \tif (rc != SEPOL_OK) {\n \t\tgoto exit;\n \t}\n",
+    "patch": "--- a/libsepol/cil/src/cil_build_ast.c\n+++ b/libsepol/cil/src/cil_build_ast.c\n@@ -4089,7 +4089,7 @@\n \t\treturn;\n \t}\n \n-\tcil_list_destroy(&validtrans->str_expr, CIL_TRUE);\n+\tcil_list_destroy(&validtrans->str_expr, CIL_FALSE);\n \tcil_list_destroy(&validtrans->datum_expr, CIL_FALSE);\n \n \tfree(validtrans);\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -294,26 +277,13 @@
       {
         "tool_name": "read_definition",
         "args": [
-          "cil_gen_validatetrans",
-          "selinux/libsepol/cil/src/cil_build_ast.c",
-          0,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 414842.101986263,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n4043 int cil_gen_validatetrans(struct cil_db *db, struct cil_tree_node *parse_current, struct cil_tree_node ..."
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
           "cil_gen_constraint_expr",
           "selinux/libsepol/cil/src/cil_build_ast.c",
           0,
           true
         ],
         "kwargs": {},
-        "timestamp": 414845.00731573,
+        "timestamp": 1867129.820310813,
         "success": true,
         "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n2847 int cil_gen_constraint_expr(struct cil_tree_node *current, enum cil_flavor flavor, struct cil_list **ex..."
       },
@@ -326,9 +296,35 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 414847.718058567,
+        "timestamp": 1867129.821790968,
         "success": true,
         "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n4086 void cil_destroy_validatetrans(struct cil_validatetrans *validtrans), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "cil_gen_validatetrans",
+          "selinux/libsepol/cil/src/cil_build_ast.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1867129.823096727,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n4043 int cil_gen_validatetrans(struct cil_db *db, struct cil_tree_node *parse_current, struct cil_tree_node ..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "cil_destroy_data",
+          "selinux/libsepol/cil/src/cil.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1867129.823960215,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n697 void cil_destroy_data(void **data, enum cil_flavor flavor), extra=None))"
       },
       {
         "tool_name": "read_definition",
@@ -339,7 +335,7 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 414852.885843253,
+        "timestamp": 1867136.10404366,
         "success": true,
         "result_summary": "Ok({'contents': '4043 int cil_gen_validatetrans(struct cil_db *db, struct cil_tree_node *parse_current, struct cil_tree_node *ast_node, enum cil_flavor flavor)', 'line_start': 4043, 'line_end': 4044, ..."
       },
@@ -352,7 +348,7 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 414855.504930394,
+        "timestamp": 1867139.130614406,
         "success": true,
         "result_summary": "Ok({'contents': '4086 void cil_destroy_validatetrans(struct cil_validatetrans *validtrans)', 'line_start': 4086, 'line_end': 4087, 'file': 'selinux/libsepol/cil/src/cil_build_ast.c'})"
       },
@@ -365,7 +361,7 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 414857.954316363,
+        "timestamp": 1867142.315345457,
         "success": true,
         "result_summary": "Ok({'contents': '2847 int cil_gen_constraint_expr(struct cil_tree_node *current, enum cil_flavor flavor, struct cil_list **expr)', 'line_start': 2847, 'line_end': 2848, 'file': 'selinux/libsepol/cil/s..."
       }
@@ -374,13 +370,13 @@
       {
         "tool_name": "read_source",
         "args": [
-          "selinux/libsepol/cil/src/cil_build_ast.c",
-          4086
+          "selinux/libsepol/cil/src/cil.c",
+          1016
         ],
         "kwargs": {},
-        "timestamp": 414860.05840703,
+        "timestamp": 1867132.508283507,
         "success": true,
-        "result_summary": "Ok({'contents': '3987 {\\n3988 \\tenum cil_syntax syntax[] = {\\n3989 \\t\\tCIL_SYN_STRING,\\n3990 \\t\\tCIL_SYN_STRING | CIL_SYN_LIST,\\n3991 \\t\\tCIL_SYN_LIST,\\n3992 \\t\\tCIL_SYN_END\\n3993 \\t};\\n3994 \\tsize_t ..."
+        "result_summary": "Ok({'contents': ' 917 \\t\\tbreak;\\n 918 \\tcase CIL_ROLETRANSITION:\\n 919 \\t\\tcil_destroy_roletransition(*data);\\n 920 \\t\\tbreak;\\n 921 \\tcase CIL_TYPE_RULE:\\n 922 \\t\\tcil_destroy_type_rule(*data);\\n 92..."
       },
       {
         "tool_name": "read_source",
@@ -389,7 +385,7 @@
           4043
         ],
         "kwargs": {},
-        "timestamp": 414860.059299702,
+        "timestamp": 1867144.030479424,
         "success": true,
         "result_summary": "Ok({'contents': '3944 \\tcil_levelrange_init(&lvlrange);\\n3945 \\n3946 \\tkey = parse_current->next->data;\\n3947 \\n3948 \\trc = cil_gen_node(db, ast_node, (struct cil_symtab_datum*)lvlrange, (hashtab_key_..."
       },
@@ -400,7 +396,7 @@
           2847
         ],
         "kwargs": {},
-        "timestamp": 414860.060083895,
+        "timestamp": 1867144.031900785,
         "success": true,
         "result_summary": "Ok({'contents': '2748 \\tdefault:\\n2749 \\t\\tcil_log(CIL_ERR, \"Invalid left operand (%s)\\\\n\", (char*)current->next->data);\\n2750 \\t\\tgoto exit;\\n2751 \\t}\\n2752 \\n2753 \\trc = cil_verify_constraint_leaf_e..."
       }
@@ -411,10 +407,10 @@
         "tool_name": "apply_patch",
         "args": [
           "selinux/libsepol/cil/src/cil_build_ast.c",
-          "@@ -4065,7 +4065,7 @@ int cil_gen_validatetrans(struct cil_db *db, struct cil_tree_node *parse_curren\n \n \tvalidtrans->class_str = parse_current->next->data;\n \n-\trc = cil_gen_constraint_expr(parse_current->next->next, flavor, &validtrans->str_expr);\n+\trc = cil_gen_constraint_expr(parse_current->next->next, CIL_CONSTRAINT, &validtrans->str_expr);\n \tif (rc != SEPOL_OK) {\n \t\tgoto exit;\n \t}\n"
+          "@@ -4089,7 +4089,7 @@ void cil_destroy_validatetrans(struct cil_validatetrans *validtrans)\n \t\treturn;\n \t}\n \n-\tcil_list_destroy(&validtrans->str_expr, CIL_TRUE);\n+\tcil_list_destroy(&validtrans->str_expr, CIL_FALSE);\n \tcil_list_destroy(&validtrans->datum_expr, CIL_FALSE);\n \n \tfree(validtrans);"
         ],
         "kwargs": {},
-        "timestamp": 414862.671121349,
+        "timestamp": 1867146.211482927,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -424,7 +420,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 414905.190156098,
+        "timestamp": 1867209.535050362,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

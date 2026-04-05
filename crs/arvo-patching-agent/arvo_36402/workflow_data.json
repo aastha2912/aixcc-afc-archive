@@ -1,5 +1,5 @@
 {
-  "vuln_id": 108,
+  "vuln_id": 414,
   "crash_result": {
     "output": "==523==ERROR: AddressSanitizer: negative-size-param: (size=-2091920926)\nSCARINESS: 10 (negative-size-param)\n    #0 0x8177f61 in __asan_memset /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:26:3\n    #1 0x8523ed7 in OT::VarRegionList* hb_serialize_context_t::allocate_size<OT::VarRegionList>(unsigned int) /work/build/../../src/harfbuzz/src/hb-serialize.hh:461:5\n    #2 0x8523713 in OT::VarRegionList::serialize(hb_serialize_context_t*, OT::VarRegionList const*, hb_bimap_t ",
     "stack": "#0 0x8177f61 in __asan_memset llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:26:3\n#1 0x8523ed7 in OT::VarRegionList* hb_serialize_context_t::allocate_size<OT::VarRegionList>(unsigned int) /work/build/../../src/harfbuzz/src/hb-serialize.hh:461:5\n#2 0x8523713 in OT::VarRegionList::serialize(hb_serialize_context_t*, OT::VarRegionList const*, hb_bimap_t const&) /work/build/../../src/harfbuzz/src/hb-ot-layout-common.hh:2530:9\n#3 0x8522884 in bool OT::OffsetTo<OT::VarRegionList,",
@@ -24,25 +24,58 @@
   "analyzed_vuln": {
     "function": "VarRegionList::serialize",
     "file": "harfbuzz/src/hb-ot-layout-common.hh",
-    "description": "Integer overflow in size computation for VarRegionList serialization. In VarRegionList::serialize(), `get_size()` computes `min_size + 6 * axisCount * regionCount` using 16-bit table fields promoted to unsigned int. A crafted font can make `axisCount * regionCount` overflow 32-bit, producing a too-small allocation via `allocate_size<VarRegionList>(get_size()-min_size)`. Subsequent memcpy uses `VarRegionAxis::static_size * axisCount` bytes per region, causing oversized operations and eventually ASan `negative-size-param` in memset from allocator bookkeeping corruption/invalid size.",
-    "conditions": "Triggered via hb-subset-fuzzer on a font containing malformed variation data (HVAR/VVAR -> VariationStore -> VarRegionList) with large attacker-controlled `axisCount` and mapped `regionCount`. Data flow: `hb_subset` -> `HVARVVAR::_subset` -> `VariationStore::serialize` -> `VarRegionList::serialize`. The PoV needs variation indices/map setup so serialization reaches VarRegionList and region remapping population is non-zero; then overflowed size causes under-allocation followed by out-of-bounds memcpy/write, leading to crash during later allocation/memset."
+    "description": "Integer overflow in size computation during subsetting/serialization of variation regions. VarRegionList::serialize copies axisCount from untrusted source and regionCount from mapping, then computes get_size() as `min_size + VarRegionAxis::static_size * axisCount * regionCount` using 32-bit unsigned arithmetic with no overflow check. If this wraps to a small value (< min_size), `get_size() - min_size` underflows to a huge unsigned value passed to `hb_serialize_context_t::allocate_size`, which then does pointer subtraction/cast and reaches `memset` with a negative size (ASan negative-size-param). Crash happens in allocate_size/memset, but root cause is missing bounds/overflow validation in VarRegionList::serialize size math.",
+    "conditions": "Triggered via hb-subset-fuzzer path that subsets HVAR: `hb_subset` -> HVAR/VVAR `_subset` -> VariationStore::serialize -> VarRegionList::serialize. Malformed font provides HVAR VariationStore/VarRegionList with attacker-controlled `axisCount` and enough mapped regions (`regionCount` from region_map population) so `6 * axisCount * regionCount` overflows 32-bit. This causes wrapped `get_size()` and underflowed allocation length, leading to negative-size memset in serializer buffer allocation."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 4,
-      "total_cost": 0.4013037,
-      "total_input_tokens": 682326,
-      "total_output_tokens": 585,
-      "total_cached_tokens": 508544,
+      "total_cost": 0.40489785,
+      "total_input_tokens": 681111,
+      "total_output_tokens": 648,
+      "total_cached_tokens": 505472,
       "llm_calls": [
         {
-          "timestamp": 1773397813.6391344,
+          "timestamp": 1774844750.7393806,
           "model": "gpt-5.3-codex",
-          "cost": 0.2897608,
-          "input_tokens": 165760,
+          "cost": 0.292446,
+          "input_tokens": 165848,
+          "output_tokens": 158,
+          "total_tokens": 166006,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_JLdmimPbeZhhmJ5EO0kBo5kE"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_GqXU0zhDl5eIXONbDSOBKQkd"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_RwFeC6XVGfzVknl7xRnkhLIE"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_fOmGAcNPjtQy6psoRyviPuV1"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774844798.235036,
+          "model": "gpt-5.3-codex",
+          "cost": 0.031788399999999994,
+          "input_tokens": 166264,
           "output_tokens": 150,
-          "total_tokens": 165910,
-          "cached_tokens": 1536,
+          "total_tokens": 166414,
+          "cached_tokens": 165888,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -50,81 +83,53 @@
           "tool_call_count": 4,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_AeOMg1FTNU0rAe8aI1H37kss"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_9qozgR2mCUFJdvT7GWJvWzIY"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_MAsGD4GOC4jeqOzxGHsUxzzf"
+              "tool_call_id": "call_RtG1Wi42zAe4sHxjUmPZEPJy"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_HGd0qPXKLk2bQGImQ9sU8wfV"
+              "tool_call_id": "call_qdH0skhAaiSTDA656YAbwBQU"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_GhhItDrWmv8y72hGDt4J6b9x"
+              "tool_call_id": "call_TXbZsBEivxnkFz14jPpt2eWD"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773397852.8752325,
+          "timestamp": 1774844803.1450047,
           "model": "gpt-5.3-codex",
-          "cost": 0.03164,
-          "input_tokens": 166128,
-          "output_tokens": 142,
-          "total_tokens": 166270,
-          "cached_tokens": 165760,
+          "cost": 0.0419986,
+          "input_tokens": 173364,
+          "output_tokens": 35,
+          "total_tokens": 173399,
+          "cached_tokens": 166272,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 1,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Sbql0cXVn6pKhqkj5hNZADAb"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_t0iq9Smzvx4nVE2sRRclwAcT"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_gPyF5UEfrIwoE5D97VyN3N3E"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_fQnRh0RDfJU3zORkKPyKeveI"
+              "tool_call_id": "call_1J2VODs9eumFZXQFIE1KRVRi"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773397858.7048886,
+          "timestamp": 1774844808.162779,
           "model": "gpt-5.3-codex",
-          "cost": 0.0449932,
-          "input_tokens": 175208,
-          "output_tokens": 4,
-          "total_tokens": 175212,
-          "cached_tokens": 166144,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": false,
-          "tool_call_count": 0,
-          "tool_calls": null,
-          "finish_reason": "stop"
-        },
-        {
-          "timestamp": 1773397866.360853,
-          "model": "gpt-5.3-codex",
-          "cost": 0.034909699999999995,
-          "input_tokens": 175230,
-          "output_tokens": 289,
-          "total_tokens": 175519,
-          "cached_tokens": 175104,
+          "cost": 0.03866485,
+          "input_tokens": 175635,
+          "output_tokens": 305,
+          "total_tokens": 175940,
+          "cached_tokens": 173312,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -133,7 +138,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_qYPndU8UXIi9PlmofIjLgUqR"
+              "tool_call_id": "call_1TrYtAYovALVVohoIgjQe95y"
             }
           ],
           "finish_reason": "tool_calls"
@@ -141,45 +146,62 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.38791514999999993,
-      "total_input_tokens": 668677,
-      "total_output_tokens": 442,
-      "total_cached_tokens": 500608,
+      "total_llm_calls": 5,
+      "total_cost": 0.4191411,
+      "total_input_tokens": 844058,
+      "total_output_tokens": 449,
+      "total_cached_tokens": 675712,
       "llm_calls": [
         {
-          "timestamp": 1773397872.0385537,
+          "timestamp": 1774844812.754175,
           "model": "gpt-5.3-codex",
-          "cost": 0.29010274999999996,
-          "input_tokens": 165053,
-          "output_tokens": 90,
-          "total_tokens": 165143,
-          "cached_tokens": 0,
+          "cost": 0.2892897,
+          "input_tokens": 167038,
+          "output_tokens": 43,
+          "total_tokens": 167081,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 1,
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_cjI51DfJQLaDxM45zamgSmAk"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_bZqWFus4MqGS8vbBnjZfoxcR"
+              "tool_call_id": "call_6pSf9S9mhnkvLj4B3ZpskIie"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773397882.9706092,
+          "timestamp": 1774844818.1676247,
           "model": "gpt-5.3-codex",
-          "cost": 0.03779684999999999,
-          "input_tokens": 167571,
-          "output_tokens": 315,
-          "total_tokens": 167886,
-          "cached_tokens": 164992,
+          "cost": 0.03040485,
+          "input_tokens": 167315,
+          "output_tokens": 35,
+          "total_tokens": 167350,
+          "cached_tokens": 166912,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_naDX8zQEjL0L2x9vz0GP4Boo"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774844822.7819757,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0381619,
+          "input_tokens": 169586,
+          "output_tokens": 334,
+          "total_tokens": 169920,
+          "cached_tokens": 167168,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -188,19 +210,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_5Emb6PorqEl37zO5KXGxLen7"
+              "tool_call_id": "call_J3fcwrf6mudql7oBdXHx6Z5H"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773397884.6213365,
+          "timestamp": 1774844824.3506978,
           "model": "gpt-5.3-codex",
-          "cost": 0.029852899999999995,
-          "input_tokens": 167974,
+          "cost": 0.03078985,
+          "input_tokens": 170007,
           "output_tokens": 14,
-          "total_tokens": 167988,
-          "cached_tokens": 167808,
+          "total_tokens": 170021,
+          "cached_tokens": 169472,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -209,19 +231,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_bxrSavAojGlALYcLhlNME0CZ"
+              "tool_call_id": "call_mISjoD7ILoL1mOL1TxX6paED"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773397926.26348,
+          "timestamp": 1774844870.8873255,
           "model": "gpt-5.3-codex",
-          "cost": 0.030162649999999996,
-          "input_tokens": 168079,
+          "cost": 0.0304948,
+          "input_tokens": 170112,
           "output_tokens": 23,
-          "total_tokens": 168102,
-          "cached_tokens": 167808,
+          "total_tokens": 170135,
+          "cached_tokens": 169856,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -230,7 +252,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_bz4cFiJUROPvxK8d8peswJAt"
+              "tool_call_id": "call_pmnZM1DaRKwJCfd5sNcT2oMH"
             }
           ],
           "finish_reason": "tool_calls"
@@ -238,15 +260,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.7892188499999999,
-      "total_input_tokens": 1351003,
-      "total_output_tokens": 1027,
-      "total_llm_calls": 8
+      "total_cost": 0.82403895,
+      "total_input_tokens": 1525169,
+      "total_output_tokens": 1097,
+      "total_llm_calls": 9
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/hb-ot-layout-common.hh\n+++ b/src/hb-ot-layout-common.hh\n@@ -2526,8 +2526,14 @@\n     VarRegionList *out = c->allocate_min<VarRegionList> ();\n     if (unlikely (!out)) return_trace (false);\n     axisCount = src->axisCount;\n-    regionCount = region_map.get_population ();\n-    if (unlikely (!c->allocate_size<VarRegionList> (get_size () - min_size))) return_trace (false);\n+    unsigned int mapped_region_count = region_map.get_population ();\n+    if (unlikely (mapped_region_count > 0xFFFFu)) return_trace (false);\n+    regionCount = mapped_region_count;\n+    unsigned int tail_size = VarRegionAxis::static_size * (unsigned int) axisCount * (unsigned int) regionCount;\n+    if (unlikely ((unsigned int) axisCount &&\n+                  tail_size / (unsigned int) axisCount != VarRegionAxis::static_size * (unsigned int) regionCount))\n+      return_trace (false);\n+    if (unlikely (!c->allocate_size<VarRegionList> (tail_size))) return_trace (false);\n     unsigned int region_count = src->get_region_count ();\n     for (unsigned int r = 0; r < regionCount; r++)\n     {\n",
+    "patch": "--- a/src/hb-ot-layout-common.hh\n+++ b/src/hb-ot-layout-common.hh\n@@ -2525,9 +2525,18 @@\n     TRACE_SERIALIZE (this);\n     VarRegionList *out = c->allocate_min<VarRegionList> ();\n     if (unlikely (!out)) return_trace (false);\n-    axisCount = src->axisCount;\n-    regionCount = region_map.get_population ();\n-    if (unlikely (!c->allocate_size<VarRegionList> (get_size () - min_size))) return_trace (false);\n+    unsigned int axis_count = src->axisCount;\n+    unsigned int region_count = region_map.get_population ();\n+    if (unlikely (axis_count > HB_UINT_MAX / VarRegionAxis::static_size))\n+      return_trace (false);\n+    unsigned int axis_size = VarRegionAxis::static_size * axis_count;\n+    if (unlikely (region_count > HB_UINT_MAX / axis_size))\n+      return_trace (false);\n+    unsigned int extra_size = axis_size * region_count;\n+\n+    axisCount = axis_count;\n+    regionCount = region_count;\n+    if (unlikely (!c->allocate_size<VarRegionList> (extra_size))) return_trace (false);\n     unsigned int region_count = src->get_region_count ();\n     for (unsigned int r = 0; r < regionCount; r++)\n     {\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -270,7 +292,7 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 430165.906862348,
+        "timestamp": 1877105.108898887,
         "success": true,
         "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n 527   void serialize (hb_serialize_context_t *c,\n1259   bool serialize (hb_serialize_context_t *c,\n1402   b..."
       }
@@ -280,12 +302,12 @@
         "tool_name": "read_source",
         "args": [
           "harfbuzz/src/hb-ot-layout-common.hh",
-          2500
+          2523
         ],
         "kwargs": {},
-        "timestamp": 430160.709750527,
+        "timestamp": 1877106.743669393,
         "success": true,
-        "result_summary": "Ok({'contents': \"2401     case 2: return u.format2.collect_class (glyphs, klass);\\n2402     default:return false;\\n2403     }\\n2404   }\\n2405 \\n2406   bool intersects (const hb_set_t *glyphs) const\\n2..."
+        "result_summary": "Ok({'contents': \"2424   {\\n2425     switch (u.format) {\\n2426     case 1: return u.format1.intersected_class_glyphs (glyphs, klass, intersect_glyphs);\\n2427     case 2: return u.format2.intersected_cl..."
       }
     ],
     "find_references": [],
@@ -294,10 +316,10 @@
         "tool_name": "apply_patch",
         "args": [
           "harfbuzz/src/hb-ot-layout-common.hh",
-          "@@ -2526,8 +2526,14 @@\n     VarRegionList *out = c->allocate_min<VarRegionList> ();\n     if (unlikely (!out)) return_trace (false);\n     axisCount = src->axisCount;\n-    regionCount = region_map.get_population ();\n-    if (unlikely (!c->allocate_size<VarRegionList> (get_size () - min_size))) return_trace (false);\n+    unsigned int mapped_region_count = region_map.get_population ();\n+    if (unlikely (mapped_region_count > 0xFFFFu)) return_trace (false);\n+    regionCount = mapped_region_count;\n+    unsigned int tail_size = VarRegionAxis::static_size * (unsigned int) axisCount * (unsigned int) regionCount;\n+    if (unlikely ((unsigned int) axisCount &&\n+                  tail_size / (unsigned int) axisCount != VarRegionAxis::static_size * (unsigned int) regionCount))\n+      return_trace (false);\n+    if (unlikely (!c->allocate_size<VarRegionList> (tail_size))) return_trace (false);\n     unsigned int region_count = src->get_region_count ();\n     for (unsigned int r = 0; r < regionCount; r++)\n     {\n"
+          "@@ -2525,10 +2525,20 @@\n     TRACE_SERIALIZE (this);\n     VarRegionList *out = c->allocate_min<VarRegionList> ();\n     if (unlikely (!out)) return_trace (false);\n-    axisCount = src->axisCount;\n-    regionCount = region_map.get_population ();\n-    if (unlikely (!c->allocate_size<VarRegionList> (get_size () - min_size))) return_trace (false);\n+    unsigned int axis_count = src->axisCount;\n+    unsigned int region_count = region_map.get_population ();\n+    if (unlikely (axis_count > HB_UINT_MAX / VarRegionAxis::static_size))\n+      return_trace (false);\n+    unsigned int axis_size = VarRegionAxis::static_size * axis_count;\n+    if (unlikely (region_count > HB_UINT_MAX / axis_size))\n+      return_trace (false);\n+    unsigned int extra_size = axis_size * region_count;\n+\n+    axisCount = axis_count;\n+    regionCount = region_count;\n+    if (unlikely (!c->allocate_size<VarRegionList> (extra_size))) return_trace (false);\n     unsigned int region_count = src->get_region_count ();\n     for (unsigned int r = 0; r < regionCount; r++)\n     {\n"
         ],
         "kwargs": {},
-        "timestamp": 430171.628556881,
+        "timestamp": 1877111.385544932,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -307,7 +329,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 430213.175632699,
+        "timestamp": 1877157.953478714,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

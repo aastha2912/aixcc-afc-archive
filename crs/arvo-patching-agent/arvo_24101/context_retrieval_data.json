@@ -6,29 +6,38 @@
       "args": [
         "ConcatenateBuffers",
         "arrow/cpp/src/arrow/buffer.cc",
-        240,
+        1,
         true
       ],
       "kwargs": {},
-      "timestamp": 556100.81736011,
+      "timestamp": 1852925.917178729,
       "success": true,
       "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n252 Result<std::shared_ptr<Buffer>> ConcatenateBuffers(, extra=None))"
-    },
-    {
-      "tool_name": "read_definition",
-      "args": [
-        "ConcatenateBuffers",
-        "arrow/cpp/src/arrow/buffer.cc",
-        252,
-        true
-      ],
-      "kwargs": {},
-      "timestamp": 556115.692361853,
-      "success": true,
-      "result_summary": "Ok({'contents': '252 Result<std::shared_ptr<Buffer>> ConcatenateBuffers(\\n253     const std::vector<std::shared_ptr<Buffer>>& buffers, MemoryPool* pool) {\\n254   int64_t out_length = 0;\\n255   for (co..."
     }
   ],
   "read_source": [
+    {
+      "tool_name": "read_source",
+      "args": [
+        "arrow/cpp/src/arrow/buffer.cc",
+        240
+      ],
+      "kwargs": {},
+      "timestamp": 1852851.680016761,
+      "success": true,
+      "result_summary": "Ok({'contents': '141 \\n142   ~PoolBuffer() override {\\n143     if (mutable_data_ != nullptr) {\\n144       pool_->Free(mutable_data_, capacity_);\\n145     }\\n146   }\\n147 \\n148   Status Reserve(const i..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "arrow/cpp/src/arrow/buffer.cc",
+        252
+      ],
+      "kwargs": {},
+      "timestamp": 1852991.743580594,
+      "success": true,
+      "result_summary": "Ok({'contents': '153       uint8_t* new_data;\\n154       int64_t new_capacity = BitUtil::RoundUpToMultipleOf64(capacity);\\n155       if (mutable_data_) {\\n156         RETURN_NOT_OK(pool_->Reallocate(c..."
+    },
     {
       "tool_name": "read_source",
       "args": [
@@ -36,67 +45,47 @@
         180
       ],
       "kwargs": {},
-      "timestamp": 555752.762301199,
+      "timestamp": 1853068.166249525,
       "success": true,
       "result_summary": "Ok({'contents': ' 81       internal::CopyBitmap(bitmap.data, bitmap.range.offset, bitmap.range.length, dst,\\n 82                            bitmap_offset);\\n 83     }\\n 84     bitmap_offset += bitmap...."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "arrow/cpp/src/arrow/array/concatenate.cc",
-        240
-      ],
-      "kwargs": {},
-      "timestamp": 555752.763542628,
-      "success": true,
-      "result_summary": "Ok({'contents': '141   }\\n142 \\n143   // Get the range of offsets to transfer from src\\n144   auto src_begin = reinterpret_cast<const Offset*>(src->data());\\n145   auto src_end = reinterpret_cast<cons..."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "arrow/cpp/src/arrow/array/concatenate.cc",
-        100
-      ],
-      "kwargs": {},
-      "timestamp": 555947.096142075,
-      "success": true,
-      "result_summary": "Ok({'contents': '  1 // Licensed to the Apache Software Foundation (ASF) under one\\n  2 // or more contributor license agreements.  See the NOTICE file\\n  3 // distributed with this work for additiona..."
     }
   ],
-  "find_references": [],
+  "find_references": [
+    {
+      "tool_name": "find_references",
+      "args": [
+        "ConcatenateBuffers",
+        "arrow/cpp/src/arrow/buffer.cc",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1852985.690361851,
+      "success": true,
+      "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: arrow/cpp/src/arrow/buffer.h, arrow/cpp/src/arrow/io/compressed_test.cc, arrow/cpp/src/parquet/column_writer.cc, ..."
+    }
+  ],
   "apply_patch": [
     {
       "tool_name": "apply_patch",
       "args": [
-        "arrow/cpp/src/arrow/array/concatenate.cc",
-        "@@ -146,8 +146,13 @@ static Status PutOffsets(const std::shared_ptr<Buffer>& src, Offset first_offset,\n \n   // Compute the range of values which is spanned by this range of offsets\n   values_range->offset = src_begin[0];\n-  values_range->length = *src_end - values_range->offset;\n+  const Offset last_offset = src_end[-1];\n+  if (ARROW_PREDICT_FALSE(last_offset < values_range->offset)) {\n+    return Status::Invalid(\"negative offsets in binary array\");\n+  }\n+  values_range->length = last_offset - values_range->offset;\n   if (first_offset > std::numeric_limits<Offset>::max() - values_range->length) {\n     return Status::Invalid(\"offset overflow while concatenating arrays\");\n   }\n"
+        "arrow/cpp/src/arrow/buffer.cc",
+        "@@ -252,14 +252,21 @@\n Result<std::shared_ptr<Buffer>> ConcatenateBuffers(\n     const std::vector<std::shared_ptr<Buffer>>& buffers, MemoryPool* pool) {\n   int64_t out_length = 0;\n   for (const auto& buffer : buffers) {\n+    if (ARROW_PREDICT_FALSE(buffer->size() < 0)) {\n+      return Status::Invalid(\"Negative buffer size: \", buffer->size());\n+    }\n     out_length += buffer->size();\n   }\n   ARROW_ASSIGN_OR_RAISE(auto out, AllocateBuffer(out_length, pool));\n   auto out_data = out->mutable_data();\n   for (const auto& buffer : buffers) {\n-    std::memcpy(out_data, buffer->data(), buffer->size());\n-    out_data += buffer->size();\n+    const int64_t buffer_size = buffer->size();\n+    if (buffer_size > 0) {\n+      std::memcpy(out_data, buffer->data(), static_cast<size_t>(buffer_size));\n+      out_data += buffer_size;\n+    }\n   }\n   return std::move(out);\n }\n"
       ],
       "kwargs": {},
-      "timestamp": 555756.737369967,
+      "timestamp": 1852929.575384543,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     },
     {
       "tool_name": "apply_patch",
       "args": [
-        "arrow/cpp/src/arrow/array/concatenate.cc",
-        "@@ -147,12 +147,21 @@ static Status PutOffsets(const std::shared_ptr<Buffer>& src, Offset first_offset,\n   // Compute the range of values which is spanned by this range of offsets\n   values_range->offset = src_begin[0];\n   const Offset last_offset = src_end[-1];\n-  if (ARROW_PREDICT_FALSE(last_offset < values_range->offset)) {\n+  if (ARROW_PREDICT_FALSE(values_range->offset < 0 || last_offset < 0 ||\n+                          last_offset < values_range->offset)) {\n     return Status::Invalid(\"negative offsets in binary array\");\n   }\n   values_range->length = last_offset - values_range->offset;\n   if (first_offset > std::numeric_limits<Offset>::max() - values_range->length) {\n     return Status::Invalid(\"offset overflow while concatenating arrays\");\n   }\n+\n+  // Ensure offsets are non-decreasing to avoid creating invalid value slices.\n+  for (auto p = src_begin + 1; p != src_end; ++p) {\n+    if (ARROW_PREDICT_FALSE(p[-1] > p[0])) {\n+      return Status::Invalid(\"non-monotonic offsets in binary array\");\n+    }\n+  }\n \n   // Write offsets into dst, ensuring that the first offset written is\n   // first_offset\n"
+        "arrow/cpp/src/arrow/buffer.cc",
+        "@@ -253,17 +253,21 @@\n     const std::vector<std::shared_ptr<Buffer>>& buffers, MemoryPool* pool) {\n   int64_t out_length = 0;\n   for (const auto& buffer : buffers) {\n-    if (ARROW_PREDICT_FALSE(buffer->size() < 0)) {\n-      return Status::Invalid(\"Negative buffer size: \", buffer->size());\n+    if (ARROW_PREDICT_FALSE(buffer == nullptr)) {\n+      return Status::Invalid(\"Cannot concatenate null buffer\");\n     }\n-    out_length += buffer->size();\n+    if (ARROW_PREDICT_FALSE(buffer->size() < 0)) {\n+      return Status::Invalid(\"Negative buffer size: \", buffer->size());\n+    }\n+    ARROW_ASSIGN_OR_RAISE(out_length, internal::AddWithOverflow(out_length, buffer->size()));\n   }\n   ARROW_ASSIGN_OR_RAISE(auto out, AllocateBuffer(out_length, pool));\n   auto out_data = out->mutable_data();\n   for (const auto& buffer : buffers) {\n     const int64_t buffer_size = buffer->size();\n     if (buffer_size > 0) {\n-      std::memcpy(out_data, buffer->data(), static_cast<size_t>(buffer_size));\n+      std::memcpy(out_data, buffer->data(), static_cast<size_t>(buffer_size));\n       out_data += buffer_size;\n     }\n   }\n"
       ],
       "kwargs": {},
-      "timestamp": 555862.445445284,
+      "timestamp": 1852996.190186955,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
-    },
-    {
-      "tool_name": "apply_patch",
-      "args": [
-        "arrow/cpp/src/arrow/array/concatenate.cc",
-        "@@ -111,6 +111,9 @@ static Status ConcatenateOffsets(const BufferVector& buffers, MemoryPool* pool,\n     out_length += buffer->size() / sizeof(Offset);\n   }\n   ARROW_ASSIGN_OR_RAISE(*out, AllocateBuffer((out_length + 1) * sizeof(Offset), pool));\n+  if (ARROW_PREDICT_FALSE(out_length == 0)) {\n+    return Status::Invalid(\"offset buffer has no elements\");\n+  }\n   auto dst = reinterpret_cast<Offset*>((*out)->mutable_data());\n@@ -172,7 +175,11 @@ static Status PutOffsets(const std::shared_ptr<Buffer>& src, Offset first_offset,\n   // NOTE: Concatenate can be called during IPC reads to append delta dictionaries.\n   // Avoid UB on non-validated input by doing the addition in the unsigned domain.\n   // (the result can later be validated using Array::ValidateFull)\n-  std::transform(src_begin, src_end, dst, [adjustment](Offset offset) {\n+  std::transform(src_begin, src_end, dst, [adjustment, first_offset](Offset offset) {\n+    if (ARROW_PREDICT_FALSE(offset < 0)) {\n+      return first_offset;\n+    }\n     return internal::SafeSignedAdd(offset, adjustment);\n   });\n   return Status::OK();\n"
-      ],
-      "kwargs": {},
-      "timestamp": 555951.894932036,
-      "success": true,
-      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
   ],
   "test_patch": [
@@ -104,7 +93,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 555850.971581436,
+      "timestamp": 1852983.703506421,
       "success": true,
       "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'arrow-ipc-stream-fuzz', 'dedup': '__asan_memcpy--arrow::ConcatenateBuffers(std::__1::vector..."
     },
@@ -112,15 +101,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 555940.761462446,
-      "success": true,
-      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'arrow-ipc-stream-fuzz', 'dedup': '__asan_memcpy--arrow::ConcatenateBuffers(std::__1::vector..."
-    },
-    {
-      "tool_name": "test_patch",
-      "args": [],
-      "kwargs": {},
-      "timestamp": 556016.212277962,
+      "timestamp": 1853062.228192124,
       "success": true,
       "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'arrow-ipc-stream-fuzz', 'dedup': '__asan_memcpy--arrow::ConcatenateBuffers(std::__1::vector..."
     }
@@ -130,15 +111,7 @@
       "tool_name": "undo_last_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 556020.129389952,
-      "success": true,
-      "result_summary": "Ok({'total_edits': 2})"
-    },
-    {
-      "tool_name": "undo_last_patch",
-      "args": [],
-      "kwargs": {},
-      "timestamp": 556022.52932234,
+      "timestamp": 1853072.923138755,
       "success": true,
       "result_summary": "Ok({'total_edits': 1})"
     },
@@ -146,7 +119,7 @@
       "tool_name": "undo_last_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 556102.637241756,
+      "timestamp": 1853073.979568201,
       "success": true,
       "result_summary": "Ok({'total_edits': 0})"
     }

@@ -1,5 +1,5 @@
 {
-  "vuln_id": 212,
+  "vuln_id": 343,
   "crash_result": {
     "output": "==658==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x626000005e80 at pc 0x0000015011d6 bp 0x7ffdff448790 sp 0x7ffdff448788\nREAD of size 8 at 0x626000005e80 thread T0\nSCARINESS: 23 (8-byte-read-heap-buffer-overflow)\n    #0 0x15011d5 in arrow::internal::CountSetBits(unsigned char const*, long, long) /src/arrow/cpp/src/arrow/util/bit_util.cc:95:37\n    #1 0x12584d3 in GetNullCount /src/arrow/cpp/src/arrow/array.cc:113:21\n    #2 0x12584d3 in arrow::Array::null_count() const /src/arrow/cp",
     "stack": "#0 0x15011d5 in arrow::internal::CountSetBits(unsigned char const*, long, long) arrow/cpp/src/arrow/util/bit_util.cc:95:37\n#1 0x12584d3 in GetNullCount arrow/cpp/src/arrow/array.cc:113:21\n#2 0x12584d3 in arrow::Array::null_count() const arrow/cpp/src/arrow/array.cc:125:51\n#3 0x130ef8e in arrow::internal::ValidateArray(arrow::Array const&) arrow/cpp/src/arrow/array/validate.cc:267:13\n#4 0x131378c in Visit arrow/cpp/src/arrow/array/validate.cc:135:34\n#5 0x131378c in arrow::Status arrow::VisitArray",
@@ -22,26 +22,114 @@
     "dedup": "arrow::internal::CountSetBits(unsigned char const*, long, long)--GetNullCount--arrow::Array::null_count() const"
   },
   "analyzed_vuln": {
-    "function": "ArrayData::GetNullCount",
-    "file": "arrow/cpp/src/arrow/array.cc",
-    "description": "`ArrayData::GetNullCount()` computes nulls by calling `CountSetBits(this->buffers[0]->data(), this->offset, this->length)` without validating that the null bitmap buffer is large enough for `offset + length` bits. With malformed IPC input, an array can be constructed whose validity bitmap is undersized relative to its declared length/offset. During `ValidateArray()` the call to `array.null_count()` triggers `GetNullCount()`, which then causes `CountSetBits()` to read past the end of the bitmap (crash at bit_util.cc:95 in the popcount loop).",
-    "conditions": "In `arrow-ipc-stream-fuzz`, attacker-controlled IPC stream data is decoded into arrays/record batches. The PoV creates inconsistent array metadata (notably length/offset vs validity bitmap size), especially through nested list validation paths. `RecordBatch::ValidateFull()` -> `ValidateArray()` calls `array.null_count()`, which reaches `ArrayData::GetNullCount()`. If `null_count` is unknown and `buffers[0]` exists but is too small, `CountSetBits` performs out-of-bounds reads, producing the ASan heap-buffer-overflow."
+    "function": "ValidateArray",
+    "file": "arrow/cpp/src/arrow/array/validate.cc",
+    "description": "`ValidateArray(const Array&)` calls `array.null_count()` before validating that the array buffers are consistent with the declared length/offset and bitmap size. For fuzzed IPC data, `ArrayData::GetNullCount()` computes null count via `CountSetBits(buffers[0]->data(), offset, length)`, which trusts `length`/`offset` and reads bitmap words past the actual allocated validity buffer, causing the ASan heap-buffer-overflow in `CountSetBits`. Root cause is missing/incorrect pre-validation ordering in `ValidateArray` (unsafe use of derived null_count on untrusted ArrayData).",
+    "conditions": "Trigger requires constructing an Array from IPC input where a validity bitmap buffer exists but is smaller than what `offset + length` implies (or otherwise inconsistent with metadata), while null_count is unknown so `null_count()` recomputes via bitmap scan. In the `arrow-ipc-stream-fuzz` path (`FuzzIpcStream` -> `RecordBatch::ValidateFull` -> `ValidateArray`), malformed stream metadata propagates into `ArrayData`; `ValidateArray` calls `null_count()` early, leading `CountSetBits` to over-read the bitmap and crash."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 2,
-      "total_cost": 0.07007175,
-      "total_input_tokens": 61665,
-      "total_output_tokens": 393,
-      "total_cached_tokens": 27520,
+      "total_llm_calls": 3,
+      "total_cost": 0.0659029,
+      "total_input_tokens": 84598,
+      "total_output_tokens": 555,
+      "total_cached_tokens": 57088,
       "llm_calls": [
         {
-          "timestamp": 1773526431.1678708,
+          "timestamp": 1774819559.8872151,
           "model": "gpt-5.3-codex",
-          "cost": 0.049644,
-          "input_tokens": 27504,
+          "cost": 0.0477848,
+          "input_tokens": 27592,
+          "output_tokens": 137,
+          "total_tokens": 27729,
+          "cached_tokens": 1536,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_EKc4tlgKbIn64WZcieSU5zCs"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_r0Rnq2i8rfyix6zItwVD1sNE"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_EE1gY7hu1qZCvrjtvxnRB5bG"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774819719.247044,
+          "model": "gpt-5.3-codex",
+          "cost": 0.007165899999999999,
+          "input_tokens": 27882,
+          "output_tokens": 137,
+          "total_tokens": 28019,
+          "cached_tokens": 27648,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_7cAl5LNxXQBugGvdH013kIeO"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_9TPqAcRWBjnsCqizseMLw9P0"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_XVYV28ONEcQZsJjmHtGvncnm"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774819735.7108119,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0109522,
+          "input_tokens": 29124,
+          "output_tokens": 281,
+          "total_tokens": 29405,
+          "cached_tokens": 27904,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_mX94DXPEVeI9qUfj8SnPNv8H"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 4,
+      "total_cost": 0.0880908,
+      "total_input_tokens": 135760,
+      "total_output_tokens": 583,
+      "total_cached_tokens": 100096,
+      "llm_calls": [
+        {
+          "timestamp": 1774819737.8856854,
+          "model": "gpt-5.3-codex",
+          "cost": 0.05196275,
+          "input_tokens": 28829,
           "output_tokens": 108,
-          "total_tokens": 27612,
+          "total_tokens": 28937,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,82 +139,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_pVeH0ZTggNIGC2nu5LJdlJFR"
+              "tool_call_id": "call_4MqIVaj3lbtyfvoNTnOqPvcs"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_G01n29J32wj6sqQmAcMniZVr"
+              "tool_call_id": "call_BDYZaFoqdd7032pZTyBg7OP0"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_QDIuoT5PpxrsxQAdF188lWuV"
+              "tool_call_id": "call_GBq1y1zeCKOwkHbt64f4oEC9"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773526442.132546,
+          "timestamp": 1774819745.7731526,
           "model": "gpt-5.3-codex",
-          "cost": 0.02042775,
-          "input_tokens": 34161,
-          "output_tokens": 285,
-          "total_tokens": 34446,
-          "cached_tokens": 27520,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "terminate",
-              "tool_call_id": "call_1mjBnPMjMlRtTINECgv2N3Yo"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        }
-      ]
-    },
-    "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.07389865,
-      "total_input_tokens": 117375,
-      "total_output_tokens": 413,
-      "total_cached_tokens": 87168,
-      "llm_calls": [
-        {
-          "timestamp": 1773526444.3221512,
-          "model": "gpt-5.3-codex",
-          "cost": 0.049104999999999996,
-          "input_tokens": 27372,
-          "output_tokens": 86,
-          "total_tokens": 27458,
-          "cached_tokens": 0,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_idROaBmsMXpuhOQTQPzxoj20"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_keBr26it9LKlSKv4fJkTbbwv"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773526704.8286974,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0129171,
-          "input_tokens": 29714,
-          "output_tokens": 290,
-          "total_tokens": 30004,
-          "cached_tokens": 27392,
+          "cost": 0.0224735,
+          "input_tokens": 35258,
+          "output_tokens": 438,
+          "total_tokens": 35696,
+          "cached_tokens": 28800,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,19 +168,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_oqJDSKv5TBaF3qKDCc0iialn"
+              "tool_call_id": "call_cBKqRZz8YvfcL35bUcjhZu64"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773526705.9381466,
+          "timestamp": 1774819746.965947,
           "model": "gpt-5.3-codex",
-          "cost": 0.005884199999999999,
-          "input_tokens": 30092,
+          "cost": 0.006773199999999999,
+          "input_tokens": 35784,
           "output_tokens": 14,
-          "total_tokens": 30106,
-          "cached_tokens": 29824,
+          "total_tokens": 35798,
+          "cached_tokens": 35584,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,19 +189,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_Bqs8jfAAu3KB9KEyFm7GITER"
+              "tool_call_id": "call_XBY6xRzicmCWZCrKYxOvILzA"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773526976.8133368,
+          "timestamp": 1774819903.6290593,
           "model": "gpt-5.3-codex",
-          "cost": 0.0059923500000000005,
-          "input_tokens": 30197,
+          "cost": 0.0068813500000000005,
+          "input_tokens": 35889,
           "output_tokens": 23,
-          "total_tokens": 30220,
-          "cached_tokens": 29952,
+          "total_tokens": 35912,
+          "cached_tokens": 35712,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,7 +210,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_piPV0aGBl1xrLwgcxbtHyZ5T"
+              "tool_call_id": "call_AUavf1pSQqRHouuE3EX6ijAR"
             }
           ],
           "finish_reason": "tool_calls"
@@ -185,15 +218,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.1439704,
-      "total_input_tokens": 179040,
-      "total_output_tokens": 806,
-      "total_llm_calls": 6
+      "total_cost": 0.1539937,
+      "total_input_tokens": 220358,
+      "total_output_tokens": 1138,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/arrow/cpp/src/arrow/array.cc\n+++ b/arrow/cpp/src/arrow/array.cc\n@@ -109,6 +109,16 @@\n   int64_t precomputed = this->null_count.load();\n   if (ARROW_PREDICT_FALSE(precomputed == kUnknownNullCount)) {\n     if (this->buffers[0]) {\n+      const int64_t null_bitmap_bits = bit_util::BytesToBits(this->buffers[0]->size());\n+      if (ARROW_PREDICT_FALSE(this->offset < 0 || this->length < 0 ||\n+                              this->offset > null_bitmap_bits ||\n+                              this->length > null_bitmap_bits - this->offset)) {\n+        // Invalid / inconsistent metadata (e.g. malformed IPC input).  Avoid\n+        // out-of-bounds reads when computing null_count from the bitmap.\n+        precomputed = 0;\n+        this->null_count.store(precomputed);\n+        return precomputed;\n+      }\n       precomputed = this->length -\n                     CountSetBits(this->buffers[0]->data(), this->offset, this->length);\n     } else {\n",
+    "patch": "--- a/arrow/cpp/src/arrow/array/validate.cc\n+++ b/arrow/cpp/src/arrow/array/validate.cc\n@@ -264,6 +264,27 @@\n     return Status::Invalid(\"Array length is negative\");\n   }\n \n+  if (data.offset < 0) {\n+    return Status::Invalid(\"Array offset is negative\");\n+  }\n+\n+  if (data.buffers.size() != layout.bit_widths.size()) {\n+    return Status::Invalid(\"Expected \", layout.bit_widths.size(),\n+                           \" buffers in array \"\n+                           \"of type \",\n+                           type.ToString(), \", got \", data.buffers.size());\n+  }\n+\n+  if (layout.bit_widths[0] == 1 && data.buffers[0]) {\n+    const int64_t required_bits = data.offset + data.length;\n+    if (required_bits < 0) {\n+      return Status::Invalid(\"Array bitmap range is invalid\");\n+    }\n+    if (data.buffers[0]->size() * 8 < required_bits) {\n+      return Status::Invalid(\"Null bitmap buffer is too small for array length and offset\");\n+    }\n+  }\n+\n   if (array.null_count() > array.length()) {\n     return Status::Invalid(\"Null count exceeds array length\");\n   }\n",
     "build_artifacts_count": 1,
     "tested_povs_count": 1,
     "last_validation": {
@@ -207,32 +240,40 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "GetNullCount",
-          "arrow/cpp/src/arrow/array.cc",
-          113,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 558989.220917082,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n108 int64_t ArrayData::GetNullCount() const {, extra=None))"
-      }
-    ],
+    "read_definition": [],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
-          "arrow/cpp/src/arrow/array.cc",
-          90
+          "arrow/cpp/src/arrow/array/validate.cc",
+          267
         ],
         "kwargs": {},
-        "timestamp": 558733.105267127,
+        "timestamp": 1852026.461750883,
         "success": true,
-        "result_summary": "Ok({'contents': '  1 // Licensed to the Apache Software Foundation (ASF) under one\\n  2 // or more contributor license agreements.  See the NOTICE file\\n  3 // distributed with this work for additiona..."
+        "result_summary": "Ok({'contents': '168     return Status::OK();\\n169   }\\n170 \\n171   Status Visit(const DictionaryArray& array) {\\n172     Type::type index_type_id = array.indices()->type()->id();\\n173     if (!is_int..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "arrow/cpp/src/arrow/array/validate.cc",
+          295
+        ],
+        "kwargs": {},
+        "timestamp": 1852026.46245495,
+        "success": true,
+        "result_summary": "Ok({'contents': '196 \\n197  protected:\\n198   template <typename BinaryArrayType>\\n199   Status ValidateBinaryArray(const BinaryArrayType& array) {\\n200     if (array.data()->buffers.size() != 3) {\\n2..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "arrow/cpp/src/arrow/array.cc",
+          113
+        ],
+        "kwargs": {},
+        "timestamp": 1852026.463186427,
+        "success": true,
+        "result_summary": "Ok({'contents': ' 14 // KIND, either express or implied.  See the License for the\\n 15 // specific language governing permissions and limitations\\n 16 // under the License.\\n 17 \\n 18 #include \"arrow/..."
       }
     ],
     "find_references": [],
@@ -240,11 +281,11 @@
       {
         "tool_name": "apply_patch",
         "args": [
-          "arrow/cpp/src/arrow/array.cc",
-          "@@ -109,9 +109,24 @@ int64_t ArrayData::GetNullCount() const {\n   int64_t precomputed = this->null_count.load();\n   if (ARROW_PREDICT_FALSE(precomputed == kUnknownNullCount)) {\n     if (this->buffers[0]) {\n+      const int64_t null_bitmap_bits = bit_util::BytesToBits(this->buffers[0]->size());\n+      if (ARROW_PREDICT_FALSE(this->offset < 0 || this->length < 0 ||\n+                              this->offset > null_bitmap_bits ||\n+                              this->length > null_bitmap_bits - this->offset)) {\n+        // Invalid / inconsistent metadata (e.g. malformed IPC input).  Avoid\n+        // out-of-bounds reads when computing null_count from the bitmap.\n+        precomputed = 0;\n+        this->null_count.store(precomputed);\n+        return precomputed;\n+      }\n       precomputed = this->length -\n                     CountSetBits(this->buffers[0]->data(), this->offset, this->length);\n     } else {\n       precomputed = 0;\n     }\n"
+          "arrow/cpp/src/arrow/array/validate.cc",
+          "@@ -264,10 +264,31 @@ Status ValidateArray(const Array& array) {\n   if (array.length() < 0) {\n     return Status::Invalid(\"Array length is negative\");\n   }\n-\n-  if (array.null_count() > array.length()) {\n+\n+  if (data.offset < 0) {\n+    return Status::Invalid(\"Array offset is negative\");\n+  }\n+\n+  if (data.buffers.size() != layout.bit_widths.size()) {\n+    return Status::Invalid(\"Expected \", layout.bit_widths.size(),\n+                           \" buffers in array \"\n+                           \"of type \",\n+                           type.ToString(), \", got \", data.buffers.size());\n+  }\n+\n+  if (layout.bit_widths[0] == 1 && data.buffers[0]) {\n+    const int64_t required_bits = data.offset + data.length;\n+    if (required_bits < 0) {\n+      return Status::Invalid(\"Array bitmap range is invalid\");\n+    }\n+    if (data.buffers[0]->size() * 8 < required_bits) {\n+      return Status::Invalid(\"Null bitmap buffer is too small for array length and offset\");\n+    }\n+  }\n+\n+  if (array.null_count() > array.length()) {\n     return Status::Invalid(\"Null count exceeds array length\");\n   }\n-\n-  if (data.buffers.size() != layout.bit_widths.size()) {\n+\n+  if (data.buffers.size() != layout.bit_widths.size()) {\n     return Status::Invalid(\"Expected \", layout.bit_widths.size(),\n                            \" buffers in array \"\n                            \"of type \",\n"
         ],
         "kwargs": {},
-        "timestamp": 558993.4484134,
+        "timestamp": 1852034.411571845,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -254,7 +295,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 559262.919626262,
+        "timestamp": 1852190.557228357,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

@@ -1,5 +1,5 @@
 {
-  "vuln_id": 41,
+  "vuln_id": 322,
   "crash_result": {
     "output": "==9522==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x613000000350 at pc 0x0000005d080d bp 0x7ffdc8b97c90 sp 0x7ffdc8b97c88\nREAD of size 2 at 0x613000000350 thread T0\nSCARINESS: 14 (2-byte-read-heap-buffer-overflow)\n    #0 0x5d080c in BEInt<unsigned short, 2>::operator unsigned short() const /src/harfbuzz/src/./hb-machinery.hh:705:59\n    #1 0x5d07b0 in OT::IntType<unsigned short, 2u>::operator unsigned int() const /src/harfbuzz/src/./hb-open-type.hh:67:40\n    #2 0x6f47ff in OT::Offs",
     "stack": "#0 0x5d080c in BEInt<unsigned short, 2>::operator unsigned short() const harfbuzz/src/./hb-machinery.hh:705:59\n#1 0x5d07b0 in OT::IntType<unsigned short, 2u>::operator unsigned int() const harfbuzz/src/./hb-open-type.hh:67:40\n#2 0x6f47ff in OT::OffsetTo<OT::UnsizedOffsetListOf<AAT::Lookup<OT::IntType<unsigned short, 2u> >, OT::IntType<unsigned short, 2u>, false>, OT::IntType<unsigned short, 2u>, false>::operator()(void const*) const harfbuzz/src/./hb-open-type.hh:261:46\n#3 0x6f3dae in AAT::Conte",
@@ -22,27 +22,27 @@
     "dedup": "BEInt<unsigned short, 2>::operator unsigned short() const--OT::IntType<unsigned short, 2u>::operator unsigned int() const--OT::OffsetTo<OT::UnsizedOffsetListOf<AAT::Lookup<OT::IntType<unsigned short, 2u> >, OT::IntType<unsigned short, 2u>, false>, OT::IntType<unsigned short, 2u>, false>::operator()(void const*) const"
   },
   "analyzed_vuln": {
-    "function": "AAT::ContextualSubtable<AAT::ObsoleteTypes>::driver_context_t::driver_context_t",
+    "function": "AAT::ContextualSubtable<Types>::driver_context_t::driver_context_t",
     "file": "harfbuzz/src/hb-aat-layout-morx-table.hh",
-    "description": "Heap OOB read is caused by constructing `subs` via `table + table->substitutionTables` in `ContextualSubtable::driver_context_t` without validating that the 32-bit offset points to at least a readable `UnsizedOffsetListOf<Lookup<GlyphID>, HBUINT32>` header. During apply-time, malformed morx contextual subtable data can place this offset at/near the end of the blob; later `subs[index]` reads the first 2-byte offset field past allocation, crashing in `BEInt<unsigned short,2>::operator unsigned short()`. The crash site is generic integer load, but root cause is unsafe dereference of untrusted offset in contextual morx apply path.",
-    "conditions": "In hb-shape-fuzzer, attacker-controlled font bytes (PoC includes a malformed AAT `mort`/`morx` contextual chain) reach `hb_aat_layout_substitute` -> `mortmorx::apply` -> `ContextualSubtable::apply`. The state machine triggers contextual substitution so `driver_context_t` is created and uses untrusted `substitutionTables` offset. If sanitize is bypassed/not enforced for this path or insufficient for this specific malformed layout, `subs` points out of bounds; then non-0xFFFF mark/current indices cause `subs[...]` access and a 2-byte OOB read at end of input buffer."
+    "description": "The root cause is constructing `subs` from `table + table->substitutionTables` in the contextual morx subtable driver without validating that the offset points to a complete `UnsizedOffsetListOf` header (and at least one offset entry). For non-extended (`ObsoleteTypes`) execution, `ContextualSubtable::sanitize()` returns early and does not sanitize `substitutionTables` at all, so a malformed font can provide an out-of-range/truncated substitutionTables offset. Later, `transition()` indexes `subs[...]`, causing `OffsetTo::operator()` to read a 2-byte offset past the font buffer (ASan crash in BEInt/HBUINT16 read).",
+    "conditions": "Input must reach AAT morx contextual subtable processing in hb-shape-fuzzer with a malformed mort/morx table using ObsoleteTypes path (`Types::extended == false`), where `substitutionTables` offset is near/end-of-buffer or otherwise invalid/truncated. Data flow: fuzz input -> font blob -> hb_aat_layout_substitute() -> mortmorx::apply() -> ChainSubtable::apply()/dispatch() -> ContextualSubtable::apply() -> driver_context_t ctor initializes `subs` from unvalidated offset -> transition uses `subs[markIndex/currentIndex]` -> OOB 2-byte read."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 2,
-      "total_cost": 0.031106949999999998,
-      "total_input_tokens": 16185,
-      "total_output_tokens": 458,
-      "total_cached_tokens": 2304,
+      "total_llm_calls": 4,
+      "total_cost": 0.026600699999999998,
+      "total_input_tokens": 27218,
+      "total_output_tokens": 629,
+      "total_cached_tokens": 18944,
       "llm_calls": [
         {
-          "timestamp": 1773363574.5968199,
+          "timestamp": 1774814535.5464888,
           "model": "gpt-5.3-codex",
-          "cost": 0.008200849999999999,
-          "input_tokens": 4811,
-          "output_tokens": 114,
-          "total_tokens": 4925,
-          "cached_tokens": 1152,
+          "cost": 0.00778505,
+          "input_tokens": 4807,
+          "output_tokens": 128,
+          "total_tokens": 4935,
+          "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,27 +51,77 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_zAypXcoW7JWA7Bg0lidxHebA"
+              "tool_call_id": "call_SViowIQDUoYm54u18OduS2ul"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_B2RJl6It720TVAQf2bgM2Ru1"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_lRN3JDJRzkt7CFSOfrdE87c9"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_Ez3982T6LB5JTDIy2kV4tZSG"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ArnJlTUuBxzyHw1OaxP5EhJ3"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773363580.78455,
+          "timestamp": 1774814599.8455606,
           "model": "gpt-5.3-codex",
-          "cost": 0.0229061,
-          "input_tokens": 11374,
-          "output_tokens": 344,
-          "total_tokens": 11718,
-          "cached_tokens": 1152,
+          "cost": 0.00328195,
+          "input_tokens": 5157,
+          "output_tokens": 137,
+          "total_tokens": 5294,
+          "cached_tokens": 4864,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_twhAUjEzfGlyDrigKNrraErQ"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_oP4Ab63617rVJgHXsvZwvKA2"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_tldAbKf7JRCtJi5Xm0pd8gKF"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774814613.053798,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0056875,
+          "input_tokens": 7562,
+          "output_tokens": 37,
+          "total_tokens": 7599,
+          "cached_tokens": 5120,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_J1z6icVrFxCk4rxESoc11VmC"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774814619.8832333,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0098462,
+          "input_tokens": 9692,
+          "output_tokens": 327,
+          "total_tokens": 10019,
+          "cached_tokens": 7424,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +130,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_ksWVhCsOtbSNYqNfAczFDodE"
+              "tool_call_id": "call_g6ZYXm7vklfDdao7JjsWOkeE"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,19 +138,19 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.02211405,
-      "total_input_tokens": 26219,
-      "total_output_tokens": 635,
-      "total_cached_tokens": 20736,
+      "total_llm_calls": 5,
+      "total_cost": 0.0289394,
+      "total_input_tokens": 47324,
+      "total_output_tokens": 486,
+      "total_cached_tokens": 38528,
       "llm_calls": [
         {
-          "timestamp": 1773363582.722685,
+          "timestamp": 1774814621.6858847,
           "model": "gpt-5.3-codex",
-          "cost": 0.00560245,
-          "input_tokens": 4531,
+          "cost": 0.0084777,
+          "input_tokens": 6174,
           "output_tokens": 93,
-          "total_tokens": 4624,
+          "total_tokens": 6267,
           "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -110,23 +160,44 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_UR9QSSdycjmq6hSjUJZc4ZSP"
+              "tool_call_id": "call_icSp3CEgmTTJBmjWsbF4XmN9"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_u5d42OSdqxpIEVCnagmDtdF8"
+              "tool_call_id": "call_4s67q1Y7aFLzO1stSKI3rZ3R"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773363617.010153,
+          "timestamp": 1774814630.8170025,
           "model": "gpt-5.3-codex",
-          "cost": 0.01191225,
-          "input_tokens": 6799,
-          "output_tokens": 505,
-          "total_tokens": 7304,
-          "cached_tokens": 4480,
+          "cost": 0.00567945,
+          "input_tokens": 8479,
+          "output_tokens": 37,
+          "total_tokens": 8516,
+          "cached_tokens": 6144,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_k5pOlT4HgnRCOAL3H1ZD7huh"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774814635.388328,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0096824,
+          "input_tokens": 10584,
+          "output_tokens": 319,
+          "total_tokens": 10903,
+          "cached_tokens": 8448,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,19 +206,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_rVody9L7KIeRzZlV9UsGRbMr"
+              "tool_call_id": "call_G6gyQ9gZCxC7JR4pogbwJdxC"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773363618.179537,
+          "timestamp": 1774814636.72341,
           "model": "gpt-5.3-codex",
-          "cost": 0.0026487999999999998,
-          "input_tokens": 7392,
+          "cost": 0.00249585,
+          "input_tokens": 10991,
           "output_tokens": 14,
-          "total_tokens": 7406,
-          "cached_tokens": 6656,
+          "total_tokens": 11005,
+          "cached_tokens": 10752,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,19 +227,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_zvBQdZSxBpGp1URMqByEzOWw"
+              "tool_call_id": "call_fOEcK5fzTCt6hgSDAjXrJ6dw"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773363682.3663867,
+          "timestamp": 1774814697.8385696,
           "model": "gpt-5.3-codex",
-          "cost": 0.0019505500000000001,
-          "input_tokens": 7497,
+          "cost": 0.0026039999999999995,
+          "input_tokens": 11096,
           "output_tokens": 23,
-          "total_tokens": 7520,
-          "cached_tokens": 7296,
+          "total_tokens": 11119,
+          "cached_tokens": 10880,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,7 +248,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_u2C8Dv8Yy6VarhN9q0yCNmzp"
+              "tool_call_id": "call_zBAoR6i2ZsnbpiTq0ooasJJj"
             }
           ],
           "finish_reason": "tool_calls"
@@ -185,15 +256,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.053221,
-      "total_input_tokens": 42404,
-      "total_output_tokens": 1093,
-      "total_llm_calls": 6
+      "total_cost": 0.055540099999999995,
+      "total_input_tokens": 74542,
+      "total_output_tokens": 1115,
+      "total_llm_calls": 9
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/hb-aat-layout-morx-table.hh\n+++ b/src/hb-aat-layout-morx-table.hh\n@@ -207,7 +207,8 @@\n \tret (false),\n \tmark_set (false),\n \tmark (0),\n-\tsubs (table+table->substitutionTables) {}\n+\tsubs (table+table->substitutionTables),\n+\tsubs_valid (table->substitutionTables.sanitize (&hb_sanitize_context_t::noop (), table, 0)) {}\n \n     inline bool is_actionable (StateTableDriver<EntryData> *driver,\n \t\t\t       const Entry<EntryData> *entry)\n@@ -231,7 +232,7 @@\n \n       if (entry->data.markIndex != 0xFFFF)\n       {\n-\tconst Lookup<GlyphID> &lookup = subs[entry->data.markIndex];\n+\tconst Lookup<GlyphID> &lookup = subs_valid ? subs[entry->data.markIndex] : Null(Lookup<GlyphID>);\n \thb_glyph_info_t *info = buffer->info;\n \tconst GlyphID *replacement = lookup.get_value (info[mark].codepoint, driver->num_glyphs);\n \tif (replacement)\n@@ -244,7 +245,7 @@\n       if (entry->data.currentIndex != 0xFFFF)\n       {\n         unsigned int idx = MIN (buffer->idx, buffer->len - 1);\n-\tconst Lookup<GlyphID> &lookup = subs[entry->data.currentIndex];\n+\tconst Lookup<GlyphID> &lookup = subs_valid ? subs[entry->data.currentIndex] : Null(Lookup<GlyphID>);\n \thb_glyph_info_t *info = buffer->info;\n \tconst GlyphID *replacement = lookup.get_value (info[idx].codepoint, driver->num_glyphs);\n \tif (replacement)\n@@ -268,6 +269,7 @@\n     private:\n     bool mark_set;\n     unsigned int mark;\n+    bool subs_valid;\n     const UnsizedOffsetListOf<Lookup<GlyphID>, HBUINT32> &subs;\n   };\n \n",
+    "patch": "--- a/src/hb-aat-layout-morx-table.hh\n+++ b/src/hb-aat-layout-morx-table.hh\n@@ -330,7 +330,24 @@\n     unsigned int num_entries = 0;\n     if (unlikely (!machine.sanitize (c, &num_entries))) return_trace (false);\n \n-    if (!Types::extended) return_trace (true);\n+    if (!Types::extended)\n+    {\n+      /* Obsolete (non-extended) contextual subtables still dereference\n+       * substitutionTables in driver_context_t by constructing `subs` from\n+       * table + substitutionTables.  Ensure the offset points to at least a\n+       * complete UnsizedOffsetListOf header and one offset entry to avoid\n+       * out-of-bounds reads when the list is indexed later. */\n+      const UnsizedOffsetListOf<Lookup<GlyphID>, HBUINT, false> &subs =\n+        this + substitutionTables;\n+      if (unlikely (!subs.sanitize_shallow (c)))\n+        return_trace (false);\n+\n+      const HBUINT *offsets = &subs[0];\n+      if (unlikely (!offsets->sanitize (c)))\n+        return_trace (false);\n+\n+      return_trace (true);\n+    }\n \n     unsigned int num_lookups = 0;\n \n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -216,9 +287,20 @@
           223
         ],
         "kwargs": {},
-        "timestamp": 395871.306849181,
+        "timestamp": 1846910.36664956,
         "success": true,
-        "result_summary": "Ok({'contents': \"124 \\t  hb_glyph_info_t *info = buffer->info;\\n125 \\t  hb_glyph_info_t buf[4];\\n126 \\n127 \\t  memcpy (buf, info + start, l * sizeof (buf[0]));\\n128 \\t  memcpy (buf + 2, info + end - r..."
+        "result_summary": "Ok({'contents': \"124 \\n125 \\tif (end - start >= l + r)\\n126 \\t{\\n127 \\t  buffer->merge_clusters (start, MIN (buffer->idx + 1, buffer->len));\\n128 \\t  buffer->merge_clusters (start, end);\\n129 \\n130 \\t..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "harfbuzz/src/hb-aat-layout-morx-table.hh",
+          330
+        ],
+        "kwargs": {},
+        "timestamp": 1846919.391856823,
+        "success": true,
+        "result_summary": "Ok({'contents': '231         return false;\\n232 \\n233       return entry->data.markIndex != 0xFFFF || entry->data.currentIndex != 0xFFFF;\\n234     }\\n235     bool transition (StateTableDriver<Types, E..."
       }
     ],
     "find_references": [
@@ -230,9 +312,9 @@
           false
         ],
         "kwargs": {},
-        "timestamp": 395899.891078618,
+        "timestamp": 1846918.108146025,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='harfbuzz/src/hb-aat-layout-morx-table.hh', refs=[FileReference(line=210, content='\\tsubs (table+table->substitutionTables) {}', enclosing_definition='subs'), FileReferenc..."
+        "result_summary": "Ok([FileReferences(file_name='harfbuzz/src/hb-aat-layout-morx-table.hh', refs=[FileReference(line=223, content='\\tsubs (table+table->substitutionTables) {}', enclosing_definition='subs'), FileReferenc..."
       }
     ],
     "apply_patch": [
@@ -240,10 +322,10 @@
         "tool_name": "apply_patch",
         "args": [
           "harfbuzz/src/hb-aat-layout-morx-table.hh",
-          "@@ -206,9 +206,10 @@ struct ContextualSubtable\n     inline driver_context_t (const ContextualSubtable *table) :\n \tret (false),\n \tmark_set (false),\n \tmark (0),\n-\tsubs (table+table->substitutionTables) {}\n+\tsubs (table+table->substitutionTables),\n+\tsubs_valid (table->substitutionTables.sanitize (&hb_sanitize_context_t::noop (), table, 0)) {}\n@@ -232,7 +233,7 @@ struct ContextualSubtable\n       if (entry->data.markIndex != 0xFFFF)\n       {\n-\tconst Lookup<GlyphID> &lookup = subs[entry->data.markIndex];\n+\tconst Lookup<GlyphID> &lookup = subs_valid ? subs[entry->data.markIndex] : Null(Lookup<GlyphID>);\n \thb_glyph_info_t *info = buffer->info;\n \tconst GlyphID *replacement = lookup.get_value (info[mark].codepoint, driver->num_glyphs);\n \tif (replacement)\n@@ -244,7 +245,7 @@ struct ContextualSubtable\n       if (entry->data.currentIndex != 0xFFFF)\n       {\n         unsigned int idx = MIN (buffer->idx, buffer->len - 1);\n-\tconst Lookup<GlyphID> &lookup = subs[entry->data.currentIndex];\n+\tconst Lookup<GlyphID> &lookup = subs_valid ? subs[entry->data.currentIndex] : Null(Lookup<GlyphID>);\n \thb_glyph_info_t *info = buffer->info;\n \tconst GlyphID *replacement = lookup.get_value (info[idx].codepoint, driver->num_glyphs);\n \tif (replacement)\n@@ -269,6 +270,7 @@ struct ContextualSubtable\n     private:\n     bool mark_set;\n     unsigned int mark;\n+    bool subs_valid;\n     const UnsizedOffsetListOf<Lookup<GlyphID>, HBUINT32> &subs;\n   };\n"
+          "@@ -330,7 +330,22 @@\n     unsigned int num_entries = 0;\n     if (unlikely (!machine.sanitize (c, &num_entries))) return_trace (false);\n \n-    if (!Types::extended) return_trace (true);\n+    if (!Types::extended)\n+    {\n+      /* Obsolete (non-extended) contextual subtables still dereference\n+       * substitutionTables in driver_context_t by constructing `subs` from\n+       * table + substitutionTables.  Ensure the offset points to at least a\n+       * complete UnsizedOffsetListOf header and one offset entry to avoid\n+       * out-of-bounds reads when the list is indexed later. */\n+      const UnsizedOffsetListOf<Lookup<GlyphID>, HBUINT, false> &subs =\n+        this + substitutionTables;\n+      if (unlikely (!subs.sanitize_shallow (c)))\n+        return_trace (false);\n+\n+      const HBUINT *offsets = &subs[0];\n+      if (unlikely (!offsets->sanitize (c)))\n+        return_trace (false);\n+\n+      return_trace (true);\n+    }\n \n     unsigned int num_lookups = 0;\n "
         ],
         "kwargs": {},
-        "timestamp": 395905.612169696,
+        "timestamp": 1846923.984500735,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -253,7 +335,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 395967.311367222,
+        "timestamp": 1846984.886834666,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

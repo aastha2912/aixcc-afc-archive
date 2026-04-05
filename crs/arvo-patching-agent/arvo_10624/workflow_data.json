@@ -1,5 +1,5 @@
 {
-  "vuln_id": 221,
+  "vuln_id": 310,
   "crash_result": {
     "output": "UndefinedBehaviorSanitizer:DEADLYSIGNAL\n==706==ERROR: UndefinedBehaviorSanitizer: SEGV on unknown address 0x7b980ff1db78 (pc 0x7b980ff1db78 bp 0x7ffcb7074f00 sp 0x7ffcb7074ec8 T706)\n==706==The signal is caused by a READ memory access.\n==706==Hint: PC is at a non-executable region. Maybe a wild jump?\n    #0 0x7b980ff1db77  (/lib/x86_64-linux-gnu/libc.so.6+0x3c4b77)\n\nUndefinedBehaviorSanitizer can not provide additional info.\nSUMMARY: UndefinedBehaviorSanitizer: SEGV (/lib/x86_64-linux-gnu/libc.so",
     "stack": "#0 0x7b980ff1db77  (/lib/x86_64-linux-gnu/libc.so.6+0x3c4b77)",
@@ -22,26 +22,26 @@
     "dedup": "4f71f935058abd6ae14106b21e55847725b3168b6ca532001827d5b7dd395db6"
   },
   "analyzed_vuln": {
-    "function": "LLVMFuzzerTestOneInput",
-    "file": "open62541/tests/fuzz/fuzz_binary_message.cc",
-    "description": "The PoV triggers a crash because the fuzz harness unconditionally calls `c.close(&c)` after `UA_Server_processBinaryMessage`. During message processing, `UA_Server_processBinaryMessage` may already call `connection->close(connection)` on parse/protocol errors. In this harness, `close` is `dummyClose`, which frees shared buffers; calling it again from the harness causes a double-close/double-free style memory corruption that leads to a wild control-flow crash (UBSan SEGV in libc).",
-    "conditions": "Input is fed to `LLVMFuzzerTestOneInput`, copied into `msg`, and passed to `UA_Server_processBinaryMessage`. The crafted binary stream must cause `UA_Connection_processChunks` to return an error so `UA_Server_processBinaryMessage` executes its error path (`connection->close(connection)`). After returning, the harness still executes `c.close(&c)` and `UA_Connection_deleteMembers(&c)`, resulting in repeated cleanup on the same connection-owned buffers and crash."
+    "function": "UA_Server_processBinaryMessage",
+    "file": "open62541/src/server/ua_server_binary.c",
+    "description": "`UA_Server_processBinaryMessage` unconditionally calls `connection->close(connection)` on message-processing errors, but does not validate that the `UA_Connection` has a valid function pointer. In the fuzz harness, `createDummyConnection(..., NULL)` leaves callbacks in an unsafe state, and malformed input drives an error path (`UA_Connection_processChunks`/chunk handling failure) that reaches this close call, causing a wild indirect jump/SEGV in libc due to an invalid function pointer target.",
+    "conditions": "Trigger requires a binary packet that causes `UA_Connection_processChunks` to return an error in `UA_Server_processBinaryMessage` (the provided PoC does this via malformed HEL/OPN/MSG chunk stream). Data flow: fuzzer input -> copied into `UA_ByteString` -> `UA_Server_processBinaryMessage` -> error path -> `UA_Connection_sendError` then `connection->close(connection)`. If `connection->close` is unset/corrupted (as in dummy connection setup with NULL backend), the indirect call crashes."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 7,
-      "total_cost": 0.03161095,
-      "total_input_tokens": 35129,
-      "total_output_tokens": 574,
-      "total_cached_tokens": 24064,
+      "total_llm_calls": 10,
+      "total_cost": 0.036532999999999996,
+      "total_input_tokens": 54060,
+      "total_output_tokens": 892,
+      "total_cached_tokens": 44800,
       "llm_calls": [
         {
-          "timestamp": 1773532352.95071,
+          "timestamp": 1774812457.5109723,
           "model": "gpt-5.3-codex",
-          "cost": 0.00505085,
-          "input_tokens": 3267,
+          "cost": 0.00520485,
+          "input_tokens": 3355,
           "output_tokens": 82,
-          "total_tokens": 3349,
+          "total_tokens": 3437,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,47 +51,22 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_HBV0qVavfu393FjXGoOazSg9"
+              "tool_call_id": "call_tuP8dMf9Y6CmG18WqVlhUktU"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_3cAcr4x79AbtqRSdbB2DrpQb"
+              "tool_call_id": "call_H37XJhvHqsZDUlUaEoZJmbkS"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532392.0492961,
+          "timestamp": 1774812503.628168,
           "model": "gpt-5.3-codex",
-          "cost": 0.00219275,
-          "input_tokens": 3421,
-          "output_tokens": 89,
-          "total_tokens": 3510,
-          "cached_tokens": 3200,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_H8BIUt5nPgWxm1Rxx6og599F"
-            },
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_iExZ8366u57JVtvnLFtQxRvP"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773532397.3742213,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0031164,
-          "input_tokens": 4072,
-          "output_tokens": 88,
-          "total_tokens": 4160,
+          "cost": 0.00215915,
+          "input_tokens": 3509,
+          "output_tokens": 90,
+          "total_tokens": 3599,
           "cached_tokens": 3328,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -100,24 +75,49 @@
           "tool_call_count": 2,
           "tool_calls": [
             {
-              "tool_name": "find_references",
-              "tool_call_id": "call_niWVmvoX3bZ8jEWtdjjO1uSS"
+              "tool_name": "read_source",
+              "tool_call_id": "call_qek12mdpRsvUMILvP1aPo6zV"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_AsB818w0Pq7rackCJY4KDOs9"
+              "tool_name": "find_references",
+              "tool_call_id": "call_8pAzxijJCYqg0ehQgnFGmFIM"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532409.2420037,
+          "timestamp": 1774812505.6797023,
           "model": "gpt-5.3-codex",
-          "cost": 0.0018826499999999998,
-          "input_tokens": 4383,
-          "output_tokens": 33,
-          "total_tokens": 4416,
-          "cached_tokens": 3968,
+          "cost": 0.00312305,
+          "input_tokens": 4247,
+          "output_tokens": 81,
+          "total_tokens": 4328,
+          "cached_tokens": 3456,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_FNaI4kDRBJKwxH2xTlXYtRWD"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_5oZfsoKgvIgYWcVjk4k9H0jn"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774812516.0703056,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0019221999999999998,
+          "input_tokens": 4540,
+          "output_tokens": 45,
+          "total_tokens": 4585,
+          "cached_tokens": 4224,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -125,20 +125,41 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_JW9VBEdbI3wbMLfRrCcTnCqf"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_iOkLIus0Blm2muEmTPpclhsi"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532412.9651074,
+          "timestamp": 1774812518.72845,
           "model": "gpt-5.3-codex",
-          "cost": 0.01078525,
-          "input_tokens": 6139,
-          "output_tokens": 3,
-          "total_tokens": 6142,
-          "cached_tokens": 0,
+          "cost": 0.0016922500000000002,
+          "input_tokens": 4639,
+          "output_tokens": 45,
+          "total_tokens": 4684,
+          "cached_tokens": 4480,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_VBCrqWLGYU1cOjgAJiI03ADj"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774812524.010225,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0028959,
+          "input_tokens": 5074,
+          "output_tokens": 91,
+          "total_tokens": 5165,
+          "cached_tokens": 4608,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -147,23 +168,73 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_EnydTwHpCyXXM4FVENYzyhSc"
+              "tool_call_id": "call_eU5ghb0ssH22i6FZRPOH043y"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_TVI313ehEBCDoDNFL4C3MGsz"
+              "tool_call_id": "call_beiajZuXmJ4EaDC6IrcfJEGx"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532430.0885763,
+          "timestamp": 1774812529.990744,
           "model": "gpt-5.3-codex",
-          "cost": 0.0022743,
-          "input_tokens": 6442,
-          "output_tokens": 34,
-          "total_tokens": 6476,
-          "cached_tokens": 6016,
+          "cost": 0.0025238500000000002,
+          "input_tokens": 5263,
+          "output_tokens": 84,
+          "total_tokens": 5347,
+          "cached_tokens": 4992,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_UGNCZgnEk5urImbxceLtTp2F"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_1KxwqARzRLQFvzUQHuYVF7cK"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774812535.316585,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00251615,
+          "input_tokens": 5457,
+          "output_tokens": 88,
+          "total_tokens": 5545,
+          "cached_tokens": 5248,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_rjztdiqbNQRxumD5Uvh4MY0f"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_NT2pE5wIrfPbCXRnUQPUgLbq"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774812538.099073,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00610855,
+          "input_tokens": 8065,
+          "output_tokens": 33,
+          "total_tokens": 8098,
+          "cached_tokens": 5376,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -172,19 +243,19 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_CXkjpUcUoPzNIL0GwaPX8HA2"
+              "tool_call_id": "call_2TkGWA39ijUJ4M3Y5kqZCRCD"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532435.9206436,
+          "timestamp": 1774812542.8784537,
           "model": "gpt-5.3-codex",
-          "cost": 0.00630875,
-          "input_tokens": 7405,
-          "output_tokens": 245,
-          "total_tokens": 7650,
-          "cached_tokens": 6400,
+          "cost": 0.00838705,
+          "input_tokens": 9911,
+          "output_tokens": 253,
+          "total_tokens": 10164,
+          "cached_tokens": 7936,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -193,7 +264,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_rpugXBIJlTn031UCel1j4gsL"
+              "tool_call_id": "call_8wWAey5WvQEtXJvPPBDICN9S"
             }
           ],
           "finish_reason": "tool_calls"
@@ -201,19 +272,19 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 8,
-      "total_cost": 0.0394233,
-      "total_input_tokens": 60862,
-      "total_output_tokens": 493,
-      "total_cached_tokens": 46976,
+      "total_llm_calls": 5,
+      "total_cost": 0.018212600000000002,
+      "total_input_tokens": 30700,
+      "total_output_tokens": 329,
+      "total_cached_tokens": 25472,
       "llm_calls": [
         {
-          "timestamp": 1773532437.788336,
+          "timestamp": 1774812544.6610978,
           "model": "gpt-5.3-codex",
-          "cost": 0.00465395,
-          "input_tokens": 4117,
-          "output_tokens": 77,
-          "total_tokens": 4194,
+          "cost": 0.00531545,
+          "input_tokens": 4391,
+          "output_tokens": 90,
+          "total_tokens": 4481,
           "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -222,24 +293,24 @@
           "tool_call_count": 2,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_BbG18n7kopYkLIomABUEo76W"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_MstrUfjiTnZHAsiWwJxkd5OZ"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_yyag9IBwdvep8zSOxd6agLSY"
+              "tool_call_id": "call_MV0HxuDLLDBsGDw0CZohbA4T"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532443.5333464,
+          "timestamp": 1774812562.2853332,
           "model": "gpt-5.3-codex",
-          "cost": 0.0031668,
-          "input_tokens": 4872,
-          "output_tokens": 78,
-          "total_tokens": 4950,
-          "cached_tokens": 4096,
+          "cost": 0.00263585,
+          "input_tokens": 4791,
+          "output_tokens": 79,
+          "total_tokens": 4870,
+          "cached_tokens": 4352,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -248,90 +319,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_PWqjf4aZ0QFuw7d7G2uIFTh1"
+              "tool_call_id": "call_ACmeuakKYmisiL0Hn0qZY0qZ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_zdWCSu0wKwKBgNxhCWpW9tts"
+              "tool_call_id": "call_qBmGMJjkmW59pZKh9po53HbF"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532444.8097017,
+          "timestamp": 1774812565.3756745,
           "model": "gpt-5.3-codex",
-          "cost": 0.005717949999999999,
-          "input_tokens": 7373,
-          "output_tokens": 34,
-          "total_tokens": 7407,
-          "cached_tokens": 4864,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_EYLTcYrifZn1uPRWKngEXK5O"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773532446.1945875,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0032892999999999998,
-          "input_tokens": 7894,
-          "output_tokens": 69,
-          "total_tokens": 7963,
-          "cached_tokens": 7296,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_u9cdkVKpQrO2Nh55lv63isWg"
-            },
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_qz0hiWrUYP8P702FjAQsevQh"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773532456.8440123,
-          "model": "gpt-5.3-codex",
-          "cost": 0.01233995,
-          "input_tokens": 8277,
-          "output_tokens": 34,
-          "total_tokens": 8311,
-          "cached_tokens": 1664,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_WvgbKffA7QiZmFRUSO4UrXNm"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773532459.4880266,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0055636,
-          "input_tokens": 9240,
-          "output_tokens": 164,
-          "total_tokens": 9404,
-          "cached_tokens": 8192,
+          "cost": 0.006507550000000001,
+          "input_tokens": 6997,
+          "output_tokens": 123,
+          "total_tokens": 7120,
+          "cached_tokens": 4736,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -340,19 +344,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_tMc81mE6dqmIKbQcAwdx4XiX"
+              "tool_call_id": "call_qbd3yPiAtImXaLAaVHvLfl0h"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532460.4835966,
+          "timestamp": 1774812566.4440804,
           "model": "gpt-5.3-codex",
-          "cost": 0.0022918,
-          "input_tokens": 9492,
+          "cost": 0.001722,
+          "input_tokens": 7208,
           "output_tokens": 14,
-          "total_tokens": 9506,
-          "cached_tokens": 9216,
+          "total_tokens": 7222,
+          "cached_tokens": 7040,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -361,19 +365,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_shEuUiSI6sbFCIdg6u20T4xg"
+              "tool_call_id": "call_URz1631uu16B1tjS7z0zID5Q"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773532496.0720534,
+          "timestamp": 1774812615.3685026,
           "model": "gpt-5.3-codex",
-          "cost": 0.0023999499999999997,
-          "input_tokens": 9597,
+          "cost": 0.0020317499999999997,
+          "input_tokens": 7313,
           "output_tokens": 23,
-          "total_tokens": 9620,
-          "cached_tokens": 9344,
+          "total_tokens": 7336,
+          "cached_tokens": 7040,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -382,7 +386,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Pdoz1lqBtR5vcxh99QtDzjJR"
+              "tool_call_id": "call_LTNYuwiP2yGi2e4vBLdzCYUN"
             }
           ],
           "finish_reason": "tool_calls"
@@ -390,15 +394,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.07103425,
-      "total_input_tokens": 95991,
-      "total_output_tokens": 1067,
+      "total_cost": 0.0547456,
+      "total_input_tokens": 84760,
+      "total_output_tokens": 1221,
       "total_llm_calls": 15
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/tests/fuzz/fuzz_binary_message.cc\n+++ b/tests/fuzz/fuzz_binary_message.cc\n@@ -36,7 +36,11 @@\n     UA_Server_run_shutdown(server);\n     UA_Server_delete(server);\n     UA_ServerConfig_delete(config);\n-    c.close(&c);\n+\n+    /* UA_Server_processBinaryMessage may already close the connection on\n+     * protocol/parse errors. Avoid a second close in the harness. */\n+    if(c.state != UA_CONNECTION_CLOSED)\n+        c.close(&c);\n     UA_Connection_deleteMembers(&c);\n     return 0;\n }\n",
+    "patch": "--- a/src/server/ua_server_binary.c\n+++ b/src/server/ua_server_binary.c\n@@ -774,7 +774,8 @@\n         error.error = retval;\n         error.reason = UA_STRING_NULL;\n         UA_Connection_sendError(connection, &error);\n-        connection->close(connection);\n+        if(connection->close)\n+            connection->close(connection);\n         return;\n     }\n \n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -412,41 +416,22 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "UA_Server_processBinaryMessage",
+          "open62541/src/server/ua_server_binary.c",
+          1,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1844834.816589745,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n758 UA_Server_processBinaryMessage(UA_Server *server, UA_Connection *connection,, extra=None))"
+      }
+    ],
     "read_source": [
-      {
-        "tool_name": "read_source",
-        "args": [
-          "open62541/tests/fuzz/fuzz_binary_message.cc",
-          1
-        ],
-        "kwargs": {},
-        "timestamp": 564726.500963915,
-        "success": true,
-        "result_summary": "Ok({'contents': ' 1 /* This Source Code Form is subject to the terms of the Mozilla Public\\n 2  * License, v. 2.0. If a copy of the MPL was not distributed with this\\n 3  * file, You can obtain one at..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "open62541/arch/ua_network_tcp.c",
-          430
-        ],
-        "kwargs": {},
-        "timestamp": 564732.109051812,
-        "success": true,
-        "result_summary": "Ok({'contents': '331         du.length = (size_t)UA_snprintf(discoveryUrlBuffer, 255, \"opc.tcp://%.*s:%d/\",\\n332                                      (int)customHostname->length,\\n333                 ..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "open62541/tests/fuzz/testing_networklayers.h",
-          1
-        ],
-        "kwargs": {},
-        "timestamp": 564732.238767969,
-        "success": true,
-        "result_summary": "Err(CRSError(path 'open62541/tests/fuzz/testing_networklayers.h' does not exist in directory tree. Similar paths: open62541/tests/testing-plugins/testing_networklayers.h, extra=None))"
-      },
       {
         "tool_name": "read_source",
         "args": [
@@ -454,56 +439,32 @@
           1
         ],
         "kwargs": {},
-        "timestamp": 564733.384330245,
+        "timestamp": 1844850.860466247,
         "success": true,
         "result_summary": "Ok({'contents': ' 1 /* This Source Code Form is subject to the terms of the Mozilla Public\\n 2  * License, v. 2.0. If a copy of the MPL was not distributed with this\\n 3  * file, You can obtain one at..."
       },
       {
         "tool_name": "read_source",
         "args": [
-          "open62541/tests/testing-plugins/testing_networklayers.c",
-          1
+          "open62541/src/server/ua_server_binary.c",
+          758
         ],
         "kwargs": {},
-        "timestamp": 564745.418839752,
+        "timestamp": 1844850.861022873,
         "success": true,
-        "result_summary": "Ok({'contents': ' 1 /* This Source Code Form is subject to the terms of the Mozilla Public\\n 2  * License, v. 2.0. If a copy of the MPL was not distributed with this\\n 3  * file, You can obtain one at..."
+        "result_summary": "Ok({'contents': '659             continue;\\n660         retval = endpointCandidate->securityPolicy.asymmetricModule.\\n661             compareCertificateThumbprint(&endpointCandidate->securityPolicy,\\n..."
       }
     ],
     "find_references": [
       {
         "tool_name": "find_references",
         "args": [
-          "UA_Server_processBinaryMessage",
-          "",
-          false
-        ],
-        "kwargs": {},
-        "timestamp": 564730.498168959,
-        "success": true,
-        "result_summary": "Ok([FileReferences(file_name='open62541/arch/ua_network_tcp.c', refs=[FileReference(line=464, content='            UA_Server_processBinaryMessage(server, &e->connection, &buf);', enclosing_definition=..."
-      },
-      {
-        "tool_name": "find_references",
-        "args": [
-          "dummyClose",
-          "",
-          false
-        ],
-        "kwargs": {},
-        "timestamp": 564739.995377552,
-        "success": true,
-        "result_summary": "Ok([FileReferences(file_name='open62541/tests/testing-plugins/testing_networklayers.c', refs=[FileReference(line=69, content='    c.close = dummyClose;', enclosing_definition='createDummyConnection')]..."
-      },
-      {
-        "tool_name": "find_references",
-        "args": [
           "createDummyConnection",
-          "",
+          "open62541",
           false
         ],
         "kwargs": {},
-        "timestamp": 564744.101646932,
+        "timestamp": 1844847.897318402,
         "success": true,
         "result_summary": "Ok([FileReferences(file_name='open62541/tests/fuzz/fuzz_binary_message.cc', refs=[FileReference(line=17, content='    UA_Connection c = createDummyConnection(65535, NULL);', enclosing_definition='LLVM..."
       }
@@ -512,11 +473,11 @@
       {
         "tool_name": "apply_patch",
         "args": [
-          "open62541/tests/fuzz/fuzz_binary_message.cc",
-          "@@ -36,6 +36,10 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {\n     UA_Server_run_shutdown(server);\n     UA_Server_delete(server);\n     UA_ServerConfig_delete(config);\n-    c.close(&c);\n+\n+    /* UA_Server_processBinaryMessage may already close the connection on\n+     * protocol/parse errors. Avoid a second close in the harness. */\n+    if(c.state != UA_CONNECTION_CLOSED)\n+        c.close(&c);\n     UA_Connection_deleteMembers(&c);\n     return 0;\n }"
+          "open62541/src/server/ua_server_binary.c",
+          "@@ -772,7 +772,8 @@\n         /* Send an ERR message and close the connection */\n         UA_TcpErrorMessage error;\n         error.error = retval;\n         error.reason = UA_STRING_NULL;\n         UA_Connection_sendError(connection, &error);\n-        connection->close(connection);\n+        if(connection->close)\n+            connection->close(connection);\n         return;\n     }\n"
         ],
         "kwargs": {},
-        "timestamp": 564748.096454757,
+        "timestamp": 1844853.967977638,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -526,7 +487,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 564783.501196153,
+        "timestamp": 1844902.847256862,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

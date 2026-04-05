@@ -1,5 +1,5 @@
 {
-  "vuln_id": 78,
+  "vuln_id": 378,
   "crash_result": {
     "output": "==67904==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x603000014ca0 at pc 0x000000548707 bp 0x7ffef614e110 sp 0x7ffef614d8d8\nREAD of size 4294967258 at 0x603000014ca0 thread T0\nSCARINESS: 26 (multi-byte-read-heap-buffer-overflow)\n    #0 0x548706 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n    #1 0x78e9af in XXH_memcpy /src/php-src/ext/hash/xxhash/xxhash.h:916:12\n    #2 0x7894fd in XXH_INLINE_XXH64_update /src/php-src/ext/hash/xxha",
     "stack": "#0 0x548706 in __asan_memcpy llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n#1 0x78e9af in XXH_memcpy php-src/ext/hash/xxhash/xxhash.h:916:12\n#2 0x7894fd in XXH_INLINE_XXH64_update php-src/ext/hash/xxhash/xxhash.h:2007:13\n#3 0x7890f0 in PHP_XXH64Update php-src/ext/hash/hash_xxhash.c:111:2\n#4 0x73a2d8 in zif_hash_update php-src/ext/hash/hash.c:698:2\n#5 0xba8d2d in zend_call_function php-src/Zend/zend_execute_API.c\n#6 0xba7090 in _call_user_function_impl php-src/Zend/ze",
@@ -24,54 +24,58 @@
   "analyzed_vuln": {
     "function": "php_hash_unserialize",
     "file": "php-src/ext/hash/hash.c",
-    "description": "HashContext object unserialization accepts attacker-controlled internal hash state values (including xxh64 state fields) without validating invariants. The crafted state makes XXH64_update compute an invalid huge copy length (size_t underflow/overflow), leading to out-of-bounds read in XXH_memcpy during hash_update(). Crash manifests in XXH64_update/PHP_XXH64Update, but root cause is unsafe deserialization in php_hash_unserialize().",
-    "conditions": "In harness php-fuzz-unserializehash, input after '|' is unserialized into a HashContext object. If algorithm is xxh64 and internal state array elements are forged (as in PoC), then fuzzer calls hash_update(HashContext, prefix-data). hash_update passes a small zend string buffer to xxh64 update, which trusts corrupted state and performs memcpy with a massive length, causing heap-buffer-overflow read. Requires successful creation of HashContext via unserialize with malicious state and subsequent hash_update call."
+    "description": "`php_hash_unserialize` accepts attacker-controlled serialized `HashContext` state and restores algorithm internals (including xxh64 `memsize`) without enforcing invariant bounds. Later, `hash_update()` calls `PHP_XXH64Update` -> `XXH64_update`, which uses `state->memsize` in `32 - state->memsize` and memcpy length calculations. With forged `memsize` > 32, this underflows to a huge size_t and triggers an out-of-bounds read in `XXH_memcpy`.",
+    "conditions": "Input to `php-fuzz-unserializehash` must unserialize into a `HashContext` object for algorithm `xxh64` with crafted internal state array values (notably an oversized memsize field). The harness then calls `hash_update($ctx, <prefix data>)`; because context validation is missing during unserialization, the malformed state reaches `XXH64_update`, causing large memcpy/read and ASan heap-buffer-overflow."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.0275961,
-      "total_input_tokens": 14110,
-      "total_output_tokens": 337,
-      "total_cached_tokens": 1152,
+      "total_cost": 0.026613300000000003,
+      "total_input_tokens": 17078,
+      "total_output_tokens": 371,
+      "total_cached_tokens": 5376,
       "llm_calls": [
         {
-          "timestamp": 1773385065.9525743,
+          "timestamp": 1774836828.0063784,
           "model": "gpt-5.3-codex",
-          "cost": 0.0067781,
-          "input_tokens": 4078,
-          "output_tokens": 104,
-          "total_tokens": 4182,
+          "cost": 0.0073660999999999996,
+          "input_tokens": 4166,
+          "output_tokens": 135,
+          "total_tokens": 4301,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_5eahZF0bdSyfqVXIT931s4nD"
+              "tool_call_id": "call_EuXzoFefY1WylOEZYIaNTxpx"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_eVMxe8hTY1X5AUGZbk0Ivzv9"
+              "tool_call_id": "call_Jmdj0t36bYqSY0a2O2U9lJcJ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_a4WEOruUWFTWPRQPTiaQCG5W"
+              "tool_call_id": "call_HgiXldpGMxS8KEcOORnf64A3"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Ds1tcymPvYjlg5M6h4VPAQEB"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773385081.0318182,
+          "timestamp": 1774836834.422716,
           "model": "gpt-5.3-codex",
-          "cost": 0.020818,
-          "input_tokens": 10032,
-          "output_tokens": 233,
-          "total_tokens": 10265,
-          "cached_tokens": 0,
+          "cost": 0.019247200000000003,
+          "input_tokens": 12912,
+          "output_tokens": 236,
+          "total_tokens": 13148,
+          "cached_tokens": 4224,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +84,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_CA8Odn3N7AOfuroP6UNWJU6R"
+              "tool_call_id": "call_v5i8w8sNciWW1J0GuT8eLq8b"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,20 +92,20 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 5,
-      "total_cost": 0.026103349999999997,
-      "total_input_tokens": 40273,
-      "total_output_tokens": 416,
-      "total_cached_tokens": 31872,
+      "total_llm_calls": 6,
+      "total_cost": 0.0367395,
+      "total_input_tokens": 53258,
+      "total_output_tokens": 647,
+      "total_cached_tokens": 41600,
       "llm_calls": [
         {
-          "timestamp": 1773385083.727041,
+          "timestamp": 1774836836.8417807,
           "model": "gpt-5.3-codex",
-          "cost": 0.0056882,
-          "input_tokens": 4076,
-          "output_tokens": 84,
-          "total_tokens": 4160,
-          "cached_tokens": 1664,
+          "cost": 0.010543750000000001,
+          "input_tokens": 5321,
+          "output_tokens": 88,
+          "total_tokens": 5409,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -110,23 +114,23 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_d98vUQBYqxmbD05nZJulO2Bg"
+              "tool_call_id": "call_cM9rJyAAs0IgferzaGtljXvb"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_MMaBhKppZc5w7J8H5xcTJqIs"
+              "tool_name": "find_references",
+              "tool_call_id": "call_u5KGlSSntbjlx7Y9oqzFDBpp"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773385308.7681437,
+          "timestamp": 1774837028.2582839,
           "model": "gpt-5.3-codex",
-          "cost": 0.00641865,
-          "input_tokens": 7007,
+          "cost": 0.0018914000000000001,
+          "input_tokens": 5572,
           "output_tokens": 29,
-          "total_tokens": 7036,
-          "cached_tokens": 3968,
+          "total_tokens": 5601,
+          "cached_tokens": 5248,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,19 +139,44 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_5RF2bKA2ZvpIV7TK6h9ivXIx"
+              "tool_call_id": "call_K9UmMRMyAFREPbHm76mDaWD8"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773385315.2936368,
+          "timestamp": 1774837029.9656837,
           "model": "gpt-5.3-codex",
-          "cost": 0.00939085,
-          "input_tokens": 9459,
-          "output_tokens": 266,
-          "total_tokens": 9725,
-          "cached_tokens": 6912,
+          "cost": 0.0064512,
+          "input_tokens": 8024,
+          "output_tokens": 77,
+          "total_tokens": 8101,
+          "cached_tokens": 5504,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_Bjl6VLzP2rz42UYm0LOObF7q"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_weBsnrrQhPae90OGdSdz946h"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774837084.9235375,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0127078,
+          "input_tokens": 11076,
+          "output_tokens": 416,
+          "total_tokens": 11492,
+          "cached_tokens": 7936,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,19 +185,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_UW1HfiyGxvKxS4pd0Z1l6B9R"
+              "tool_call_id": "call_P6LqldH1Vq2WRMm5FX8kZGe2"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773385317.3691874,
+          "timestamp": 1774837086.256284,
           "model": "gpt-5.3-codex",
-          "cost": 0.00224875,
-          "input_tokens": 9813,
+          "cost": 0.0025185999999999997,
+          "input_tokens": 11580,
           "output_tokens": 14,
-          "total_tokens": 9827,
-          "cached_tokens": 9600,
+          "total_tokens": 11594,
+          "cached_tokens": 11392,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,19 +206,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_2qCHij27YOFmqINQd77Uvh6j"
+              "tool_call_id": "call_3US6LuKB3RZ5cvSa0Y8MDC1G"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773385452.2970967,
+          "timestamp": 1774837235.804282,
           "model": "gpt-5.3-codex",
-          "cost": 0.0023569000000000003,
-          "input_tokens": 9918,
+          "cost": 0.0026267499999999997,
+          "input_tokens": 11685,
           "output_tokens": 23,
-          "total_tokens": 9941,
-          "cached_tokens": 9728,
+          "total_tokens": 11708,
+          "cached_tokens": 11520,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -198,7 +227,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_g84sEjWu2SSyvyPSSz7uUJsB"
+              "tool_call_id": "call_NMsNvGMaALHRS8BggOR3ekSC"
             }
           ],
           "finish_reason": "tool_calls"
@@ -206,15 +235,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.053699449999999996,
-      "total_input_tokens": 54383,
-      "total_output_tokens": 753,
-      "total_llm_calls": 7
+      "total_cost": 0.0633528,
+      "total_input_tokens": 70336,
+      "total_output_tokens": 1018,
+      "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/ext/hash/hash.c\n+++ b/ext/hash/hash.c\n@@ -343,7 +343,16 @@\n {\n \tif (hash->ops->serialize_spec\n \t\t&& magic == PHP_HASH_SERIALIZE_MAGIC_SPEC) {\n-\t\treturn php_hash_unserialize_spec(hash, zv, hash->ops->serialize_spec);\n+\t\tint rc = php_hash_unserialize_spec(hash, zv, hash->ops->serialize_spec);\n+\t\tif (rc != SUCCESS) {\n+\t\t\treturn rc;\n+\t\t}\n+\n+\t\t/* Reinitialize algorithm-specific invariants after state import.\n+\t\t * Some implementations (e.g. xxHash) can crash on malformed internal\n+\t\t * state even if the serialized layout matches the spec. */\n+\t\thash->ops->hash_init(hash->context, NULL);\n+\t\treturn SUCCESS;\n \t} else {\n \t\treturn FAILURE;\n \t}\n",
+    "patch": "--- a/ext/hash/hash.c\n+++ b/ext/hash/hash.c\n@@ -341,9 +341,31 @@\n \n PHP_HASH_API int php_hash_unserialize(php_hashcontext_object *hash, zend_long magic, const zval *zv) /* {{{ */\n {\n+\tint ret;\n+\n \tif (hash->ops->serialize_spec\n \t\t&& magic == PHP_HASH_SERIALIZE_MAGIC_SPEC) {\n-\t\treturn php_hash_unserialize_spec(hash, zv, hash->ops->serialize_spec);\n+\t\tret = php_hash_unserialize_spec(hash, zv, hash->ops->serialize_spec);\n+\t\tif (ret != SUCCESS) {\n+\t\t\treturn ret;\n+\t\t}\n+\n+\t\t/* Restore-state invariants for xxHash contexts.\n+\t\t * XXH*_update() assumes memsize is bounded by the internal buffer size.\n+\t\t * Reject forged serialized states that violate these invariants. */\n+\t\tif (hash->ops == &php_hash_xxh32_ops) {\n+\t\t\tPHP_XXH32_CTX *ctx = (PHP_XXH32_CTX *) hash->context;\n+\t\t\tif (ctx->s.memsize > sizeof(ctx->s.mem32)) {\n+\t\t\t\treturn FAILURE;\n+\t\t\t}\n+\t\t} else if (hash->ops == &php_hash_xxh64_ops) {\n+\t\t\tPHP_XXH64_CTX *ctx = (PHP_XXH64_CTX *) hash->context;\n+\t\t\tif (ctx->s.memsize > sizeof(ctx->s.mem64)) {\n+\t\t\t\treturn FAILURE;\n+\t\t\t}\n+\t\t}\n+\n+\t\treturn SUCCESS;\n \t} else {\n \t\treturn FAILURE;\n \t}\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -234,11 +263,11 @@
         "args": [
           "php_hash_unserialize",
           "php-src/ext/hash/hash.c",
-          0,
+          1,
           true
         ],
         "kwargs": {},
-        "timestamp": 417595.36852316,
+        "timestamp": 1869307.141702969,
         "success": true,
         "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n342 PHP_HASH_API int php_hash_unserialize(php_hashcontext_object *hash, zend_long magic, const zval *zv) /* ..."
       }
@@ -247,36 +276,61 @@
       {
         "tool_name": "read_source",
         "args": [
-          "php-src/ext/hash/hash_xxhash.c",
-          1
-        ],
-        "kwargs": {},
-        "timestamp": 417372.612454177,
-        "success": true,
-        "result_summary": "Ok({'contents': '  1 /*\\n  2    +----------------------------------------------------------------------+\\n  3    | Copyright (c) The PHP Group                                          |\\n  4    +-----..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
           "php-src/ext/hash/hash.c",
           342
         ],
         "kwargs": {},
-        "timestamp": 417597.343986422,
+        "timestamp": 1869316.835205715,
         "success": true,
         "result_summary": "Ok({'contents': '243 \\t\\t}\\n244 \\t\\tif (isupper((unsigned char) spec_ch)) {\\n245 \\t\\t\\tpos += count * sz;\\n246 \\t\\t} else if (sz == 1 && count > 1) {\\n247 \\t\\t\\tZVAL_STRINGL(&tmp, (char *) buf + pos, ..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "php-src/ext/hash/hash_xxhash.c",
+          1
+        ],
+        "kwargs": {},
+        "timestamp": 1869318.542247866,
+        "success": true,
+        "result_summary": "Ok({'contents': '  1 /*\\n  2    +----------------------------------------------------------------------+\\n  3    | Copyright (c) The PHP Group                                          |\\n  4    +-----..."
       }
     ],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "xxh64",
+          "php-src/ext/hash/hash.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1869315.416965067,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='/src/php-src/ext/hash/hash.c', refs=[FileReference(line=97, content='\\t{\"XXH64\", \"xxh64\", 39},', enclosing_definition='N/A'), FileReference(line=1606, content='\\tphp_hash..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "serialize_spec",
+          "php-src/ext/hash",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1869368.305403323,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='php-src/ext/hash/hash.c', refs=[FileReference(line=333, content='\\tif (hash->ops->serialize_spec) {', enclosing_definition='php_hash_serialize'), FileReference(line=335, ..."
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "php-src/ext/hash/hash.c",
-          "@@ -342,10 +342,20 @@\n PHP_HASH_API int php_hash_unserialize(php_hashcontext_object *hash, zend_long magic, const zval *zv) /* {{{ */\n {\n \tif (hash->ops->serialize_spec\n \t\t&& magic == PHP_HASH_SERIALIZE_MAGIC_SPEC) {\n-\t\treturn php_hash_unserialize_spec(hash, zv, hash->ops->serialize_spec);\n+\t\tint rc = php_hash_unserialize_spec(hash, zv, hash->ops->serialize_spec);\n+\t\tif (rc != SUCCESS) {\n+\t\t\treturn rc;\n+\t\t}\n+\n+\t\t/* Reinitialize algorithm-specific invariants after state import.\n+\t\t * Some implementations (e.g. xxHash) can crash on malformed internal\n+\t\t * state even if the serialized layout matches the spec. */\n+\t\thash->ops->hash_init(hash->context, NULL);\n+\t\treturn SUCCESS;\n \t} else {\n \t\treturn FAILURE;\n \t}\n }\n /* }}} */"
+          "@@ -342,10 +342,35 @@ PHP_HASH_API int php_hash_unserialize(php_hashcontext_object *hash, zend_long m\n {\n+\tint ret;\n+\n \tif (hash->ops->serialize_spec\n \t\t&& magic == PHP_HASH_SERIALIZE_MAGIC_SPEC) {\n-\t\treturn php_hash_unserialize_spec(hash, zv, hash->ops->serialize_spec);\n+\t\tret = php_hash_unserialize_spec(hash, zv, hash->ops->serialize_spec);\n+\t\tif (ret != SUCCESS) {\n+\t\t\treturn ret;\n+\t\t}\n+\n+\t\t/* Restore-state invariants for xxHash contexts.\n+\t\t * XXH*_update() assumes memsize is bounded by the internal buffer size.\n+\t\t * Reject forged serialized states that violate these invariants. */\n+\t\tif (hash->ops == &php_hash_xxh32_ops) {\n+\t\t\tPHP_XXH32_CTX *ctx = (PHP_XXH32_CTX *) hash->context;\n+\t\t\tif (ctx->s.memsize > sizeof(ctx->s.mem32)) {\n+\t\t\t\treturn FAILURE;\n+\t\t\t}\n+\t\t} else if (hash->ops == &php_hash_xxh64_ops) {\n+\t\t\tPHP_XXH64_CTX *ctx = (PHP_XXH64_CTX *) hash->context;\n+\t\t\tif (ctx->s.memsize > sizeof(ctx->s.mem64)) {\n+\t\t\t\treturn FAILURE;\n+\t\t\t}\n+\t\t}\n+\n+\t\treturn SUCCESS;\n \t} else {\n \t\treturn FAILURE;\n \t}\n }\n /* }}} */\n"
         ],
         "kwargs": {},
-        "timestamp": 417603.934350367,
+        "timestamp": 1869373.533954279,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -286,7 +340,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 417738.535693102,
+        "timestamp": 1869523.201926779,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

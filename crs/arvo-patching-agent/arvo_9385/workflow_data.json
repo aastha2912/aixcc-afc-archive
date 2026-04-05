@@ -1,5 +1,5 @@
 {
-  "vuln_id": 216,
+  "vuln_id": 306,
   "crash_result": {
     "output": "==10664==ERROR: AddressSanitizer: heap-use-after-free on address 0x603000000378 at pc 0x000000929597 bp 0x7ffdcf3ea460 sp 0x7ffdcf3ea458\nWRITE of size 4 at 0x603000000378 thread T0\nSCARINESS: 46 (4-byte-write-heap-use-after-free)\n    #0 0x929596 in fetch_add /usr/local/bin/../include/c++/v1/atomic:1020:17\n    #1 0x929596 in SkRefCntBase::ref() const /src/skia/out/Fuzz_mem_constraints/../../include/core/SkRefCnt.h:76\n    #2 0xb87f94 in SkPathEffect* SkSafeRef<SkPathEffect>(SkPathEffect*) /src/ski",
     "stack": "#0 0x929596 in fetch_add /usr/local/bin/../include/c++/v1/atomic:1020:17\n#1 0x929596 in SkRefCntBase::ref() const skia/out/Fuzz_mem_constraints/../../include/core/SkRefCnt.h:76\n#2 0xb87f94 in SkPathEffect* SkSafeRef<SkPathEffect>(SkPathEffect*) skia/out/Fuzz_mem_constraints/../../include/core/SkRefCnt.h:153:14\n#3 0xb7d430 in sk_sp<SkPathEffect>::sk_sp(sk_sp<SkPathEffect> const&) skia/out/Fuzz_mem_constraints/../../include/core/SkRefCnt.h:224:40\n#4 0xb7d02c in SkPaint::SkPaint(SkPaint const&) ski",
@@ -22,100 +22,92 @@
     "dedup": "fetch_add--SkRefCntBase::ref() const--SkPathEffect* SkSafeRef<SkPathEffect>(SkPathEffect*)"
   },
   "analyzed_vuln": {
-    "function": "SkCanvas::onDrawText",
-    "file": "skia/src/core/SkCanvas.cpp",
-    "description": "Use-after-free caused by reusing a single scratch SkGlyphRunBuilder across LOOPER iterations in SkCanvas::onDrawText. The builder stores a moved/copied SkPaint inside fScratchGlyphRun; on each drawText call, SkGlyphRunBuilder::initialize() explicitly destroys the previous fScratchGlyphRun (SkGlyphRun.cpp:181), which drops refs (including PathEffect). In onDrawText, the first iteration builds glyphRun from looper.paint(), then before that glyphRun is consumed safely for all use paths, a subsequent iteration reinitializes/destroys the same scratch run, freeing the previous paint\u2019s PathEffect. Later draw code (SkDraw::drawPosText_asPaths) copies the stale paint and ref()s the freed PathEffect, triggering UAF.",
-    "conditions": "Triggered when drawText executes through LOOPER with multiple iterations (e.g., looper/layer effects active) and text rendering takes the drawPosText_asPaths path. Dataflow: fuzz harness fuzz_canvas case 45 configures SkPaint (including PathEffect via fuzz_paint -> make_fuzz_patheffect), then canvas->drawText(). onDrawText uses fScratchGlyphRunBuilder->drawText()/useGlyphRun() per iteration; builder destruction/reuse invalidates prior run paint state, and later device drawing references freed PathEffect."
+    "function": "drawText",
+    "file": "skia/src/core/SkGlyphRun.cpp",
+    "description": "SkGlyphRunBuilder::drawText() stores a GlyphRun whose internal run paint is initialized from a temporary paint object created by the looper path in SkCanvas::onDrawText. That temporary paint is destroyed before the GlyphRun is consumed in the same loop, leaving fRunPaint with a dangling SkPathEffect pointer. Later, SkDraw::drawPosText_asPaths copies that stale paint (SkPaint copy ctor refs pathEffect), causing a heap-use-after-free in SkRefCntBase::ref(). Root cause is unsafe lifetime propagation of paint-owned refcounted state into SkGlyphRunBuilder scratch run.",
+    "conditions": "Triggered via api_raster_n32_canvas when fuzzed drawText path is selected with paint settings that include a PathEffect (e.g., from fuzz_paint/make_fuzz_patheffect) and text rendering goes through glyph-run temporary shunt to drawPosText_asPaths. Data flow: FuzzCanvas case 45 -> SkCanvas::drawText/onDrawText (LOOPER_BEGIN creates transient looper.paint) -> SkGlyphRunBuilder::drawText stores run paint -> transient paint destroyed -> device->drawGlyphRun uses stored run paint -> SkDraw::drawPosText_asPaths copies paint and refs freed PathEffect, producing UAF."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.0436835,
-      "total_input_tokens": 32130,
-      "total_output_tokens": 616,
+      "total_cost": 0.039466,
+      "total_input_tokens": 30280,
+      "total_output_tokens": 546,
       "total_cached_tokens": 13440,
       "llm_calls": [
         {
-          "timestamp": 1773530967.7900183,
+          "timestamp": 1774811912.275776,
           "model": "gpt-5.3-codex",
-          "cost": 0.013459249999999999,
-          "input_tokens": 6499,
-          "output_tokens": 149,
-          "total_tokens": 6648,
+          "cost": 0.013263249999999999,
+          "input_tokens": 6587,
+          "output_tokens": 124,
+          "total_tokens": 6711,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 5,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_fumRr1aLjqBr45spJYqS7jVH"
+              "tool_call_id": "call_bC2Uu3lz4tTLn4YBcldhetu1"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_leDnsD9AsrI7nHRei2SyuJ2T"
+              "tool_call_id": "call_oQpd8RG9v1x5GvbuDX3LAw58"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_nHXjDHGaiU2GQNyt4e1KHFew"
+              "tool_call_id": "call_TdQBKjHo6qB0af9iPpZaudrr"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_on5lSdLsX8YEGATzF7sLYCkb"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_QyqXTYqM1DUE9AbkdHum0FCL"
+              "tool_call_id": "call_Qdl2rRTURkTEaeYxKPaAvYqq"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773530997.783594,
+          "timestamp": 1774811916.2887523,
           "model": "gpt-5.3-codex",
-          "cost": 0.003970400000000001,
-          "input_tokens": 6872,
-          "output_tokens": 159,
-          "total_tokens": 7031,
+          "cost": 0.0036256500000000002,
+          "input_tokens": 6891,
+          "output_tokens": 132,
+          "total_tokens": 7023,
           "cached_tokens": 6528,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 5,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_SmwmRN8eQEefJTQY3nsBR1Me"
+              "tool_call_id": "call_jqd1JpZq2o2nzzGITBNbaQX4"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_CTYj45AHoSGCsrLvAAga0lKw"
+              "tool_call_id": "call_65VHctjwACvHB2p7n05W6WML"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_RXsW4gTPDcDkOQk8xbZwyfDq"
+              "tool_call_id": "call_8HLtM7zdJprKuivwTUjAaU1S"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_q3O0J1Rq9VcMhFe8EkNrF6zq"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_C6vXqL71bqPceYzQF7GCNEW3"
+              "tool_call_id": "call_AtXS34Pi7seTO6cFvrU7gjIB"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773531005.3121707,
+          "timestamp": 1774811921.6421137,
           "model": "gpt-5.3-codex",
-          "cost": 0.02625385,
-          "input_tokens": 18759,
-          "output_tokens": 308,
-          "total_tokens": 19067,
+          "cost": 0.022577100000000003,
+          "input_tokens": 16802,
+          "output_tokens": 290,
+          "total_tokens": 17092,
           "cached_tokens": 6912,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -125,7 +117,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_r1W5V8V46TCXwwJ0r5XLOecL"
+              "tool_call_id": "call_jJW5vgKZ2uAXRhjz4QDeojWG"
             }
           ],
           "finish_reason": "tool_calls"
@@ -134,19 +126,19 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.0240702,
-      "total_input_tokens": 36260,
-      "total_output_tokens": 326,
-      "total_cached_tokens": 27904,
+      "total_cost": 0.03343165,
+      "total_input_tokens": 46099,
+      "total_output_tokens": 528,
+      "total_cached_tokens": 34688,
       "llm_calls": [
         {
-          "timestamp": 1773531006.8973038,
+          "timestamp": 1774811923.2186816,
           "model": "gpt-5.3-codex",
-          "cost": 0.0067592,
-          "input_tokens": 5328,
+          "cost": 0.011841200000000001,
+          "input_tokens": 7656,
           "output_tokens": 76,
-          "total_tokens": 5404,
-          "cached_tokens": 2304,
+          "total_tokens": 7732,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -155,23 +147,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_fvM8318rFT09aYe8ygyPamLW"
+              "tool_call_id": "call_jPG7F2szxYukE0WhkzlfT8Zk"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_lgjuSKTkLnJhNvYKhtsT6QzW"
+              "tool_call_id": "call_2vI6DauUSc2M6uDhJ4EQD0QR"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773531009.747206,
+          "timestamp": 1774811927.6011853,
           "model": "gpt-5.3-codex",
-          "cost": 0.01234765,
-          "input_tokens": 10075,
-          "output_tokens": 213,
-          "total_tokens": 10288,
-          "cached_tokens": 5248,
+          "cost": 0.015692599999999998,
+          "input_tokens": 12444,
+          "output_tokens": 415,
+          "total_tokens": 12859,
+          "cached_tokens": 7552,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -180,19 +172,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_ER8Xtg2Y5aio6Nrnh6vG0ILR"
+              "tool_call_id": "call_mxd8YtETZgqm9GKZy2PW2xGk"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773531010.908047,
+          "timestamp": 1774811928.7370598,
           "model": "gpt-5.3-codex",
-          "cost": 0.0024276,
-          "input_tokens": 10376,
+          "cost": 0.0028948499999999996,
+          "input_tokens": 12947,
           "output_tokens": 14,
-          "total_tokens": 10390,
-          "cached_tokens": 10112,
+          "total_tokens": 12961,
+          "cached_tokens": 12672,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -201,19 +193,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_6TesX8YDGgKihyUbGE5d29m2"
+              "tool_call_id": "call_P1CbveqQFGq6rB8wKEyNFgSP"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773531195.6313188,
+          "timestamp": 1774812127.261957,
           "model": "gpt-5.3-codex",
-          "cost": 0.00253575,
-          "input_tokens": 10481,
+          "cost": 0.0030029999999999996,
+          "input_tokens": 13052,
           "output_tokens": 23,
-          "total_tokens": 10504,
-          "cached_tokens": 10240,
+          "total_tokens": 13075,
+          "cached_tokens": 12800,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -222,7 +214,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_7Kjrh39uPBnRs581caD8av5k"
+              "tool_call_id": "call_sUZ1AWo7ihVNvzuyEWwLRABg"
             }
           ],
           "finish_reason": "tool_calls"
@@ -230,15 +222,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.0677537,
-      "total_input_tokens": 68390,
-      "total_output_tokens": 942,
+      "total_cost": 0.07289765000000001,
+      "total_input_tokens": 76379,
+      "total_output_tokens": 1074,
       "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/core/SkCanvas.cpp\n+++ b/src/core/SkCanvas.cpp\n@@ -2429,9 +2429,10 @@\n     LOOPER_BEGIN(paint, nullptr)\n \n     while (iter.next()) {\n-        fScratchGlyphRunBuilder->drawText(\n+        SkGlyphRunBuilder glyphRunBuilder;\n+        glyphRunBuilder.drawText(\n                 looper.paint(), text, byteLength, SkPoint::Make(x, y));\n-        auto glyphRun = fScratchGlyphRunBuilder->useGlyphRun();\n+        auto glyphRun = glyphRunBuilder.useGlyphRun();\n         iter.fDevice->drawGlyphRun(looper.paint(), glyphRun);\n     }\n \n",
+    "patch": "--- a/src/core/SkGlyphRun.cpp\n+++ b/src/core/SkGlyphRun.cpp\n@@ -137,6 +137,7 @@\n     auto glyphIDs = textToGlyphIDs(paint, bytes, byteLength);\n     if (!glyphIDs.empty()) {\n         this->initialize(glyphIDs.size());\n+        new (&fScratchGlyphRun) SkGlyphRun{SkPaint{paint}, {}, {}, {}, {}, {}, {}};\n         this->simplifyDrawText(\n                 paint, glyphIDs, origin, fUniqueGlyphIDIndices, fUniqueGlyphIDs, fPositions);\n     }\n@@ -148,6 +149,7 @@\n     auto glyphIDs = textToGlyphIDs(paint, bytes, byteLength);\n     if (!glyphIDs.empty()) {\n         this->initialize(glyphIDs.size());\n+        new (&fScratchGlyphRun) SkGlyphRun{SkPaint{paint}, {}, {}, {}, {}, {}, {}};\n         this->simplifyDrawPosTextH(\n                 paint, glyphIDs, xpos, constY, fUniqueGlyphIDIndices, fUniqueGlyphIDs, fPositions);\n     }\n@@ -158,6 +160,7 @@\n     auto glyphIDs = textToGlyphIDs(paint, bytes, byteLength);\n     if (!glyphIDs.empty()) {\n         this->initialize(glyphIDs.size());\n+        new (&fScratchGlyphRun) SkGlyphRun{SkPaint{paint}, {}, {}, {}, {}, {}, {}};\n         this->simplifyDrawPosText(\n                 paint, glyphIDs, pos, fUniqueGlyphIDIndices, fUniqueGlyphIDs);\n     }\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -257,24 +249,24 @@
       {
         "tool_name": "read_source",
         "args": [
-          "skia/src/core/SkGlyphRun.cpp",
-          139
+          "skia/src/core/SkCanvas.cpp",
+          2435
         ],
         "kwargs": {},
-        "timestamp": 563295.473067501,
+        "timestamp": 1844211.79487223,
         "success": true,
-        "result_summary": "Ok({'contents': ' 40                        SkSpan<const uint16_t> denseIndices,\\n 41                        SkSpan<const SkPoint> positions,\\n 42                        SkSpan<const SkGlyphID> glyphI..."
+        "result_summary": "Ok({'contents': '2336 \\n2337 void SkCanvas::onDrawImageNine(const SkImage* image, const SkIRect& center, const SkRect& dst,\\n2338                                const SkPaint* paint) {\\n2339     SkPai..."
       },
       {
         "tool_name": "read_source",
         "args": [
-          "skia/src/core/SkCanvas.cpp",
-          2432
+          "skia/src/core/SkGlyphRun.cpp",
+          120
         ],
         "kwargs": {},
-        "timestamp": 563295.474277468,
+        "timestamp": 1844211.795455371,
         "success": true,
-        "result_summary": "Ok({'contents': '2333     SkDEBUGCODE(bitmap.validate();)\\n2334     this->internalDrawBitmapRect(bitmap, src, dst, paint, constraint);\\n2335 }\\n2336 \\n2337 void SkCanvas::onDrawImageNine(const SkImage..."
+        "result_summary": "Ok({'contents': ' 21 #include \"SkStrikeCache.h\"\\n 22 #include \"SkTextBlob.h\"\\n 23 #include \"SkTextBlobRunIterator.h\"\\n 24 #include \"SkTo.h\"\\n 25 #include \"SkUtils.h\"\\n 26 \\n 27 namespace {\\n 28 static..."
       }
     ],
     "find_references": [],
@@ -282,11 +274,11 @@
       {
         "tool_name": "apply_patch",
         "args": [
-          "skia/src/core/SkCanvas.cpp",
-          "@@ -2429,10 +2429,11 @@\n     LOOPER_BEGIN(paint, nullptr)\n \n     while (iter.next()) {\n-        fScratchGlyphRunBuilder->drawText(\n-                looper.paint(), text, byteLength, SkPoint::Make(x, y));\n-        auto glyphRun = fScratchGlyphRunBuilder->useGlyphRun();\n-        iter.fDevice->drawGlyphRun(looper.paint(), glyphRun);\n+        SkGlyphRunBuilder glyphRunBuilder;\n+        glyphRunBuilder.drawText(\n+                looper.paint(), text, byteLength, SkPoint::Make(x, y));\n+        auto glyphRun = glyphRunBuilder.useGlyphRun();\n+        iter.fDevice->drawGlyphRun(looper.paint(), glyphRun);\n     }\n \n     LOOPER_END\n"
+          "skia/src/core/SkGlyphRun.cpp",
+          "@@ -137,6 +137,7 @@ void SkGlyphRunBuilder::drawText(\n     auto glyphIDs = textToGlyphIDs(paint, bytes, byteLength);\n     if (!glyphIDs.empty()) {\n         this->initialize(glyphIDs.size());\n+        new (&fScratchGlyphRun) SkGlyphRun{SkPaint{paint}, {}, {}, {}, {}, {}, {}};\n         this->simplifyDrawText(\n                 paint, glyphIDs, origin, fUniqueGlyphIDIndices, fUniqueGlyphIDs, fPositions);\n     }\n@@ -148,6 +149,7 @@ void SkGlyphRunBuilder::drawPosTextH(const SkPaint& paint, const void* bytes,\n     auto glyphIDs = textToGlyphIDs(paint, bytes, byteLength);\n     if (!glyphIDs.empty()) {\n         this->initialize(glyphIDs.size());\n+        new (&fScratchGlyphRun) SkGlyphRun{SkPaint{paint}, {}, {}, {}, {}, {}, {}};\n         this->simplifyDrawPosTextH(\n                 paint, glyphIDs, xpos, constY, fUniqueGlyphIDIndices, fUniqueGlyphIDs, fPositions);\n     }\n@@ -158,6 +160,7 @@ void SkGlyphRunBuilder::drawPosText(const SkPaint& paint, const void* bytes,\n     auto glyphIDs = textToGlyphIDs(paint, bytes, byteLength);\n     if (!glyphIDs.empty()) {\n         this->initialize(glyphIDs.size());\n+        new (&fScratchGlyphRun) SkGlyphRun{SkPaint{paint}, {}, {}, {}, {}, {}, {}};\n         this->simplifyDrawPosText(\n                 paint, glyphIDs, pos, fUniqueGlyphIDIndices, fUniqueGlyphIDs);\n     }\n"
         ],
         "kwargs": {},
-        "timestamp": 563298.351834901,
+        "timestamp": 1844216.194711577,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -296,7 +288,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 563482.989432231,
+        "timestamp": 1844413.938359307,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

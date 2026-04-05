@@ -1,5 +1,5 @@
 {
-  "vuln_id": 106,
+  "vuln_id": 412,
   "crash_result": {
     "output": "==1837==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x75e03880e7f0 at pc 0x00000062c869 bp 0x7fff48d54940 sp 0x7fff48d54938\nREAD of size 8 at 0x75e03880e7f0 thread T0\nSCARINESS: 33 (8-byte-read-heap-buffer-overflow-far-from-bounds)\n    #0 0x62c868 in ebitmap_match_any /src/selinux/libsepol/src/ebitmap.c:237:33\n    #1 0x61adc8 in check_assertion_avtab_match /src/selinux/libsepol/src/assertion.c:462:7\n    #2 0x622287 in avtab_map /src/selinux/libsepol/src/avtab.c:347:10\n    #3 0x61aaa",
     "stack": "#0 0x62c868 in ebitmap_match_any selinux/libsepol/src/ebitmap.c:237:33\n#1 0x61adc8 in check_assertion_avtab_match selinux/libsepol/src/assertion.c:462:7\n#2 0x622287 in avtab_map selinux/libsepol/src/avtab.c:347:10\n#3 0x61aaae in check_assertion selinux/libsepol/src/assertion.c:513:7\n#4 0x5955bb in cil_check_neverallow selinux/libsepol/src/../cil/src/cil_binary.c:4721:8\n#5 0x5933b4 in cil_check_neverallows selinux/libsepol/src/../cil/src/cil_binary.c:4775:8\n#6 0x592515 in cil_binary_create_alloca",
@@ -23,113 +23,55 @@
   },
   "analyzed_vuln": {
     "function": "cil_typeattribute_to_bitmap",
-    "file": "selinux/libsepol/cil/src/cil_binary.c",
-    "description": "Heap OOB read in ebitmap_match_any() is caused by out-of-bounds indexing into pdb->attr_type_map in check_assertion_avtab_match(). The root cause is in cil_typeattribute_to_bitmap(): it iterates bits from cil_attr->types and uses db->val_to_type[i] without validating that i is within valid type-value bounds (or that the mapped datum/value is valid). This can populate inconsistent type/attribute bitmaps and later produce invalid source/target type values used as k->source_type/k->target_type, so check_assertion_avtab_match reads p->attr_type_map[k->source_type-1] from before the allocated array, leading to the ASan crash at ebitmap_match_any.",
-    "conditions": "Fuzzed CIL input must create malformed/inconsistent typeattribute/typeattributeset state (via cil_attr->types bit positions) so cil_typeattribute_to_bitmap processes an invalid bit index i and builds corrupted attr/type mapping. During neverallow checking (cil_check_neverallow -> check_assertion -> avtab_map -> check_assertion_avtab_match), an avtab entry with invalid source/target type value then indexes attr_type_map with (type-1) out of range, and ebitmap_match_any dereferences the resulting invalid ebitmap node pointer, triggering the heap-buffer-overflow read."
+    "file": "selinux/libsepol/src/../cil/src/cil_binary.c",
+    "description": "Root cause is an off-by-one/invalid index propagation when populating type/attribute bitmaps: cil_typeattribute_to_bitmap iterates bits from cil_attr->types and uses db->val_to_type[i] directly, then writes using sepol_type->s.value - 1 into pdb->type_attr_map/attr_type_map without validating that i maps to a valid type entry and that resulting values are in [1, p_types.nprim]. Malformed CIL can produce inconsistent type/value mappings (including 0/invalid), corrupting ebitmap node metadata for attr_type_map entries. Later ebitmap_match_any in assertion checking dereferences a malformed ebitmap node pointer and performs an out-of-bounds read.",
+    "conditions": "Fuzzer input must build a policy with malformed/inconsistent typeattribute/typeattributeset state (via nested blocks/inherits etc.) so that during cil_binary_create_allocated_pdb, cil_typeattribute_to_bitmap processes an invalid bit index from cil_attr->types (or invalid db->val_to_type mapping) and updates attr/type maps with unchecked value-1 indices. Then neverallow checking (check_assertion -> avtab_map -> check_assertion_avtab_match) calls ebitmap_match_any on the corrupted p->attr_type_map[k->source_type-1], triggering the heap-buffer-overflow read."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 4,
-      "total_cost": 0.032259499999999997,
-      "total_input_tokens": 36282,
-      "total_output_tokens": 721,
-      "total_cached_tokens": 26240,
+      "total_llm_calls": 2,
+      "total_cost": 0.02963625,
+      "total_input_tokens": 21647,
+      "total_output_tokens": 419,
+      "total_cached_tokens": 8960,
       "llm_calls": [
         {
-          "timestamp": 1773397218.0032246,
+          "timestamp": 1774844206.403688,
           "model": "gpt-5.3-codex",
-          "cost": 0.01315055,
-          "input_tokens": 7393,
-          "output_tokens": 188,
-          "total_tokens": 7581,
+          "cost": 0.012212549999999999,
+          "input_tokens": 7481,
+          "output_tokens": 110,
+          "total_tokens": 7591,
           "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_r8PdxzrZoi252bG70vUpYLoP"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_rViffHe3ihR5AMzvPJuQrk2l"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_q4ZmNJ0YijXl5jk12S04rLb4"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_tU65WlRBuz7I4N6WftYZjQHn"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773397254.9753566,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00461195,
-          "input_tokens": 7813,
-          "output_tokens": 188,
-          "total_tokens": 8001,
-          "cached_tokens": 7424,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 4,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_5rxNPUjr6s7laHzjDAj8vk7E"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_nOTIxym1cMM6aMLGSuE2hSPq"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_RMdaUc6T6KvBwQe2NnuUt960"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_MYmq9SPsFd7H0gsiOEUCN6k0"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773397271.038738,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00454055,
-          "input_tokens": 9457,
-          "output_tokens": 35,
-          "total_tokens": 9492,
-          "cached_tokens": 7936,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_iSnipGKz3NGcUn5zUi1HNx8j"
+              "tool_call_id": "call_v4ejmgPYRrQbI4PHZ8Df72wN"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_PtH0ppxrhQk1dM2EHZnKIruJ"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_5YNIDYJNk1RjFs9dNHXeDpGs"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773397276.9249096,
+          "timestamp": 1774844211.690034,
           "model": "gpt-5.3-codex",
-          "cost": 0.009956449999999999,
-          "input_tokens": 11619,
-          "output_tokens": 310,
-          "total_tokens": 11929,
-          "cached_tokens": 9344,
+          "cost": 0.0174237,
+          "input_tokens": 14166,
+          "output_tokens": 309,
+          "total_tokens": 14475,
+          "cached_tokens": 7424,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -138,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_VpVWnhVVqMBegHWjGbooWbob"
+              "tool_call_id": "call_QCVuxUt0y7E1O31nZOtFZOrb"
             }
           ],
           "finish_reason": "tool_calls"
@@ -146,91 +88,45 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 6,
-      "total_cost": 0.0375928,
-      "total_input_tokens": 54592,
-      "total_output_tokens": 786,
-      "total_cached_tokens": 43776,
+      "total_llm_calls": 4,
+      "total_cost": 0.0326998,
+      "total_input_tokens": 43548,
+      "total_output_tokens": 665,
+      "total_cached_tokens": 33536,
       "llm_calls": [
         {
-          "timestamp": 1773397279.2282288,
+          "timestamp": 1774844213.5741558,
           "model": "gpt-5.3-codex",
-          "cost": 0.0136605,
-          "input_tokens": 6974,
-          "output_tokens": 104,
-          "total_tokens": 7078,
-          "cached_tokens": 0,
+          "cost": 0.01403745,
+          "input_tokens": 8791,
+          "output_tokens": 91,
+          "total_tokens": 8882,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
           "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_zklaHXYS8Rr1IcKjM2cwO6mi"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_PhOPDYdu6kLpj2vNkzYf0U2w"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773397288.113308,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00317835,
-          "input_tokens": 7205,
-          "output_tokens": 104,
-          "total_tokens": 7309,
-          "cached_tokens": 6912,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_um3xVBR7CYnBbugt9PLsW08Y"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_EzHxi0trxgKQ2qIKVVk2kUpV"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773397295.9195929,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0033701499999999997,
-          "input_tokens": 8097,
-          "output_tokens": 35,
-          "total_tokens": 8132,
-          "cached_tokens": 7168,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_clWWuDYTw6erFnKZYDRzhXqe"
+              "tool_call_id": "call_klN6tRnxmSSI4wtbJ3ArXmQI"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_jig6OnnGfjrkiMH8ULk3ZADW"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773397301.6851091,
+          "timestamp": 1774844259.2877393,
           "model": "gpt-5.3-codex",
-          "cost": 0.01247995,
-          "input_tokens": 10341,
-          "output_tokens": 506,
-          "total_tokens": 10847,
-          "cached_tokens": 8064,
+          "cost": 0.013293699999999999,
+          "input_tokens": 11134,
+          "output_tokens": 537,
+          "total_tokens": 11671,
+          "cached_tokens": 8704,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -239,19 +135,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_gJN773UypLZdNKjvSj1BppSG"
+              "tool_call_id": "call_TwN55tiyqoHUD1nJUfh1m1y5"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773397303.0530005,
+          "timestamp": 1774844260.3620527,
           "model": "gpt-5.3-codex",
-          "cost": 0.00239785,
-          "input_tokens": 10935,
+          "cost": 0.0026302499999999998,
+          "input_tokens": 11759,
           "output_tokens": 14,
-          "total_tokens": 10949,
-          "cached_tokens": 10752,
+          "total_tokens": 11773,
+          "cached_tokens": 11520,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -260,19 +156,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_DS2W8urPgXQKYueJIGuq3Y7T"
+              "tool_call_id": "call_Pjg2oL0aqbcG9VqPt7Fk7wNM"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773397322.412836,
+          "timestamp": 1774844280.9670584,
           "model": "gpt-5.3-codex",
-          "cost": 0.0025059999999999995,
-          "input_tokens": 11040,
+          "cost": 0.0027384,
+          "input_tokens": 11864,
           "output_tokens": 23,
-          "total_tokens": 11063,
-          "cached_tokens": 10880,
+          "total_tokens": 11887,
+          "cached_tokens": 11648,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -281,7 +177,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Hl7twAM2tCRTZFfo3jo8NyXv"
+              "tool_call_id": "call_OdjSIp1HdCNYxPbtDSxXFBjF"
             }
           ],
           "finish_reason": "tool_calls"
@@ -289,15 +185,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.0698523,
-      "total_input_tokens": 90874,
-      "total_output_tokens": 1507,
-      "total_llm_calls": 10
+      "total_cost": 0.062336050000000004,
+      "total_input_tokens": 65195,
+      "total_output_tokens": 1084,
+      "total_llm_calls": 6
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/libsepol/cil/src/cil_binary.c\n+++ b/libsepol/cil/src/cil_binary.c\n@@ -642,11 +642,27 @@\n \tvalue = sepol_type->s.value;\n \n \tebitmap_for_each_positive_bit(cil_attr->types, tnode, i) {\n+\t\tif (i >= db->num_types || db->val_to_type == NULL || db->val_to_type[i] == NULL) {\n+\t\t\tcil_log(CIL_ERR, \"Typeattribute %s has invalid type index %u in type set\\n\",\n+\t\t\t\tcil_attr->datum.fqn, i);\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n+\n \t\trc = __cil_get_sepol_type_datum(pdb, DATUM(db->val_to_type[i]), &sepol_type);\n \t\tif (rc != SEPOL_OK) goto exit;\n+\t\tif (sepol_type->s.value == 0 || sepol_type->s.value > pdb->p_types.nprim) {\n+\t\t\tcil_log(CIL_ERR, \"Typeattribute %s resolved invalid type value %u\\n\",\n+\t\t\t\tcil_attr->datum.fqn, sepol_type->s.value);\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n \n-\t\tebitmap_set_bit(&pdb->type_attr_map[sepol_type->s.value - 1], value - 1, 1);\n-\t\tebitmap_set_bit(&pdb->attr_type_map[value - 1], sepol_type->s.value - 1, 1);\n+\t\tif (ebitmap_set_bit(&pdb->type_attr_map[sepol_type->s.value - 1], value - 1, 1) ||\n+\t\t    ebitmap_set_bit(&pdb->attr_type_map[value - 1], sepol_type->s.value - 1, 1)) {\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n \t}\n \n \trc = SEPOL_OK;\n",
+    "patch": "--- a/libsepol/cil/src/cil_binary.c\n+++ b/libsepol/cil/src/cil_binary.c\n@@ -640,13 +640,35 @@\n \tif (rc != SEPOL_OK) goto exit;\n \n \tvalue = sepol_type->s.value;\n+\tif (value == 0 || value > pdb->p_types.nprim) {\n+\t\trc = SEPOL_ERR;\n+\t\tgoto exit;\n+\t}\n \n \tebitmap_for_each_positive_bit(cil_attr->types, tnode, i) {\n+\t\tif (i >= db->num_types || db->val_to_type == NULL || db->val_to_type[i] == NULL) {\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n+\n \t\trc = __cil_get_sepol_type_datum(pdb, DATUM(db->val_to_type[i]), &sepol_type);\n \t\tif (rc != SEPOL_OK) goto exit;\n+\t\tif (sepol_type->s.value == 0 || sepol_type->s.value > pdb->p_types.nprim) {\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n+\n+\t\trc = ebitmap_set_bit(&pdb->type_attr_map[sepol_type->s.value - 1], value - 1, 1);\n+\t\tif (rc != SEPOL_OK) {\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n \n-\t\tebitmap_set_bit(&pdb->type_attr_map[sepol_type->s.value - 1], value - 1, 1);\n-\t\tebitmap_set_bit(&pdb->attr_type_map[value - 1], sepol_type->s.value - 1, 1);\n+\t\trc = ebitmap_set_bit(&pdb->attr_type_map[value - 1], sepol_type->s.value - 1, 1);\n+\t\tif (rc != SEPOL_OK) {\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n \t}\n \n \trc = SEPOL_OK;\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -311,83 +207,43 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "check_assertion_avtab_match",
-          "selinux/libsepol/src/assertion.c",
-          0,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 429571.470909795,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n448 static int check_assertion_avtab_match(avtab_key_t *k, avtab_datum_t *d, void *args), extra=None))"
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "cil_typeattribute_to_bitmap",
-          "selinux/libsepol/cil/src/cil_binary.c",
-          0,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 429574.61291437,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n620 int cil_typeattribute_to_bitmap(policydb_t *pdb, const struct cil_db *db, struct cil_typeattribute *cil_..."
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "cil_typeattribute_to_bitmap",
-          "selinux/libsepol/cil/src/cil_binary.c",
-          620,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 429580.118155112,
-        "success": true,
-        "result_summary": "Ok({'contents': '620 int cil_typeattribute_to_bitmap(policydb_t *pdb, const struct cil_db *db, struct cil_typeattribute *cil_attr)', 'line_start': 620, 'line_end': 621, 'file': 'selinux/libsepol/cil/s..."
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "check_assertion_avtab_match",
-          "selinux/libsepol/src/assertion.c",
-          448,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 429583.185163966,
-        "success": true,
-        "result_summary": "Ok({'contents': '448 static int check_assertion_avtab_match(avtab_key_t *k, avtab_datum_t *d, void *args)\\n449 {\\n450 \\tint rc, rc2 = 0;\\n451 \\tstruct avtab_match_args *a = (struct avtab_match_args *)..."
-      }
-    ],
+    "read_definition": [],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
           "selinux/libsepol/cil/src/cil_binary.c",
-          660
+          633
         ],
         "kwargs": {},
-        "timestamp": 429584.495570909,
+        "timestamp": 1876502.155379273,
         "success": true,
-        "result_summary": "Ok({'contents': '561 \\ttype_datum_t *sepol_attr = NULL;\\n562 \\n563 \\tif (!cil_attr->keep) {\\n564 \\t\\treturn SEPOL_OK;\\t\\t\\n565 \\t}\\n566 \\n567 \\tsepol_attr = cil_malloc(sizeof(*sepol_attr));\\n568 \\ttyp..."
+        "result_summary": "Ok({'contents': '534 \\n535 int cil_typepermissive_to_policydb(policydb_t *pdb, struct cil_typepermissive *cil_typeperm)\\n536 {\\n537 \\tint rc = SEPOL_ERR;\\n538 \\ttype_datum_t *sepol_type = NULL;\\n539 \\..."
       }
     ],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "cil_typeattribute_to_bitmap",
+          "selinux/libsepol/cil/src/cil_binary.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1876541.995916079,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='selinux/libsepol/cil/src/cil_binary.c', refs=[FileReference(line=3793, content='\\t\\t\\trc = cil_typeattribute_to_bitmap(pdb, db, node->data);', enclosing_definition='__cil..."
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "selinux/libsepol/cil/src/cil_binary.c",
-          "@@ -644,7 +644,22 @@ int cil_typeattribute_to_bitmap(policydb_t *pdb, const struct cil_db *db, struc\n \tebitmap_for_each_positive_bit(cil_attr->types, tnode, i) {\n+\t\tif (i >= db->num_types || db->val_to_type == NULL || db->val_to_type[i] == NULL) {\n+\t\t\tcil_log(CIL_ERR, \"Typeattribute %s has invalid type index %u in type set\\n\",\n+\t\t\t\tcil_attr->datum.fqn, i);\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n+\n \t\trc = __cil_get_sepol_type_datum(pdb, DATUM(db->val_to_type[i]), &sepol_type);\n \t\tif (rc != SEPOL_OK) goto exit;\n+\t\tif (sepol_type->s.value == 0 || sepol_type->s.value > pdb->p_types.nprim) {\n+\t\t\tcil_log(CIL_ERR, \"Typeattribute %s resolved invalid type value %u\\n\",\n+\t\t\t\tcil_attr->datum.fqn, sepol_type->s.value);\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n \n-\t\tebitmap_set_bit(&pdb->type_attr_map[sepol_type->s.value - 1], value - 1, 1);\n-\t\tebitmap_set_bit(&pdb->attr_type_map[value - 1], sepol_type->s.value - 1, 1);\n+\t\tif (ebitmap_set_bit(&pdb->type_attr_map[sepol_type->s.value - 1], value - 1, 1) ||\n+\t\t    ebitmap_set_bit(&pdb->attr_type_map[value - 1], sepol_type->s.value - 1, 1)) {\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n \t}\n"
+          "@@ -642,10 +642,33 @@ int cil_typeattribute_to_bitmap(policydb_t *pdb, const struct cil_db *db, struc\n \tvalue = sepol_type->s.value;\n+\tif (value == 0 || value > pdb->p_types.nprim) {\n+\t\trc = SEPOL_ERR;\n+\t\tgoto exit;\n+\t}\n \n \tebitmap_for_each_positive_bit(cil_attr->types, tnode, i) {\n+\t\tif (i >= db->num_types || db->val_to_type == NULL || db->val_to_type[i] == NULL) {\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n+\n \t\trc = __cil_get_sepol_type_datum(pdb, DATUM(db->val_to_type[i]), &sepol_type);\n \t\tif (rc != SEPOL_OK) goto exit;\n+\t\tif (sepol_type->s.value == 0 || sepol_type->s.value > pdb->p_types.nprim) {\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n \n-\t\tebitmap_set_bit(&pdb->type_attr_map[sepol_type->s.value - 1], value - 1, 1);\n-\t\tebitmap_set_bit(&pdb->attr_type_map[value - 1], sepol_type->s.value - 1, 1);\n+\t\trc = ebitmap_set_bit(&pdb->type_attr_map[sepol_type->s.value - 1], value - 1, 1);\n+\t\tif (rc != SEPOL_OK) {\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n+\n+\t\trc = ebitmap_set_bit(&pdb->attr_type_map[value - 1], sepol_type->s.value - 1, 1);\n+\t\tif (rc != SEPOL_OK) {\n+\t\t\trc = SEPOL_ERR;\n+\t\t\tgoto exit;\n+\t\t}\n \t}\n \n \trc = SEPOL_OK;"
         ],
         "kwargs": {},
-        "timestamp": 429590.347165078,
+        "timestamp": 1876547.916475403,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -397,7 +253,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 429609.13677407,
+        "timestamp": 1876568.102134591,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

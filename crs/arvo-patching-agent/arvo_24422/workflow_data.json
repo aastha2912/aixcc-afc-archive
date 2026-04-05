@@ -1,5 +1,5 @@
 {
-  "vuln_id": 235,
+  "vuln_id": 370,
   "crash_result": {
     "output": "==38746==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7d73b65874b8 at pc 0x0000006965ef bp 0x7ffca2f8f6f0 sp 0x7ffca2f8f6e8\nREAD of size 1 at 0x7d73b65874b8 thread T0\nSCARINESS: 27 (1-byte-read-stack-buffer-overflow)\n    #0 0x6965ee in bool SmilesParseOps::parser::read_int<std::__1::__wrap_iter<char const*> >(std::__1::__wrap_iter<char const*>&, std::__1::__wrap_iter<char const*>, unsigned int&) /src/rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp:96:27\n    #1 0x65dd48 in bool Smi",
     "stack": "#0 0x6965ee in bool SmilesParseOps::parser::read_int<std::__1::__wrap_iter<char const*> >(std::__1::__wrap_iter<char const*>&, std::__1::__wrap_iter<char const*>, unsigned int&) rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp:96:27\n#1 0x65dd48 in bool SmilesParseOps::parser::parse_linknodes<std::__1::__wrap_iter<char const*> >(std::__1::__wrap_iter<char const*>&, std::__1::__wrap_iter<char const*>, RDKit::RWMol&) rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp:608:10\n#2 0x60a780 in bool SmilesPa",
@@ -22,60 +22,64 @@
     "dedup": "bool SmilesParseOps::parser::read_int<std::__1::__wrap_iter<char const*> >(std::__1::__wrap_iter<char const*>&, std::__1::__wrap_iter<char const*>, unsigned int&)--bool SmilesParseOps::parser::parse_linknodes<std::__1::__wrap_iter<char const*> >(std::__1::__wrap_iter<char const*>&, std::__1::__wrap_iter<char const*>, RDKit::RWMol&)--bool SmilesParseOps::parser::parse_it<std::__1::__wrap_iter<char const*> >(std::__1::__wrap_iter<char const*>&, std::__1::__wrap_iter<char const*>, RDKit::RWMol&)"
   },
   "analyzed_vuln": {
-    "function": "handleCXPartAndName",
-    "file": "rdkit/Code/GraphMol/SmilesParse/SmilesParse.cpp",
-    "description": "The root cause is an out-of-bounds iterator dereference in CXSMILES handling: handleCXPartAndName() unconditionally does `if (*pos == '|')` after setting `pos = cxPart.cbegin()`, without checking `pos != cxPart.cend()`. For inputs where `cxPart` is empty (or becomes empty after trim), this dereferences end(). In this PoV, that leads parseCXExtensions()/parse_linknodes()/read_int() to operate on invalid iterator bounds and eventually causes a 1-byte stack-buffer-overflow read reported in read_int at CXSmilesOps.cpp:96. Crash site is read_int, but the vulnerability is the missing emptiness/end check before dereferencing `pos` in handleCXPartAndName().",
-    "conditions": "Data flow: fuzzer input -> SmilesToMol() -> preprocessSmiles() splits into lsmiles and cxPart -> handleCXPartAndName(). A crafted SMILES containing a CXSMILES-like suffix with malformed/edge whitespace/content (PoV: `S |               LN:6:6\\xff`) causes cxPart/iterator state such that `pos` is at end but still dereferenced. This invalid state then reaches CX parser (`parse_it` -> `parse_linknodes` -> `read_int`) and triggers the ASan stack OOB read. Trigger requires allowCXSMILES path and malformed CX extension text around the LN field."
+    "function": "parse_linknodes",
+    "file": "rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp",
+    "description": "`parse_linknodes()` performs unchecked iterator increments between integer fields. After reading `startReps`, it does `++first` without verifying that `first<last` and that the separator is actually `'.'`; it repeats the same pattern before reading optional `idx2`. With malformed/truncated LN blocks, `first` can be advanced to `last` (or beyond valid range for wrapped iterators), and the subsequent `read_int()` loop dereferences `*first`, causing the ASan stack-buffer-overflow seen in `read_int()`.",
+    "conditions": "Input must reach CXSMILES extension parsing (`... |LN:...|`) via `SmilesToMol` -> `handleCXPartAndName` -> `parseCXExtensions` -> `parse_it` -> `parse_linknodes`. A malformed LN record that omits/invalidates expected separators/number fields (e.g. `LN:6:6` followed by non-digit/invalid byte before closing `|`, as in the PoC) leaves the iterator at end and then `parse_linknodes` increments it and calls `read_int`, triggering out-of-bounds read."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.0327208,
-      "total_input_tokens": 18960,
-      "total_output_tokens": 500,
-      "total_cached_tokens": 4736,
+      "total_cost": 0.034997549999999995,
+      "total_input_tokens": 21597,
+      "total_output_tokens": 477,
+      "total_cached_tokens": 6016,
       "llm_calls": [
         {
-          "timestamp": 1773544491.5701506,
+          "timestamp": 1774834700.5363302,
           "model": "gpt-5.3-codex",
-          "cost": 0.0105525,
-          "input_tokens": 4718,
-          "output_tokens": 164,
-          "total_tokens": 4882,
-          "cached_tokens": 0,
+          "cost": 0.0094101,
+          "input_tokens": 4806,
+          "output_tokens": 201,
+          "total_tokens": 5007,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 5,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_GZUUneSdb4hFMGc4kH0MAUBM"
+              "tool_call_id": "call_CvlspVLyyzKtlgpBnzXifloT"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_dRYf2B2toWOHRZ9zoBS0wLC9"
+              "tool_call_id": "call_VRZgjZETdgODNevyRukvKBzU"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_srJWcgOw8hYpz70rpF6S4kHF"
+              "tool_call_id": "call_8v07I3lzTuu12xr5EYEktS11"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_TzHbpVARgzyFJ6ikcZJAwett"
+              "tool_call_id": "call_y4g2m4FC384X8SE9UX2SzI0u"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_ybn2G8aHhLYw1dbeylRZ9JFo"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773544511.051875,
+          "timestamp": 1774834707.036388,
           "model": "gpt-5.3-codex",
-          "cost": 0.022168300000000002,
-          "input_tokens": 14242,
-          "output_tokens": 336,
-          "total_tokens": 14578,
-          "cached_tokens": 4736,
+          "cost": 0.025587449999999998,
+          "input_tokens": 16791,
+          "output_tokens": 276,
+          "total_tokens": 17067,
+          "cached_tokens": 4864,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -84,7 +88,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_YLOZQJ6iV2HqZ1R30VeUsKgV"
+              "tool_call_id": "call_UxaoR9afYCEr4lr7yXhpOB0x"
             }
           ],
           "finish_reason": "tool_calls"
@@ -92,20 +96,20 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.0370678,
-      "total_input_tokens": 33084,
-      "total_output_tokens": 269,
-      "total_cached_tokens": 15616,
+      "total_llm_calls": 5,
+      "total_cost": 0.03397135,
+      "total_input_tokens": 54513,
+      "total_output_tokens": 638,
+      "total_cached_tokens": 44672,
       "llm_calls": [
         {
-          "timestamp": 1773544513.08016,
+          "timestamp": 1774834708.6068327,
           "model": "gpt-5.3-codex",
-          "cost": 0.0069412,
-          "input_tokens": 4728,
+          "cost": 0.00925995,
+          "input_tokens": 6629,
           "output_tokens": 92,
-          "total_tokens": 4820,
-          "cached_tokens": 1664,
+          "total_tokens": 6721,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -114,23 +118,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_XrI385bid00PbzZoSCtV97Us"
+              "tool_call_id": "call_BO9ubGYXMVgeNJjVVNM8NQ7o"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_HQ80Plq56ga3sdVFtMFLghgo"
+              "tool_call_id": "call_au07JQyfR4aTqeJRRKn67umA"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773544516.3181844,
+          "timestamp": 1774834711.929946,
           "model": "gpt-5.3-codex",
-          "cost": 0.01071455,
-          "input_tokens": 9265,
-          "output_tokens": 140,
-          "total_tokens": 9405,
-          "cached_tokens": 4736,
+          "cost": 0.0133028,
+          "input_tokens": 11544,
+          "output_tokens": 256,
+          "total_tokens": 11800,
+          "cached_tokens": 6656,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +143,40 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_208iENL94LkhGyfuzZz04w9i"
+              "tool_call_id": "call_Z5lJvk3qEztSk954TFc7AQRl"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773544517.4836094,
+          "timestamp": 1774834715.161162,
           "model": "gpt-5.3-codex",
-          "cost": 0.00229355,
-          "input_tokens": 9493,
+          "cost": 0.005935650000000001,
+          "input_tokens": 11851,
+          "output_tokens": 253,
+          "total_tokens": 12104,
+          "cached_tokens": 11648,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_gAOGOG4aw8DGJCRsIN9Q2EGE"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774834716.3388052,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0025816,
+          "input_tokens": 12192,
           "output_tokens": 14,
-          "total_tokens": 9507,
-          "cached_tokens": 9216,
+          "total_tokens": 12206,
+          "cached_tokens": 12032,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +185,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_hDGmmJqs6h0zJQHsMMYF4LmL"
+              "tool_call_id": "call_nj4r7hMQmc6gmCrE2EOmtrRx"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773546446.8752947,
+          "timestamp": 1774835674.9957361,
           "model": "gpt-5.3-codex",
-          "cost": 0.0171185,
-          "input_tokens": 9598,
+          "cost": 0.00289135,
+          "input_tokens": 12297,
           "output_tokens": 23,
-          "total_tokens": 9621,
-          "cached_tokens": 0,
+          "total_tokens": 12320,
+          "cached_tokens": 12032,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,7 +206,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_ydSIeEQylFhIocfWBS5wbQR7"
+              "tool_call_id": "call_L1lQKhcoHB4Iw9LfS9tx80vZ"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,15 +214,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.0697886,
-      "total_input_tokens": 52044,
-      "total_output_tokens": 769,
-      "total_llm_calls": 6
+      "total_cost": 0.0689689,
+      "total_input_tokens": 76110,
+      "total_output_tokens": 1115,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/Code/GraphMol/SmilesParse/SmilesParse.cpp\n+++ b/Code/GraphMol/SmilesParse/SmilesParse.cpp\n@@ -365,7 +365,7 @@\n   std::string::const_iterator pos = cxPart.cbegin();\n   bool cxfailed = false;\n   if (params.allowCXSMILES) {\n-    if (*pos == '|') {\n+    if (pos != cxPart.cend() && *pos == '|') {\n       try {\n         SmilesParseOps::parseCXExtensions(*res, cxPart, pos);\n       } catch (...) {\n",
+    "patch": "--- a/Code/GraphMol/SmilesParse/CXSmilesOps.cpp\n+++ b/Code/GraphMol/SmilesParse/CXSmilesOps.cpp\n@@ -603,6 +603,9 @@\n     if (!read_int(first, last, startReps)) {\n       return false;\n     }\n+    if (first >= last || *first != '.') {\n+      return false;\n+    }\n     ++first;\n     unsigned int endReps;\n     if (!read_int(first, last, endReps)) {\n@@ -615,6 +618,9 @@\n       if (!read_int(first, last, idx1)) {\n         return false;\n       }\n+      if (first >= last || *first != '.') {\n+        return false;\n+      }\n       ++first;\n       if (!read_int(first, last, idx2)) {\n         return false;\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -216,24 +241,24 @@
       {
         "tool_name": "read_source",
         "args": [
-          "rdkit/Code/GraphMol/SmilesParse/SmilesParse.cpp",
-          360
+          "rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp",
+          80
         ],
         "kwargs": {},
-        "timestamp": 576801.915019052,
+        "timestamp": 1866997.182939507,
         "success": true,
-        "result_summary": "Ok({'contents': '261   if (inp.empty()) {\\n262     return nullptr;\\n263   }\\n264   Atom *res = nullptr;\\n265   try {\\n266     func(inp, res);\\n267   } catch (SmilesParseException &e) {\\n268     std::s..."
+        "result_summary": "Ok({'contents': '  1 //\\n  2 //  Copyright (C) 2016-2021 Greg Landrum and other RDKit contributors\\n  3 //\\n  4 //   @@ All Rights Reserved @@\\n  5 //  This file is part of the RDKit.\\n  6 //  The con..."
       },
       {
         "tool_name": "read_source",
         "args": [
           "rdkit/Code/GraphMol/SmilesParse/CXSmilesOps.cpp",
-          1160
+          560
         ],
         "kwargs": {},
-        "timestamp": 576801.918299731,
+        "timestamp": 1866997.185641542,
         "success": true,
-        "result_summary": "Ok({'contents': '1061   }\\n1062 \\n1063   std::vector<StereoGroup> mol_stereo_groups(mol.getStereoGroups());\\n1064   mol_stereo_groups.emplace_back(group_type, std::move(atoms));\\n1065   mol.setStereoG..."
+        "result_summary": "Ok({'contents': '461         }\\n462       }\\n463       if (!bnd ||\\n464           (bnd->getBeginAtomIdx() != aidx && bnd->getEndAtomIdx() != aidx)) {\\n465         BOOST_LOG(rdWarningLog) << \"BOND NOT ..."
       }
     ],
     "find_references": [],
@@ -241,11 +266,11 @@
       {
         "tool_name": "apply_patch",
         "args": [
-          "rdkit/Code/GraphMol/SmilesParse/SmilesParse.cpp",
-          "@@ -365,7 +365,7 @@\n   std::string::const_iterator pos = cxPart.cbegin();\n   bool cxfailed = false;\n   if (params.allowCXSMILES) {\n-    if (*pos == '|') {\n+    if (pos != cxPart.cend() && *pos == '|') {\n       try {\n         SmilesParseOps::parseCXExtensions(*res, cxPart, pos);\n       } catch (...) {\n"
+          "Code/GraphMol/SmilesParse/CXSmilesOps.cpp",
+          "@@ -603,10 +603,16 @@ bool parse_linknodes(Iterator &first, Iterator last, RDKit::RWMol &mol) {\n     if (!read_int(first, last, startReps)) {\n       return false;\n     }\n+    if (first >= last || *first != '.') {\n+      return false;\n+    }\n     ++first;\n     unsigned int endReps;\n     if (!read_int(first, last, endReps)) {\n       return false;\n     }\n@@ -615,6 +621,9 @@ bool parse_linknodes(Iterator &first, Iterator last, RDKit::RWMol &mol) {\n       if (!read_int(first, last, idx1)) {\n         return false;\n       }\n+      if (first >= last || *first != '.') {\n+        return false;\n+      }\n       ++first;\n       if (!read_int(first, last, idx2)) {\n         return false;\n"
         ],
         "kwargs": {},
-        "timestamp": 576804.926621749,
+        "timestamp": 1867003.801133225,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -255,7 +280,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 578733.925240007,
+        "timestamp": 1867962.142353204,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

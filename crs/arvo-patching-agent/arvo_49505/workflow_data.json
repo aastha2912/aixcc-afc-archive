@@ -1,5 +1,5 @@
 {
-  "vuln_id": 142,
+  "vuln_id": 455,
   "crash_result": {
     "output": "==6615==ERROR: AddressSanitizer: heap-buffer-overflow on address 0xec100f38 at pc 0x081c7936 bp 0xffe017c8 sp 0xffe017c0\nREAD of size 8 at 0xec100f38 thread T0\nSCARINESS: 23 (8-byte-read-heap-buffer-overflow)\n    #0 0x81c7935 in _cmsWriteXYZNumber /src/lcms/src/cmsplugin.c:359:102\n    #1 0x8208223 in Type_ViewingConditions_Write /src/lcms/src/cmstypes.c:3958:10\n    #2 0x81bf091 in SaveTags /src/lcms/src/cmsio0.c:1319:18\n    #3 0x81bdeef in cmsSaveProfileToIOhandler /src/lcms/src/cmsio0.c:1392:10",
     "stack": "#0 0x81c7935 in _cmsWriteXYZNumber lcms/src/cmsplugin.c:359:102\n#1 0x8208223 in Type_ViewingConditions_Write lcms/src/cmstypes.c:3958:10\n#2 0x81bf091 in SaveTags lcms/src/cmsio0.c:1319:18\n#3 0x81bdeef in cmsSaveProfileToIOhandler lcms/src/cmsio0.c:1392:10\n#4 0x81bf7b6 in cmsSaveProfileToFile lcms/src/cmsio0.c:1433:11\n#5 0x81b70f1 in LLVMFuzzerTestOneInput cms_profile_fuzzer.c:45:5\n#6 0x80a199e in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned int) llvm-project/compiler-rt/lib/fuz",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "Type_ViewingConditions_Write",
     "file": "lcms/src/cmstypes.c",
-    "description": "Heap-buffer-overflow is caused by Type_ViewingConditions_Write blindly casting the tag payload pointer to cmsICCViewingConditions* and reading two cmsCIEXYZ structs plus a uint32 (52 bytes) without validating the allocated size/type of Ptr. In this PoV, cmsReadTag(hProfile, cmsSigGamutTag) loads a LUT8 tag object (allocated via cmsPipelineAlloc, 40 bytes), but during profile save the same data is emitted through the viewing-conditions writer path, so _cmsWriteXYZNumber reads past the 40-byte heap object at sc->SurroundXYZ.Z.",
-    "conditions": "Using cms_profile_fuzzer, attacker-controlled ICC bytes are opened, then cmsReadTag(hProfile, cmsSigGamutTag) stores malformed/incompatible tag data. On cmsSaveProfileToFile, SaveTags dispatches to Type_ViewingConditions_Write for a tag whose Ptr is not actually a cmsICCViewingConditions object (here a smaller LUT/pipeline allocation). Because Type_ViewingConditions_Write does no runtime type/size checks, it performs out-of-bounds reads when serializing IlluminantXYZ/SurroundXYZ/IlluminantType, crashing in _cmsWriteXYZNumber."
+    "description": "The root cause is type confusion in tag serialization: Type_ViewingConditions_Write blindly casts the tag payload pointer to cmsICCViewingConditions* and reads two cmsCIEXYZ structs plus a uint32, without validating that the underlying tag object actually has that layout/size. In this PoV, corrupted profile/tag state causes the writer for viewingConditions ('view') to be used on data that is not a cmsICCViewingConditions object (allocated as a smaller/different object, seen as 40-byte region from cmsPipelineAlloc). This leads to out-of-bounds reads when _cmsWriteXYZNumber accesses sc->SurroundXYZ/sc->IlluminantType (crash at _cmsWriteXYZNumber on XYZ->Z).",
+    "conditions": "Harness cms_profile_fuzzer opens attacker-controlled ICC bytes, reads tags (including cmsReadTag(cmsSigGamutTag)), then calls cmsSaveProfileToFile. During SaveTags, tag type is chosen and LocalTypeHandler.WritePtr is invoked for each tag. With malformed input that makes a tag be serialized via the viewing-conditions writer while TagPtrs[i] points to incompatible/smaller memory, Type_ViewingConditions_Write performs unchecked field reads past the allocation, triggering ASan heap-buffer-overflow during profile save."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 4,
-      "total_cost": 0.027059549999999998,
-      "total_input_tokens": 23213,
-      "total_output_tokens": 716,
-      "total_cached_tokens": 14976,
+      "total_llm_calls": 3,
+      "total_cost": 0.027373849999999998,
+      "total_input_tokens": 27511,
+      "total_output_tokens": 446,
+      "total_cached_tokens": 17152,
       "llm_calls": [
         {
-          "timestamp": 1773425968.6330035,
+          "timestamp": 1774863868.0828218,
           "model": "gpt-5.3-codex",
-          "cost": 0.0098455,
-          "input_tokens": 4330,
-          "output_tokens": 162,
-          "total_tokens": 4492,
-          "cached_tokens": 0,
+          "cost": 0.007118299999999999,
+          "input_tokens": 4418,
+          "output_tokens": 129,
+          "total_tokens": 4547,
+          "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -50,94 +50,53 @@
           "tool_call_count": 4,
           "tool_calls": [
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_7rIDTBlvtiAz9QoGs1QORubd"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_9m9lDxxo5Hn7CGf5CSwwoiq5"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_8ASNFi4PTgKxawazGQGaUtE7"
+              "tool_name": "read_source",
+              "tool_call_id": "call_5JiUt3GCg7oC2AxRBwwFZtvK"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_OelaLF4Ifq0wnZ178XwcIyNy"
+              "tool_call_id": "call_AUJfjZZj4tWd6hLfVFqD0fcu"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_IrSjDb0Krj3KsFIMeW0IgoBI"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_VMhqHF4eZIK49sN87yLrSuKR"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773425987.8773909,
+          "timestamp": 1774863937.975067,
           "model": "gpt-5.3-codex",
-          "cost": 0.0036858499999999996,
-          "input_tokens": 4743,
-          "output_tokens": 160,
-          "total_tokens": 4903,
-          "cached_tokens": 4352,
+          "cost": 0.01302175,
+          "input_tokens": 11249,
+          "output_tokens": 28,
+          "total_tokens": 11277,
+          "cached_tokens": 4480,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_V2XhtQ6cxOlROuqauwN53qO3"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_3lynwSjl64nrGkfDeStkKxmQ"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_vmn2PrpGcAxBm109U9dhIIS0"
-            },
-            {
               "tool_name": "read_source",
-              "tool_call_id": "call_DTDmg1hYicy58AlzGd3jtB68"
+              "tool_call_id": "call_veCsHP07kxfcZBiJtXb85w5W"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773425995.3192139,
+          "timestamp": 1774863947.0753288,
           "model": "gpt-5.3-codex",
-          "cost": 0.0044443,
-          "input_tokens": 5866,
-          "output_tokens": 117,
-          "total_tokens": 5983,
-          "cached_tokens": 4736,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 3,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_xVamywBUne7Kt4xdgMPm7HGg"
-            },
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_3iX1slkkzUY71n5tnSsKCQFk"
-            },
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_kOa3PRdNiCwFiuJ9Ih8b086L"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773426006.775347,
-          "model": "gpt-5.3-codex",
-          "cost": 0.009083899999999999,
-          "input_tokens": 8274,
-          "output_tokens": 277,
-          "total_tokens": 8551,
-          "cached_tokens": 5888,
+          "cost": 0.0072338,
+          "input_tokens": 11844,
+          "output_tokens": 289,
+          "total_tokens": 12133,
+          "cached_tokens": 11136,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -146,7 +105,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_pskvOTcdmseIQH1gFcFzpr77"
+              "tool_call_id": "call_64JAjex0Oc4DY0wAy48Q2bdl"
             }
           ],
           "finish_reason": "tool_calls"
@@ -155,19 +114,19 @@
     },
     "patching": {
       "total_llm_calls": 5,
-      "total_cost": 0.029754549999999998,
-      "total_input_tokens": 42193,
-      "total_output_tokens": 768,
-      "total_cached_tokens": 34816,
+      "total_cost": 0.029680349999999998,
+      "total_input_tokens": 45621,
+      "total_output_tokens": 507,
+      "total_cached_tokens": 36352,
       "llm_calls": [
         {
-          "timestamp": 1773426008.9587257,
+          "timestamp": 1774863949.8893979,
           "model": "gpt-5.3-codex",
-          "cost": 0.005502699999999999,
-          "input_tokens": 4338,
-          "output_tokens": 110,
-          "total_tokens": 4448,
-          "cached_tokens": 2304,
+          "cost": 0.0087017,
+          "input_tokens": 5502,
+          "output_tokens": 121,
+          "total_tokens": 5623,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -175,28 +134,49 @@
           "tool_call_count": 3,
           "tool_calls": [
             {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_TKCt3ne8EeZ7dvK71tid2zm1"
+            },
+            {
               "tool_name": "read_source",
-              "tool_call_id": "call_GXpGlwAGslzdJTSjtQkrwKDM"
+              "tool_call_id": "call_yo2rlGy1m62IANUfTOClXJko"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_8DXZIdMKZDRPeQFmOFUeodWT"
-            },
+              "tool_call_id": "call_zN0YQrdff5QWXMnOnWGlkGPP"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774864038.5070517,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0059787,
+          "input_tokens": 8122,
+          "output_tokens": 31,
+          "total_tokens": 8153,
+          "cached_tokens": 5504,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_YhkRM0UUEXqHti2f614wKroz"
+              "tool_call_id": "call_BYlItPH6eOg0XVtxt4mCwpnS"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773426015.3263528,
+          "timestamp": 1774864043.542301,
           "model": "gpt-5.3-codex",
-          "cost": 0.0131656,
-          "input_tokens": 8952,
-          "output_tokens": 311,
-          "total_tokens": 9263,
-          "cached_tokens": 4352,
+          "cost": 0.0098812,
+          "input_tokens": 10360,
+          "output_tokens": 318,
+          "total_tokens": 10678,
+          "cached_tokens": 8064,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -205,40 +185,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_BXl5MHfH1774ZPonPyldWT5z"
+              "tool_call_id": "call_L4bWHyM2bS8maFfd7R1o2a9n"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773426020.0704165,
+          "timestamp": 1774864047.5551763,
           "model": "gpt-5.3-codex",
-          "cost": 0.0063609,
-          "input_tokens": 9334,
-          "output_tokens": 310,
-          "total_tokens": 9644,
-          "cached_tokens": 9088,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_kSddV4RDNFNSLP7m25gG1vji"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773426021.8659477,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0023086,
-          "input_tokens": 9732,
+          "cost": 0.0025053,
+          "input_tokens": 10766,
           "output_tokens": 14,
-          "total_tokens": 9746,
-          "cached_tokens": 9472,
+          "total_tokens": 10780,
+          "cached_tokens": 10496,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -247,19 +206,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_BhlrTvnr7PQvs1BUe0uhDJDA"
+              "tool_call_id": "call_0eLqE3heBa8LGf0e0jVNaNz1"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773426035.8942804,
+          "timestamp": 1774864134.220431,
           "model": "gpt-5.3-codex",
-          "cost": 0.0024167499999999996,
-          "input_tokens": 9837,
+          "cost": 0.00261345,
+          "input_tokens": 10871,
           "output_tokens": 23,
-          "total_tokens": 9860,
-          "cached_tokens": 9600,
+          "total_tokens": 10894,
+          "cached_tokens": 10624,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -268,7 +227,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_yxg54EfRLstbuq4VFVGSiBOG"
+              "tool_call_id": "call_m8wbs4YexcefNc4xpAuuKbuK"
             }
           ],
           "finish_reason": "tool_calls"
@@ -276,15 +235,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.05681409999999999,
-      "total_input_tokens": 65406,
-      "total_output_tokens": 1484,
-      "total_llm_calls": 9
+      "total_cost": 0.0570542,
+      "total_input_tokens": 73132,
+      "total_output_tokens": 953,
+      "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/cmstypes.c\n+++ b/src/cmstypes.c\n@@ -3952,15 +3952,24 @@\n static\n cmsBool Type_ViewingConditions_Write(struct _cms_typehandler_struct* self, cmsIOHANDLER* io, void* Ptr, cmsUInt32Number nItems)\n {\n+    cmsUInt32Number expectedSize;\n     cmsICCViewingConditions* sc = (cmsICCViewingConditions* ) Ptr;\n \n+    // This writer handles exactly one cmsICCViewingConditions structure.\n+    // Reject malformed/incompatible payloads to avoid out-of-bounds reads\n+    // when a tag pointer is incorrectly typed.\n+    if (sc == NULL) return FALSE;\n+    if (nItems != 1) return FALSE;\n+\n+    expectedSize = (cmsUInt32Number) sizeof(cmsICCViewingConditions);\n+    if (io->ReportedSize < expectedSize) return FALSE;\n+\n     if (!_cmsWriteXYZNumber(io, &sc ->IlluminantXYZ)) return FALSE;\n     if (!_cmsWriteXYZNumber(io, &sc ->SurroundXYZ)) return FALSE;\n     if (!_cmsWriteUInt32Number(io, sc ->IlluminantType)) return FALSE;\n \n     return TRUE;\n \n-    cmsUNUSED_PARAMETER(nItems);\n     cmsUNUSED_PARAMETER(self);\n }\n \n",
+    "patch": "--- a/src/cmstypes.c\n+++ b/src/cmstypes.c\n@@ -3952,15 +3952,19 @@\n static\n cmsBool Type_ViewingConditions_Write(struct _cms_typehandler_struct* self, cmsIOHANDLER* io, void* Ptr, cmsUInt32Number nItems)\n {\n-    cmsICCViewingConditions* sc = (cmsICCViewingConditions* ) Ptr;\n+    cmsICCViewingConditions sc;\n \n-    if (!_cmsWriteXYZNumber(io, &sc ->IlluminantXYZ)) return FALSE;\n-    if (!_cmsWriteXYZNumber(io, &sc ->SurroundXYZ)) return FALSE;\n-    if (!_cmsWriteUInt32Number(io, sc ->IlluminantType)) return FALSE;\n+    if (Ptr == NULL || nItems != 1) return FALSE;\n+\n+    if (!_cmsSafeMemcpy(&sc, Ptr, sizeof(cmsICCViewingConditions)))\n+        return FALSE;\n+\n+    if (!_cmsWriteXYZNumber(io, &sc.IlluminantXYZ)) return FALSE;\n+    if (!_cmsWriteXYZNumber(io, &sc.SurroundXYZ)) return FALSE;\n+    if (!_cmsWriteUInt32Number(io, sc.IlluminantType)) return FALSE;\n \n     return TRUE;\n \n-    cmsUNUSED_PARAMETER(nItems);\n     cmsUNUSED_PARAMETER(self);\n }\n \n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -298,7 +257,21 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "Type_ViewingConditions_Write",
+          "lcms/src/cmstypes.c",
+          3958,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1896286.103831899,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n3953 cmsBool Type_ViewingConditions_Write(struct _cms_typehandler_struct* self, cmsIOHANDLER* io, void* Ptr,..."
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
@@ -307,7 +280,7 @@
           1319
         ],
         "kwargs": {},
-        "timestamp": 458297.558035748,
+        "timestamp": 1896238.473035834,
         "success": true,
         "result_summary": "Ok({'contents': '1220     return cmsOpenProfileFromMemTHR(NULL, MemPtr, dwSize);\\n1221 }\\n1222 \\n1223 \\n1224 \\n1225 // Dump tag contents. If the profile is being modified, untouched tags are copied fr..."
       },
@@ -315,26 +288,26 @@
         "tool_name": "read_source",
         "args": [
           "lcms/src/cmstypes.c",
-          3958
+          3953
         ],
         "kwargs": {},
-        "timestamp": 458297.561601292,
+        "timestamp": 1896327.083385641,
         "success": true,
-        "result_summary": "Ok({'contents': \"3859         if (!_cmsRead15Fixed16Number(io, &sc ->Channels[i].ScreenAngle)) goto Error;\\n3860         if (!_cmsReadUInt32Number(io, &sc ->Channels[i].SpotShape)) goto Error;\\n3861  ..."
+        "result_summary": "Ok({'contents': \"3854         sc ->nChannels = cmsMAXCHANNELS - 1;\\n3855 \\n3856     for (i=0; i < sc ->nChannels; i++) {\\n3857 \\n3858         if (!_cmsRead15Fixed16Number(io, &sc ->Channels[i].Frequen..."
       }
     ],
     "find_references": [
       {
         "tool_name": "find_references",
         "args": [
-          "Type_ViewingConditions_Write",
+          "cmsICCViewingConditions",
           "lcms/src/cmstypes.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 458298.993856132,
+        "timestamp": 1896325.736736619,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='lcms/src/cmstypes.c', refs=[FileReference(line=3953, content='cmsBool Type_ViewingConditions_Write(struct _cms_typehandler_struct* self, cmsIOHANDLER* io, void* Ptr, cmsU..."
+        "result_summary": "Ok([FileReferences(file_name='lcms/src/cmstypes.c', refs=[FileReference(line=3927, content='    cmsICCViewingConditions* vc = NULL;', enclosing_definition='Type_ViewingConditions_Read'), FileReference..."
       }
     ],
     "apply_patch": [
@@ -342,21 +315,10 @@
         "tool_name": "apply_patch",
         "args": [
           "lcms/src/cmstypes.c",
-          ".@@ -3952,14 +3952,26 @@\n static\n cmsBool Type_ViewingConditions_Write(struct _cms_typehandler_struct* self, cmsIOHANDLER* io, void* Ptr, cmsUInt32Number nItems)\n {\n+    cmsUInt32Number expectedSize;\n     cmsICCViewingConditions* sc = (cmsICCViewingConditions* ) Ptr;\n+\n+    // This writer handles exactly one cmsICCViewingConditions structure.\n+    // Reject malformed/incompatible payloads to avoid out-of-bounds reads\n+    // when a tag pointer is incorrectly typed.\n+    if (sc == NULL) return FALSE;\n+    if (nItems != 1) return FALSE;\n+\n+    expectedSize = (cmsUInt32Number) sizeof(cmsICCViewingConditions);\n+    if (io->ReportedSize < expectedSize) return FALSE;\n \n     if (!_cmsWriteXYZNumber(io, &sc ->IlluminantXYZ)) return FALSE;\n     if (!_cmsWriteXYZNumber(io, &sc ->SurroundXYZ)) return FALSE;\n     if (!_cmsWriteUInt32Number(io, sc ->IlluminantType)) return FALSE;\n \n     return TRUE;\n \n-    cmsUNUSED_PARAMETER(nItems);\n     cmsUNUSED_PARAMETER(self);\n }\n"
+          "@@ -3952,14 +3952,20 @@\n static\n cmsBool Type_ViewingConditions_Write(struct _cms_typehandler_struct* self, cmsIOHANDLER* io, void* Ptr, cmsUInt32Number nItems)\n {\n-    cmsICCViewingConditions* sc = (cmsICCViewingConditions* ) Ptr;\n+    cmsICCViewingConditions sc;\n+\n+    if (Ptr == NULL || nItems != 1) return FALSE;\n+\n+    if (!_cmsSafeMemcpy(&sc, Ptr, sizeof(cmsICCViewingConditions)))\n+        return FALSE;\n \n-    if (!_cmsWriteXYZNumber(io, &sc ->IlluminantXYZ)) return FALSE;\n-    if (!_cmsWriteXYZNumber(io, &sc ->SurroundXYZ)) return FALSE;\n-    if (!_cmsWriteUInt32Number(io, sc ->IlluminantType)) return FALSE;\n+    if (!_cmsWriteXYZNumber(io, &sc.IlluminantXYZ)) return FALSE;\n+    if (!_cmsWriteXYZNumber(io, &sc.SurroundXYZ)) return FALSE;\n+    if (!_cmsWriteUInt32Number(io, sc.IlluminantType)) return FALSE;\n \n     return TRUE;\n \n-    cmsUNUSED_PARAMETER(nItems);\n     cmsUNUSED_PARAMETER(self);\n }\n"
         ],
         "kwargs": {},
-        "timestamp": 458303.901534129,
-        "success": true,
-        "result_summary": "Err(CRSError(Invalid patch format. Make sure it includes the hunk headers with approximate line numbers, i.e. `@@ -l,s +l,s @@`, extra={'note': 'this patch was not applied and does not need to be undo..."
-      },
-      {
-        "tool_name": "apply_patch",
-        "args": [
-          "lcms/src/cmstypes.c",
-          "@@ -3952,14 +3952,26 @@\n static\n cmsBool Type_ViewingConditions_Write(struct _cms_typehandler_struct* self, cmsIOHANDLER* io, void* Ptr, cmsUInt32Number nItems)\n {\n+    cmsUInt32Number expectedSize;\n     cmsICCViewingConditions* sc = (cmsICCViewingConditions* ) Ptr;\n+\n+    // This writer handles exactly one cmsICCViewingConditions structure.\n+    // Reject malformed/incompatible payloads to avoid out-of-bounds reads\n+    // when a tag pointer is incorrectly typed.\n+    if (sc == NULL) return FALSE;\n+    if (nItems != 1) return FALSE;\n+\n+    expectedSize = (cmsUInt32Number) sizeof(cmsICCViewingConditions);\n+    if (io->ReportedSize < expectedSize) return FALSE;\n \n     if (!_cmsWriteXYZNumber(io, &sc ->IlluminantXYZ)) return FALSE;\n     if (!_cmsWriteXYZNumber(io, &sc ->SurroundXYZ)) return FALSE;\n     if (!_cmsWriteUInt32Number(io, sc ->IlluminantType)) return FALSE;\n \n     return TRUE;\n \n-    cmsUNUSED_PARAMETER(nItems);\n     cmsUNUSED_PARAMETER(self);\n }\n"
-        ],
-        "kwargs": {},
-        "timestamp": 458308.729855627,
+        "timestamp": 1896332.490600694,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -366,7 +328,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 458323.360427599,
+        "timestamp": 1896421.525442307,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

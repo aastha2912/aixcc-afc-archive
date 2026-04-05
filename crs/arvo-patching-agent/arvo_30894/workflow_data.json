@@ -1,5 +1,5 @@
 {
-  "vuln_id": 234,
+  "vuln_id": 391,
   "crash_result": {
     "output": "==59243==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000c58 at pc 0x000000556f47 bp 0x7ffdc6d8b610 sp 0x7ffdc6d8add8\nREAD of size 16 at 0x602000000c58 thread T0\nSCARINESS: 26 (multi-byte-read-heap-buffer-overflow)\n    #0 0x556f46 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n    #1 0x9059c7 in sp_exch /src/wolfssl-sp-math-all/wolfcrypt/src/sp_int.c:2433:9\n    #2 0x7ef40d in cryptofuzz::module::wolfCrypt_bignum::Set::Run(fuzz",
     "stack": "#0 0x556f46 in __asan_memcpy llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n#1 0x9059c7 in sp_exch wolfssl-sp-math-all/wolfcrypt/src/sp_int.c:2433:9\n#2 0x7ef40d in cryptofuzz::module::wolfCrypt_bignum::Set::Run(fuzzing::datasource::Datasource&, cryptofuzz::module::wolfCrypt_bignum::Bignum&, cryptofuzz::module::wolfCrypt_bignum::BignumCluster&) const cryptofuzz-sp-math-all/modules/wolfcrypt/bn_ops.cpp:863:17\n#3 0x7bfdaf in cryptofuzz::module::wolfCrypt::OpBignumCalc(cr",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "sp_exch",
     "file": "wolfssl-sp-math-all/wolfcrypt/src/sp_int.c",
-    "description": "Heap buffer over-read in sp_exch due to incorrect copy size after swapping differently-sized sp_int values. sp_exch allocates temp buffer sized for a->used, copies a into it, then copies b into a, and finally copies temp back into b using MP_INT_SIZEOF(a->used). But a->used has already been overwritten with b->used, so the last memcpy reads past temp when b->used > original a->used.",
-    "conditions": "Triggered via cryptofuzz Set::Run case 2 calling mp_exch(res, bn[0]) with SP math build (no return check path). If res has fewer used limbs than bn[0], sp_exch allocates temp for the smaller res size, then after a<-b uses the larger updated a->used for the final copy from temp to b, causing OOB read. PoV causes this size mismatch and crashes in __asan_memcpy from sp_exch."
+    "description": "sp_exch performs three whole-struct memcpy operations using size values derived from mutable fields (a->used / b->used). After copying b into a, it uses MP_INT_SIZEOF(a->used) for the final copy back into b, but a->used has already been overwritten with b->used. The temporary buffer t was only allocated for the original a->used size, so the last XMEMCPY can read past t (and/or write past b) when b->used > original a->used, causing the ASan heap-buffer-overflow read.",
+    "conditions": "Triggered when cryptofuzz Set::Run selects mp_exch (case 2) with two sp_int values having different used lengths, specifically where second operand has larger used than first. Data flow: fuzz input -> OpBignumCalc -> wolfCrypt_bignum::Set::Run -> mp_exch/sp_exch. sp_exch allocates temp based on initial a->used, then updates a from b and incorrectly reuses updated a->used for final copy size, leading to OOB access."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.032557,
-      "total_input_tokens": 16068,
-      "total_output_tokens": 317,
+      "total_cost": 0.033285,
+      "total_input_tokens": 16244,
+      "total_output_tokens": 347,
       "total_cached_tokens": 0,
       "llm_calls": [
         {
-          "timestamp": 1773542509.8787873,
+          "timestamp": 1774838470.8118784,
           "model": "gpt-5.3-codex",
-          "cost": 0.011523750000000001,
-          "input_tokens": 5889,
+          "cost": 0.01167775,
+          "input_tokens": 5977,
           "output_tokens": 87,
-          "total_tokens": 5976,
+          "total_tokens": 6064,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,22 +51,22 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_zwkjbe4sKM5Y6D79zfJ00fyR"
+              "tool_call_id": "call_4o8rPNjP38kbWskBkxDNR2Th"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_KeoeDBnthJuAKwjUncTSJqyI"
+              "tool_call_id": "call_mSFc1sKwj7Ac5NjaeGINfqdn"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773543055.1094522,
+          "timestamp": 1774840852.5601437,
           "model": "gpt-5.3-codex",
-          "cost": 0.02103325,
-          "input_tokens": 10179,
-          "output_tokens": 230,
-          "total_tokens": 10409,
+          "cost": 0.02160725,
+          "input_tokens": 10267,
+          "output_tokens": 260,
+          "total_tokens": 10527,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -76,7 +76,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_1v8XRxm4GRjrNQ51BLg7YdK3"
+              "tool_call_id": "call_OQ9h27m3YZL4NLQjem55wZ1a"
             }
           ],
           "finish_reason": "tool_calls"
@@ -85,19 +85,19 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.0422912,
-      "total_input_tokens": 29704,
-      "total_output_tokens": 431,
-      "total_cached_tokens": 9984,
+      "total_cost": 0.04204305,
+      "total_input_tokens": 37719,
+      "total_output_tokens": 405,
+      "total_cached_tokens": 18816,
       "llm_calls": [
         {
-          "timestamp": 1773543056.8767729,
+          "timestamp": 1774840854.8271046,
           "model": "gpt-5.3-codex",
-          "cost": 0.00686945,
-          "input_tokens": 5327,
-          "output_tokens": 84,
-          "total_tokens": 5411,
-          "cached_tokens": 2304,
+          "cost": 0.01392475,
+          "input_tokens": 7253,
+          "output_tokens": 88,
+          "total_tokens": 7341,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -106,23 +106,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_gvE3jfAKNQoKcSfJ7u3Ir9Ix"
+              "tool_call_id": "call_MNvv9kxmUVsEem6mp6A1wJnx"
             },
             {
-              "tool_name": "find_references",
-              "tool_call_id": "call_uqol7ixTghKk5BQfemxDkEwc"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_yQpoY6bLPO0arXUkvu32ByN5"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773543074.978967,
+          "timestamp": 1774840924.7688015,
           "model": "gpt-5.3-codex",
-          "cost": 0.0180355,
-          "input_tokens": 7826,
-          "output_tokens": 310,
-          "total_tokens": 8136,
-          "cached_tokens": 0,
+          "cost": 0.009911650000000001,
+          "input_tokens": 9875,
+          "output_tokens": 280,
+          "total_tokens": 10155,
+          "cached_tokens": 7168,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -131,19 +131,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_OXppLToCNRb5g3emMX42uCbw"
+              "tool_call_id": "call_EjgcYntkOk9W9nusggD0sQyj"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773543076.1855388,
+          "timestamp": 1774840926.292167,
           "model": "gpt-5.3-codex",
-          "cost": 0.00249025,
-          "input_tokens": 8223,
+          "cost": 0.00239645,
+          "input_tokens": 10243,
           "output_tokens": 14,
-          "total_tokens": 8237,
-          "cached_tokens": 7680,
+          "total_tokens": 10257,
+          "cached_tokens": 9984,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -152,19 +152,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_vs6Ds3XVpuICuEyj59PJNGPn"
+              "tool_call_id": "call_YKgzyxz2AmPKFc4BN3qmrsKX"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773544346.261424,
+          "timestamp": 1774841721.835014,
           "model": "gpt-5.3-codex",
-          "cost": 0.014896,
-          "input_tokens": 8328,
+          "cost": 0.0158102,
+          "input_tokens": 10348,
           "output_tokens": 23,
-          "total_tokens": 8351,
-          "cached_tokens": 0,
+          "total_tokens": 10371,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -173,7 +173,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_WIoxDGB6EtXtbPpCh1W8bO7D"
+              "tool_call_id": "call_ryoMxRmMJx81aMmGXsqFCSiQ"
             }
           ],
           "finish_reason": "tool_calls"
@@ -181,15 +181,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.0748482,
-      "total_input_tokens": 45772,
-      "total_output_tokens": 748,
+      "total_cost": 0.07532805000000001,
+      "total_input_tokens": 53963,
+      "total_output_tokens": 752,
       "total_llm_calls": 6
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/wolfcrypt/src/sp_int.c\n+++ b/wolfcrypt/src/sp_int.c\n@@ -2420,17 +2420,21 @@\n int sp_exch(sp_int* a, sp_int* b)\n {\n     int err = MP_OKAY;\n+    int aUsed = 1;\n     DECL_SP_INT(t, (a != NULL) ? a->used : 1);\n \n     if ((a == NULL) || (b == NULL)) {\n         err = MP_VAL;\n     }\n+    else {\n+        aUsed = a->used;\n+    }\n \n-    ALLOC_SP_INT(t, a->used, err, NULL);\n+    ALLOC_SP_INT(t, aUsed, err, NULL);\n     if (err == MP_OKAY) {\n-        XMEMCPY(t, a, MP_INT_SIZEOF(a->used));\n+        XMEMCPY(t, a, MP_INT_SIZEOF(aUsed));\n         XMEMCPY(a, b, MP_INT_SIZEOF(b->used));\n-        XMEMCPY(b, t, MP_INT_SIZEOF(a->used));\n+        XMEMCPY(b, t, MP_INT_SIZEOF(aUsed));\n     }\n \n     FREE_SP_INT(t, NULL);\n",
+    "patch": "--- a/wolfcrypt/src/sp_int.c\n+++ b/wolfcrypt/src/sp_int.c\n@@ -2420,17 +2420,19 @@\n int sp_exch(sp_int* a, sp_int* b)\n {\n     int err = MP_OKAY;\n+    int aUsed;\n     DECL_SP_INT(t, (a != NULL) ? a->used : 1);\n \n     if ((a == NULL) || (b == NULL)) {\n         err = MP_VAL;\n     }\n \n+    aUsed = a->used;\n     ALLOC_SP_INT(t, a->used, err, NULL);\n     if (err == MP_OKAY) {\n-        XMEMCPY(t, a, MP_INT_SIZEOF(a->used));\n+        XMEMCPY(t, a, MP_INT_SIZEOF(aUsed));\n         XMEMCPY(a, b, MP_INT_SIZEOF(b->used));\n-        XMEMCPY(b, t, MP_INT_SIZEOF(a->used));\n+        XMEMCPY(b, t, MP_INT_SIZEOF(aUsed));\n     }\n \n     FREE_SP_INT(t, NULL);\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -203,7 +203,21 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "sp_exch",
+          "wolfssl/wolfcrypt/src/sp_int.c",
+          2400,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1873209.814848114,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n2420 ERROR reading contents: path 'wolfssl/wolfcrypt/src/sp_int.c' does not exist in directory tree. Similar..."
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
@@ -212,34 +226,21 @@
           2433
         ],
         "kwargs": {},
-        "timestamp": 575355.185478285,
+        "timestamp": 1873143.886163597,
         "success": true,
         "result_summary": "Ok({'contents': '2334         for (i = 0; i < a->used; i++) {\\n2335             a->dp[i] = 0;\\n2336         }\\n2337         _sp_zero(a);\\n2338     }\\n2339 }\\n2340 \\n2341 #if !defined(WOLFSSL_RSA_PUBLI..."
       }
     ],
-    "find_references": [
-      {
-        "tool_name": "find_references",
-        "args": [
-          "sp_exch",
-          "wolfssl/wolfcrypt/src/sp_int.c",
-          false
-        ],
-        "kwargs": {},
-        "timestamp": 575359.624350551,
-        "success": true,
-        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: wolfssl/wolfssl/wolfcrypt/sp_int.h, extra=None))"
-      }
-    ],
+    "find_references": [],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "wolfssl/wolfcrypt/src/sp_int.c",
-          "@@ -2420,18 +2420,22 @@\n int sp_exch(sp_int* a, sp_int* b)\n {\n     int err = MP_OKAY;\n+    int aUsed = 1;\n     DECL_SP_INT(t, (a != NULL) ? a->used : 1);\n \n     if ((a == NULL) || (b == NULL)) {\n         err = MP_VAL;\n     }\n+    else {\n+        aUsed = a->used;\n+    }\n \n-    ALLOC_SP_INT(t, a->used, err, NULL);\n+    ALLOC_SP_INT(t, aUsed, err, NULL);\n     if (err == MP_OKAY) {\n-        XMEMCPY(t, a, MP_INT_SIZEOF(a->used));\n+        XMEMCPY(t, a, MP_INT_SIZEOF(aUsed));\n         XMEMCPY(a, b, MP_INT_SIZEOF(b->used));\n-        XMEMCPY(b, t, MP_INT_SIZEOF(a->used));\n+        XMEMCPY(b, t, MP_INT_SIZEOF(aUsed));\n     }\n \n     FREE_SP_INT(t, NULL);\n     return err;\n }\n"
+          "@@ -2420,18 +2420,21 @@\n int sp_exch(sp_int* a, sp_int* b)\n {\n     int err = MP_OKAY;\n+    int aUsed;\n     DECL_SP_INT(t, (a != NULL) ? a->used : 1);\n \n     if ((a == NULL) || (b == NULL)) {\n         err = MP_VAL;\n     }\n \n+    aUsed = a->used;\n     ALLOC_SP_INT(t, a->used, err, NULL);\n     if (err == MP_OKAY) {\n-        XMEMCPY(t, a, MP_INT_SIZEOF(a->used));\n+        XMEMCPY(t, a, MP_INT_SIZEOF(aUsed));\n         XMEMCPY(a, b, MP_INT_SIZEOF(b->used));\n-        XMEMCPY(b, t, MP_INT_SIZEOF(a->used));\n+        XMEMCPY(b, t, MP_INT_SIZEOF(aUsed));\n     }\n \n     FREE_SP_INT(t, NULL);\n     return err;\n }\n"
         ],
         "kwargs": {},
-        "timestamp": 575363.67284892,
+        "timestamp": 1873213.498976541,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -249,7 +250,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 576633.347716646,
+        "timestamp": 1874009.044390617,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

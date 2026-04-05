@@ -1,5 +1,5 @@
 {
-  "vuln_id": 146,
+  "vuln_id": 458,
   "crash_result": {
     "output": "==9374==ERROR: AddressSanitizer: use-after-poison on address 0x79f2136fd881 at pc 0x000000489b6d bp 0x7ffea571cb10 sp 0x7ffea571c2d0\nREAD of size 10 at 0x79f2136fd881 thread T0\nSCARINESS: 36 (multi-byte-read-use-after-poison)\n    #0 0x489b6c in __interceptor_strncpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors.cpp:470:5\n    #1 0x6262c5 in dissect_softether_host_fqdn /src/ndpi/src/lib/protocols/softether.c:223:2\n    #2 0x624e4b in ndpi_search_softether /src/ndpi/src/lib/protocols/soft",
     "stack": "#0 0x489b6c in __interceptor_strncpy llvm-project/compiler-rt/lib/asan/asan_interceptors.cpp:470:5\n#1 0x6262c5 in dissect_softether_host_fqdn ndpi/src/lib/protocols/softether.c:223:2\n#2 0x624e4b in ndpi_search_softether ndpi/src/lib/protocols/softether.c:313:8\n#3 0x561a85 in check_ndpi_detection_func ndpi/src/lib/ndpi_main.c:5660:6\n#4 0x563895 in ndpi_check_flow_func ndpi/src/lib/ndpi_main.c\n#5 0x56cfee in ndpi_detection_process_packet ndpi/src/lib/ndpi_main.c:6572:15\n#6 0x4dbf2b in LLVMFuzzerTe",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "dissect_softether_host_fqdn",
     "file": "ndpi/src/lib/protocols/softether.c",
-    "description": "In `dissect_softether_host_fqdn`, the code copies `val1.value_size` bytes from `val1.value.ptr.value_str` using `strncpy` after only checking `val1.type == VALUE_STR && val1.value_size > 0`. It does not verify that `val1.value_size` is actually within the remaining packet buffer for that parsed value. A malformed SoftEther tuple can therefore produce a VALUE_STR with an oversized length, causing `strncpy` to read past valid packet data into ASan-poisoned memory (use-after-poison read). The crash occurs at the `strncpy` into `flow->protos.softether.fqdn` (and similarly possible for hostname).",
-    "conditions": "Via `fuzz_process_packet`, attacker-controlled packet bytes reach `ndpi_detection_process_packet` and then `ndpi_search_softether`, which calls `dissect_softether_host_fqdn` for payloads >=99 bytes. The input must parse enough to set `got_fqdn`/`got_hostname` and produce a `val1` tuple marked as VALUE_STR with positive but inconsistent/too-large `value_size`, so `len = min(val1.value_size, dst_size-1)` remains nonzero while source bytes are not fully available. Then `strncpy(..., val1.value.ptr.value_str, len)` performs an out-of-bounds read from poisoned region, triggering the reported ASan error."
+    "description": "The root cause is unsafe length use when comparing/copying parsed tuple strings: code uses attacker-controlled parsed lengths (`value_siz` / `val2.value_size`) as the `n` argument to `strncmp`/`strncpy` without proving the referenced source buffer is that large and valid for string reads. In particular, after `dissect_softether_type(VALUE_DATA, &val1, ...)`, it does `strncmp(val1.value.ptr.value_str, \"host_name\", value_siz)`, where `value_siz` is the total consumed field size (metadata + payload), not the actual string length. Similar pattern exists for `ddns_fqdn` check and subsequent `strncpy` from parsed pointers. This causes over-read from poisoned bytes (ASan use-after-poison) in `strncpy` at line ~223.",
+    "conditions": "Triggered via `fuzz_process_packet` -> `ndpi_detection_process_packet` -> `ndpi_search_softether`, when packet payload length is >=99 so SoftEther host/FQDN parser runs. A crafted SoftEther-like payload must make tuple parsing succeed enough to set `got_fqdn`/`got_hostname` and provide VALUE_STR/VALUE_DATA entries whose reported sizes/consumed sizes are inconsistent with actual accessible bytes, so `strncmp`/`strncpy` read past valid packet data into poisoned redzone. Input is fully attacker-controlled packet bytes from the harness."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.019901349999999998,
-      "total_input_tokens": 14361,
-      "total_output_tokens": 548,
+      "total_cost": 0.02058735,
+      "total_input_tokens": 14673,
+      "total_output_tokens": 558,
       "total_cached_tokens": 8192,
       "llm_calls": [
         {
-          "timestamp": 1773429928.8145757,
+          "timestamp": 1774864826.7318726,
           "model": "gpt-5.3-codex",
-          "cost": 0.0045493,
-          "input_tokens": 3166,
-          "output_tokens": 102,
-          "total_tokens": 3268,
+          "cost": 0.0048713,
+          "input_tokens": 3254,
+          "output_tokens": 114,
+          "total_tokens": 3368,
           "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,26 +51,26 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_wThIh4Ctq72Ce0su7foqJcJp"
+              "tool_call_id": "call_jblADNdvleIn7qCc9pJJ3X10"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_eFRKB3w8akIucslWmk6RpZCh"
+              "tool_call_id": "call_NI2GkP8CHlyB0tj01A9294F0"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_1qlctZn0EaV69gf6vGFLPWat"
+              "tool_call_id": "call_4eRqol21PkRfmmou8HObGbJ7"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773430055.3213673,
+          "timestamp": 1774865048.857488,
           "model": "gpt-5.3-codex",
-          "cost": 0.00245,
-          "input_tokens": 3416,
+          "cost": 0.002646,
+          "input_tokens": 3528,
           "output_tokens": 108,
-          "total_tokens": 3524,
+          "total_tokens": 3636,
           "cached_tokens": 3200,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -80,26 +80,26 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_iUSspfbpPPW7QjayHiAyZZZg"
+              "tool_call_id": "call_yK6Wy7xEx0nNQhXVDrpIskwc"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_4YdKkGKvLXgxs1qHp7j0AG8a"
+              "tool_call_id": "call_XE2HLS7BhzZas9OZyxU6t1Yk"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ZQ8DtTJJKBU4i7SOJjjwwfhz"
+              "tool_call_id": "call_eU4ro46kaan0ZqVOyrfvnHzW"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773430064.7587843,
+          "timestamp": 1774865055.0670245,
           "model": "gpt-5.3-codex",
-          "cost": 0.01290205,
-          "input_tokens": 7779,
-          "output_tokens": 338,
-          "total_tokens": 8117,
+          "cost": 0.01307005,
+          "input_tokens": 7891,
+          "output_tokens": 336,
+          "total_tokens": 8227,
           "cached_tokens": 3456,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -109,7 +109,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_KxvlzQdjwtpSjzhLnD7BXf5y"
+              "tool_call_id": "call_hMbL6K2J24gZYPui5eTmrvln"
             }
           ],
           "finish_reason": "tool_calls"
@@ -118,18 +118,18 @@
     },
     "patching": {
       "total_llm_calls": 5,
-      "total_cost": 0.02621745,
-      "total_input_tokens": 27215,
-      "total_output_tokens": 602,
-      "total_cached_tokens": 18944,
+      "total_cost": 0.027980400000000002,
+      "total_input_tokens": 31152,
+      "total_output_tokens": 783,
+      "total_cached_tokens": 23808,
       "llm_calls": [
         {
-          "timestamp": 1773430066.7237525,
+          "timestamp": 1774865057.388955,
           "model": "gpt-5.3-codex",
-          "cost": 0.007588,
-          "input_tokens": 3712,
-          "output_tokens": 78,
-          "total_tokens": 3790,
+          "cost": 0.00907025,
+          "input_tokens": 4479,
+          "output_tokens": 88,
+          "total_tokens": 4567,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -139,23 +139,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_sCK2c4cGw9tdZPgyRJW2p53g"
+              "tool_call_id": "call_BzIOikK1U4xG3rkPCtO3Qa2v"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_4iRoBiJw8SoT9ZZO0rTQ46Bq"
+              "tool_call_id": "call_54nCeffpSqftDVirX3AAhmo9"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773430094.8920794,
+          "timestamp": 1774865084.074825,
           "model": "gpt-5.3-codex",
-          "cost": 0.0015526,
-          "input_tokens": 3956,
+          "cost": 0.00158025,
+          "input_tokens": 4663,
           "output_tokens": 34,
-          "total_tokens": 3990,
-          "cached_tokens": 3712,
+          "total_tokens": 4697,
+          "cached_tokens": 4480,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -164,19 +164,19 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_YpCjEgg2jHWDXFL5opT1bV0O"
+              "tool_call_id": "call_AagpnnUPDhR9fzxddOCSPqLP"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773430101.754407,
+          "timestamp": 1774865090.9688208,
           "model": "gpt-5.3-codex",
-          "cost": 0.0134232,
-          "input_tokens": 6120,
-          "output_tokens": 453,
-          "total_tokens": 6573,
-          "cached_tokens": 2304,
+          "cost": 0.01342565,
+          "input_tokens": 6827,
+          "output_tokens": 624,
+          "total_tokens": 7451,
+          "cached_tokens": 4608,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -185,19 +185,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_AGcy1LYhM3tEHiSzQ17oTvb8"
+              "tool_call_id": "call_aSbgZ048UUqdoGuNzDquzvl3"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773430103.2975383,
+          "timestamp": 1774865092.344233,
           "model": "gpt-5.3-codex",
-          "cost": 0.00177275,
-          "input_tokens": 6661,
+          "cost": 0.00189805,
+          "input_tokens": 7539,
           "output_tokens": 14,
-          "total_tokens": 6675,
-          "cached_tokens": 6400,
+          "total_tokens": 7553,
+          "cached_tokens": 7296,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -206,19 +206,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_W3zd8t9Kfz8hgDnO7WwtSUnQ"
+              "tool_call_id": "call_sME7Wy5LKFfyIVq2Rwly9wcJ"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773430218.2363245,
+          "timestamp": 1774865342.7079053,
           "model": "gpt-5.3-codex",
-          "cost": 0.0018809,
-          "input_tokens": 6766,
+          "cost": 0.0020061999999999997,
+          "input_tokens": 7644,
           "output_tokens": 23,
-          "total_tokens": 6789,
-          "cached_tokens": 6528,
+          "total_tokens": 7667,
+          "cached_tokens": 7424,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -227,7 +227,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_AxAaHF4XPXBexWScyIKwYoNK"
+              "tool_call_id": "call_56prNIaKxrRCFxDypBOJgTDk"
             }
           ],
           "finish_reason": "tool_calls"
@@ -235,15 +235,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.0461188,
-      "total_input_tokens": 41576,
-      "total_output_tokens": 1150,
+      "total_cost": 0.04856775000000001,
+      "total_input_tokens": 45825,
+      "total_output_tokens": 1341,
       "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/ndpi/src/lib/protocols/softether.c\n+++ b/ndpi/src/lib/protocols/softether.c\n@@ -208,9 +208,10 @@\n \n     if(got_hostname == 1) {\n       if(val1.type == VALUE_STR && val1.value_size > 0) {\n-\tsize_t len = ndpi_min(val1.value_size, sizeof(flow->protos.softether.hostname) - 1);\n+\tsize_t src_len = ndpi_min((size_t)val1.value_size, (size_t)payload_len);\n+\tsize_t len = ndpi_min(src_len, sizeof(flow->protos.softether.hostname) - 1);\n \t      \n-\tstrncpy(flow->protos.softether.hostname, val1.value.ptr.value_str, len);\n+\tmemcpy(flow->protos.softether.hostname, val1.value.ptr.value_str, len);\n \tflow->protos.softether.hostname[len] = '\\0';\n       }\n \t  \n@@ -218,9 +219,10 @@\n     }\n     if(got_fqdn == 1) {\n       if(val1.type == VALUE_STR && val1.value_size > 0)  {\n-\tsize_t len = ndpi_min(val1.value_size, sizeof(flow->protos.softether.fqdn) - 1);\n+\tsize_t src_len = ndpi_min((size_t)val1.value_size, (size_t)payload_len);\n+\tsize_t len = ndpi_min(src_len, sizeof(flow->protos.softether.fqdn) - 1);\n \t      \n-\tstrncpy(flow->protos.softether.fqdn, val1.value.ptr.value_str, len);\n+\tmemcpy(flow->protos.softether.fqdn, val1.value.ptr.value_str, len);\n \tflow->protos.softether.fqdn[len] = '\\0';\n       }\n \t  \n",
+    "patch": "--- a/ndpi/src/lib/protocols/softether.c\n+++ b/ndpi/src/lib/protocols/softether.c\n@@ -198,7 +198,8 @@\n   payload += value_siz;\n   payload_len -= value_siz;\n \n-  if(strncmp(val1.value.ptr.value_str, \"host_name\", value_siz) == 0)\n+  if(val1.type == VALUE_DATA && val1.value_size == NDPI_STATICSTRING_LEN(\"host_name\") &&\n+     strncmp(val1.value.ptr.value_str, \"host_name\", NDPI_STATICSTRING_LEN(\"host_name\")) == 0)\n     got_hostname = 1;\n \n   for (; tuple_count > 0; --tuple_count) {\n@@ -210,7 +211,7 @@\n       if(val1.type == VALUE_STR && val1.value_size > 0) {\n \tsize_t len = ndpi_min(val1.value_size, sizeof(flow->protos.softether.hostname) - 1);\n \t      \n-\tstrncpy(flow->protos.softether.hostname, val1.value.ptr.value_str, len);\n+\tmemcpy(flow->protos.softether.hostname, val1.value.ptr.value_str, len);\n \tflow->protos.softether.hostname[len] = '\\0';\n       }\n \t  \n@@ -220,15 +221,16 @@\n       if(val1.type == VALUE_STR && val1.value_size > 0)  {\n \tsize_t len = ndpi_min(val1.value_size, sizeof(flow->protos.softether.fqdn) - 1);\n \t      \n-\tstrncpy(flow->protos.softether.fqdn, val1.value.ptr.value_str, len);\n+\tmemcpy(flow->protos.softether.fqdn, val1.value.ptr.value_str, len);\n \tflow->protos.softether.fqdn[len] = '\\0';\n       }\n \t  \n       got_fqdn = 0;\n     }\n \n-    if(val2.type == VALUE_DATA && val2.value_size > 0 &&\n-       strncmp(val2.value.ptr.value_str, \"ddns_fqdn\", val2.value_size) == 0)\t{\n+    if(val2.type == VALUE_DATA &&\n+       val2.value_size == NDPI_STATICSTRING_LEN(\"ddns_fqdn\") &&\n+       strncmp(val2.value.ptr.value_str, \"ddns_fqdn\", NDPI_STATICSTRING_LEN(\"ddns_fqdn\")) == 0) {\n       got_fqdn = 1;\n     }\n \n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -266,7 +266,7 @@
           223
         ],
         "kwargs": {},
-        "timestamp": 462356.400046422,
+        "timestamp": 1897347.023254778,
         "success": true,
         "result_summary": "Err(CRSError(path 'src/lib/protocols/softether.c' does not exist in directory tree. Similar paths: ndpi/src/lib/protocols/softether.c, extra=None))"
       },
@@ -277,7 +277,7 @@
           223
         ],
         "kwargs": {},
-        "timestamp": 462383.515722284,
+        "timestamp": 1897372.650287692,
         "success": true,
         "result_summary": "Ok({'contents': '124 }\\n125 \\n126 /* ***************************************************** */\\n127 \\n128 static int softether_type_to_enum(u_int32_t type, enum softether_value_type *result) {\\n129   s..."
       }
@@ -287,13 +287,13 @@
         "tool_name": "find_references",
         "args": [
           "dissect_softether_host_fqdn",
-          "",
+          "src/lib/protocols/softether.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 462382.082830721,
+        "timestamp": 1897371.346908076,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='ndpi/src/lib/protocols/softether.c', refs=[FileReference(line=313, content='    if(dissect_softether_host_fqdn(flow, packet) == 0) {', enclosing_definition='ndpi_search_s..."
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: ndpi/src/lib/protocols/softether.c, extra=None))"
       }
     ],
     "apply_patch": [
@@ -301,10 +301,10 @@
         "tool_name": "apply_patch",
         "args": [
           "ndpi/src/lib/protocols/softether.c",
-          "@@ -209,18 +209,22 @@ static int dissect_softether_host_fqdn(struct ndpi_flow_struct *flow,\n     if(got_hostname == 1) {\n       if(val1.type == VALUE_STR && val1.value_size > 0) {\n-\tsize_t len = ndpi_min(val1.value_size, sizeof(flow->protos.softether.hostname) - 1);\n+\tsize_t src_len = ndpi_min((size_t)val1.value_size, (size_t)payload_len);\n+\tsize_t len = ndpi_min(src_len, sizeof(flow->protos.softether.hostname) - 1);\n \t      \n-\tstrncpy(flow->protos.softether.hostname, val1.value.ptr.value_str, len);\n+\tmemcpy(flow->protos.softether.hostname, val1.value.ptr.value_str, len);\n \tflow->protos.softether.hostname[len] = '\\0';\n       }\n \t  \n       got_hostname = 0;\n     }\n     if(got_fqdn == 1) {\n       if(val1.type == VALUE_STR && val1.value_size > 0)  {\n-\tsize_t len = ndpi_min(val1.value_size, sizeof(flow->protos.softether.fqdn) - 1);\n+\tsize_t src_len = ndpi_min((size_t)val1.value_size, (size_t)payload_len);\n+\tsize_t len = ndpi_min(src_len, sizeof(flow->protos.softether.fqdn) - 1);\n \t      \n-\tstrncpy(flow->protos.softether.fqdn, val1.value.ptr.value_str, len);\n+\tmemcpy(flow->protos.softether.fqdn, val1.value.ptr.value_str, len);\n \tflow->protos.softether.fqdn[len] = '\\0';\n       }\n \t  \n"
+          "@@ -198,8 +198,9 @@ static int dissect_softether_host_fqdn(struct ndpi_flow_struct *flow,\n   payload += value_siz;\n   payload_len -= value_siz;\n \n-  if(strncmp(val1.value.ptr.value_str, \"host_name\", value_siz) == 0)\n+  if(val1.type == VALUE_DATA && val1.value_size == NDPI_STATICSTRING_LEN(\"host_name\") &&\n+     strncmp(val1.value.ptr.value_str, \"host_name\", NDPI_STATICSTRING_LEN(\"host_name\")) == 0)\n     got_hostname = 1;\n@@ -210,7 +211,7 @@ static int dissect_softether_host_fqdn(struct ndpi_flow_struct *flow,\n       if(val1.type == VALUE_STR && val1.value_size > 0) {\n \tsize_t len = ndpi_min(val1.value_size, sizeof(flow->protos.softether.hostname) - 1);\n \t      \n-\tstrncpy(flow->protos.softether.hostname, val1.value.ptr.value_str, len);\n+\tmemcpy(flow->protos.softether.hostname, val1.value.ptr.value_str, len);\n \tflow->protos.softether.hostname[len] = '\\0';\n       }\n \t  \n@@ -220,15 +221,16 @@ static int dissect_softether_host_fqdn(struct ndpi_flow_struct *flow,\n       if(val1.type == VALUE_STR && val1.value_size > 0)  {\n \tsize_t len = ndpi_min(val1.value_size, sizeof(flow->protos.softether.fqdn) - 1);\n \t      \n-\tstrncpy(flow->protos.softether.fqdn, val1.value.ptr.value_str, len);\n+\tmemcpy(flow->protos.softether.fqdn, val1.value.ptr.value_str, len);\n \tflow->protos.softether.fqdn[len] = '\\0';\n       }\n \t  \n       got_fqdn = 0;\n     }\n \n-    if(val2.type == VALUE_DATA && val2.value_size > 0 &&\n-       strncmp(val2.value.ptr.value_str, \"ddns_fqdn\", val2.value_size) == 0)\t{\n+    if(val2.type == VALUE_DATA &&\n+       val2.value_size == NDPI_STATICSTRING_LEN(\"ddns_fqdn\") &&\n+       strncmp(val2.value.ptr.value_str, \"ddns_fqdn\", NDPI_STATICSTRING_LEN(\"ddns_fqdn\")) == 0) {\n       got_fqdn = 1;\n     }\n"
         ],
         "kwargs": {},
-        "timestamp": 462390.360644457,
+        "timestamp": 1897379.743484314,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -314,7 +314,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 462505.121130333,
+        "timestamp": 1897630.025665054,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

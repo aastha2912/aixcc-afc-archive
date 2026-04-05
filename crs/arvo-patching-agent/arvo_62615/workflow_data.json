@@ -1,5 +1,5 @@
 {
-  "vuln_id": 191,
+  "vuln_id": 510,
   "crash_result": {
     "output": "==106887==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x6190000013f8 at pc 0x000000c0a1bb bp 0x7ffe2883ccb0 sp 0x7ffe2883cca8\nREAD of size 8 at 0x6190000013f8 thread T0\nSCARINESS: 33 (8-byte-read-heap-buffer-overflow-far-from-bounds)\n    #0 0xc0a1ba in ExecuteRPN /src/imagemagick/MagickCore/fx.c:3652:87\n    #1 0xc01aeb in FxEvaluateChannelExpression /src/imagemagick/MagickCore/fx.c:4013:8\n    #2 0xd07537 in InterpretImageProperties /src/imagemagick/MagickCore/property.c:4003:18\n    ",
     "stack": "#0 0xc0a1ba in ExecuteRPN imagemagick/MagickCore/fx.c:3652:87\n#1 0xc01aeb in FxEvaluateChannelExpression imagemagick/MagickCore/fx.c:4013:8\n#2 0xd07537 in InterpretImageProperties imagemagick/MagickCore/property.c:4003:18\n#3 0xfb1d5e in ReadLABELImage imagemagick/coders/label.c:148:9\n#4 0xb462f8 in ReadImage imagemagick/MagickCore/constitute.c:736:15\n#5 0x992bc1 in Magick::Image::read(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&) imagemagick/Magick",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "ExecuteRPN",
     "file": "imagemagick/MagickCore/fx.c",
-    "description": "Heap OOB read in ExecuteRPN when evaluating channel-qualified pixel access for expressions like `%[hex:u.intensity]`. In the fU0 path, INTENSITY_CHANNEL is handled by calling GetIntensity(), but then control falls through to the generic channel access block (missing `break`), which indexes `pimg->channel_map[WHICH_NON_ATTR_CHAN].offset`. For `u.intensity`, this qualifier is not a real mapped channel, so the computed offset is invalid and causes an out-of-bounds read from the pixel buffer.",
-    "conditions": "Data flow: LABEL coder calls InterpretImageProperties on attacker-controlled filename text; `%[hex:...]` invokes AcquireFxInfo/FxEvaluateChannelExpression multiple times (R/G/B/A channels). With PoC `%[hex:u.intensity]`, ExecuteRPN parses `u.intensity` into fU0 + INTENSITY_CHANNEL and executes the INTENSITY branch. Because of missing `break` after `regA = GetIntensity(...)`, execution continues into generic channel_map indexing, producing an invalid offset and triggering ASan heap-buffer-overflow read. Minimal trigger is a LABEL input containing that property expansion string."
+    "description": "Heap OOB read in FX evaluator due to using a channel-map offset without validating it against the current pixel layout. In ExecuteRPN (fU0/fU/fV paths), code reads p[pimg->channel_map[WHICH_NON_ATTR_CHAN].offset] (or pv[...] similarly). For expression '%[hex:u.intensity]', the parser routes through InterpretImageProperties->AcquireFxInfo/FxEvaluateChannelExpression with channel=Red/Green/Blue/Alpha, but the 'u.intensity' lookup causes WHICH_NON_ATTR_CHAN/ChannelQual handling to select an invalid offset for the image\u2019s channel map, and ExecuteRPN dereferences beyond the allocated pixel channel map buffer.",
+    "conditions": "Trigger via LABEL coder property interpolation of a crafted filename/property string containing a braced FX/hex expression, e.g. '%[hex:u.intensity]'. Data flow: ReadLABELImage() passes image_info->filename to InterpretImageProperties(); 'hex:' invokes FxEvaluateChannelExpression multiple times; ExecuteRPN evaluates 'u.intensity' at (0,0) and performs unchecked channel_map offset indexing on current pixel data. Requires expression to reach fU0/fU-style channel read with mismatched/invalid channel qualifier so computed offset exceeds available channels, producing heap-buffer-overflow read."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.028996099999999997,
-      "total_input_tokens": 18350,
-      "total_output_tokens": 411,
+      "total_cost": 0.0296401,
+      "total_input_tokens": 18526,
+      "total_output_tokens": 435,
       "total_cached_tokens": 5632,
       "llm_calls": [
         {
-          "timestamp": 1773517979.5684423,
+          "timestamp": 1774880433.1345158,
           "model": "gpt-5.3-codex",
-          "cost": 0.0078631,
-          "input_tokens": 4442,
+          "cost": 0.0080171,
+          "input_tokens": 4530,
           "output_tokens": 136,
-          "total_tokens": 4578,
+          "total_tokens": 4666,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,30 +51,30 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_BVt59EHYWNMLOXbmVnUew96D"
+              "tool_call_id": "call_yJoi6YfNvdqmtjHyY6MJtivQ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_qS3CTwpja6xXC4GguXPxPrLg"
+              "tool_call_id": "call_gKGEsRAOgwVfXpoew0duQ1Bg"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_FqDdNFJFCzH8wsh2Wzn7XPAa"
+              "tool_call_id": "call_mMIG2BMzwrUfrTydMYfKnWS1"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_XRajFvMXyaU0pzBfxVH7YvVw"
+              "tool_call_id": "call_D2tgz4FAy76XzqAws147P1EF"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773517994.3441792,
+          "timestamp": 1774880440.138276,
           "model": "gpt-5.3-codex",
-          "cost": 0.021133,
-          "input_tokens": 13908,
-          "output_tokens": 275,
-          "total_tokens": 14183,
+          "cost": 0.021623,
+          "input_tokens": 13996,
+          "output_tokens": 299,
+          "total_tokens": 14295,
           "cached_tokens": 4480,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -84,7 +84,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_MSpPISEbN6fmtrvH4qEYovUh"
+              "tool_call_id": "call_Mb8w0YWDY8BJAo4zODTqgqLg"
             }
           ],
           "finish_reason": "tool_calls"
@@ -93,18 +93,18 @@
     },
     "patching": {
       "total_llm_calls": 3,
-      "total_cost": 0.017207399999999998,
-      "total_input_tokens": 18700,
-      "total_output_tokens": 346,
-      "total_cached_tokens": 12928,
+      "total_cost": 0.04051705,
+      "total_input_tokens": 28887,
+      "total_output_tokens": 1472,
+      "total_cached_tokens": 19456,
       "llm_calls": [
         {
-          "timestamp": 1773517996.0973952,
+          "timestamp": 1774880442.3783743,
           "model": "gpt-5.3-codex",
-          "cost": 0.0059296999999999996,
-          "input_tokens": 4190,
-          "output_tokens": 87,
-          "total_tokens": 4277,
+          "cost": 0.0084847,
+          "input_tokens": 5706,
+          "output_tokens": 80,
+          "total_tokens": 5786,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -114,23 +114,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_nUYLdTyySgiqVHHs8xbjckaL"
+              "tool_call_id": "call_B7T2AesrCDdwg4eaGnZ3fIJD"
             },
             {
-              "tool_name": "find_references",
-              "tool_call_id": "call_8fljhLfYtCaU9awXe7xNrfCC"
+              "tool_name": "read_source",
+              "tool_call_id": "call_MCSfCGwntSRmNJxPcCezZoyj"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773518028.7043855,
+          "timestamp": 1774880458.8149397,
           "model": "gpt-5.3-codex",
-          "cost": 0.00830655,
-          "input_tokens": 7153,
-          "output_tokens": 160,
-          "total_tokens": 7313,
-          "cached_tokens": 4096,
+          "cost": 0.028765100000000002,
+          "input_tokens": 10906,
+          "output_tokens": 1325,
+          "total_tokens": 12231,
+          "cached_tokens": 5632,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +139,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_nnmVyMezhAHwbQg1Xws3HzUP"
+              "tool_call_id": "call_o4ptVC9N1rRQ9sYK2awDe8Cd"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773518031.0830717,
+          "timestamp": 1774880460.9829707,
           "model": "gpt-5.3-codex",
-          "cost": 0.00297115,
-          "input_tokens": 7357,
-          "output_tokens": 99,
-          "total_tokens": 7456,
-          "cached_tokens": 7168,
+          "cost": 0.00326725,
+          "input_tokens": 12275,
+          "output_tokens": 67,
+          "total_tokens": 12342,
+          "cached_tokens": 12160,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,7 +160,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_59V5P1Wt3uZJkBn9Q2zKS3vC"
+              "tool_call_id": "call_A2XhJleE9sEswLlnpWQ5hXnx"
             }
           ],
           "finish_reason": "tool_calls"
@@ -168,9 +168,9 @@
       ]
     },
     "total": {
-      "total_cost": 0.046203499999999995,
-      "total_input_tokens": 37050,
-      "total_output_tokens": 757,
+      "total_cost": 0.07015715,
+      "total_input_tokens": 47413,
+      "total_output_tokens": 1907,
       "total_llm_calls": 5
     }
   },
@@ -189,25 +189,23 @@
           3652
         ],
         "kwargs": {},
-        "timestamp": 550284.776333865,
+        "timestamp": 1912730.954493724,
         "success": true,
         "result_summary": "Ok({'contents': '3553                                    pfx->Imgs[0].View, imgx, imgy, 1,1, pfx->exception);\\n3554                     if (!pv) {\\n3555                       (void) ThrowMagickExcepti..."
-      }
-    ],
-    "find_references": [
+      },
       {
-        "tool_name": "find_references",
+        "tool_name": "read_source",
         "args": [
-          "INTENSITY_CHANNEL",
           "imagemagick/MagickCore/fx.c",
-          false
+          4013
         ],
         "kwargs": {},
-        "timestamp": 550314.911826205,
+        "timestamp": 1912730.955723874,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='imagemagick/MagickCore/fx.c', refs=[FileReference(line=591, content='  {\"lightness\",  LIGHT_CHANNEL},', enclosing_definition='INTENSITY_CHANNEL'), FileReference(line=712,..."
+        "result_summary": "Ok({'contents': '3914           regA = QuantumScale * (double) GetPixelGreen (img, p);\\n3915           break;\\n3916         case sO: /* alpha */\\n3917           regA = QuantumScale * (double) GetPixel..."
       }
     ],
+    "find_references": [],
     "apply_patch": [],
     "test_patch": [],
     "undo_last_patch": [],

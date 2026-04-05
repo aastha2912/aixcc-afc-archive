@@ -9,7 +9,7 @@
         1740
       ],
       "kwargs": {},
-      "timestamp": 421515.275597278,
+      "timestamp": 1871206.424889932,
       "success": true,
       "result_summary": "Ok({'contents': '1641       }\\n1642       if (rbytes != BLOSC_MIN_HEADER_LENGTH) {\\n1643         if (frame->sframe) {\\n1644           free(data_chunk);\\n1645         }\\n1646         else {\\n1647      ..."
     }
@@ -23,7 +23,7 @@
         false
       ],
       "kwargs": {},
-      "timestamp": 421579.914508032,
+      "timestamp": 1871327.740802853,
       "success": true,
       "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/frame.c', refs=[FileReference(line=1826, content='  ret = get_coffset(frame, header_len, cbytes, nchunk, &offset);', enclosing_definition='frame_get_chunk'..."
     }
@@ -33,10 +33,10 @@
       "tool_name": "apply_patch",
       "args": [
         "c-blosc2/blosc/frame.c",
-        "@@ -1737,8 +1737,25 @@ int get_coffset(blosc2_frame_s* frame, int32_t header_len, int64_t cbytes, int3\n   }\n \n+  // Validate that coffsets is a sane Blosc buffer before reading items from it.\n+  // Corrupted frame metadata may point to invalid/non-Blosc memory here.\n+  int32_t offsets_nbytes, offsets_cbytes, offsets_blocksize;\n+  int rc = blosc_cbuffer_sizes(coffsets, &offsets_nbytes, &offsets_cbytes, &offsets_blocksize);\n+  if (rc < 0) {\n+    BLOSC_TRACE_ERROR(\"Invalid offsets chunk while retrieving chunk %d offset.\", nchunk);\n+    return BLOSC2_ERROR_DATA;\n+  }\n+\n+  // We request one int64 item at index nchunk.\n+  if (offsets_nbytes < 0 || (int64_t)offsets_nbytes < ((int64_t)nchunk + 1) * (int64_t)sizeof(int64_t)) {\n+    BLOSC_TRACE_ERROR(\"Offsets chunk too small for chunk %d offset.\", nchunk);\n+    return BLOSC2_ERROR_DATA;\n+  }\n+\n   // Get the 64-bit offset\n-  int rc = blosc_getitem(coffsets, nchunk, 1, offset);\n+  rc = blosc_getitem(coffsets, nchunk, 1, offset);\n   if (rc < 0) {\n     BLOSC_TRACE_ERROR(\"Problems retrieving a chunk offset.\");\n+  } else if (rc != 1) {\n+    BLOSC_TRACE_ERROR(\"Unexpected number of items retrieved for chunk offset: %d\", rc);\n+    rc = BLOSC2_ERROR_DATA;\n   } else if (*offset > frame->len) {\n     BLOSC_TRACE_ERROR(\"Cannot read chunk %d outside of frame boundary.\", nchunk);\n     rc = BLOSC2_ERROR_READ_BUFFER;"
+        "@@ -1731,6 +1731,7 @@\n int get_coffset(blosc2_frame_s* frame, int32_t header_len, int64_t cbytes, int32_t nchunk, int64_t *offset) {\n   // Get the offset to nchunk\n   uint8_t *coffsets = get_coffsets(frame, header_len, cbytes, NULL);\n+  int32_t nitems;\n   if (coffsets == NULL) {\n     BLOSC_TRACE_ERROR(\"Cannot get the offset for chunk %d for the frame.\", nchunk);\n     return BLOSC2_ERROR_DATA;\n@@ -1738,6 +1739,19 @@ int get_coffset(blosc2_frame_s* frame, int32_t header_len, int64_t cbytes, int3\n \n   // Get the 64-bit offset\n   int rc = blosc_getitem(coffsets, nchunk, 1, offset);\n+  rc = blosc_cbuffer_sizes(coffsets, NULL, NULL, &nitems);\n+  if (rc < 0) {\n+    BLOSC_TRACE_ERROR(\"Cannot get number of items in chunk offsets container.\");\n+    return rc;\n+  }\n+\n+  if (nchunk < 0 || nchunk >= nitems) {\n+    BLOSC_TRACE_ERROR(\"Chunk index %d is out of bounds for offsets container with %d items.\",\n+                      nchunk, nitems);\n+    return BLOSC2_ERROR_INVALID_PARAM;\n+  }\n+\n+  rc = blosc_getitem(coffsets, nchunk, 1, offset);\n   if (rc < 0) {\n     BLOSC_TRACE_ERROR(\"Problems retrieving a chunk offset.\");\n   } else if (*offset > frame->len) {\n"
       ],
       "kwargs": {},
-      "timestamp": 421587.024195763,
+      "timestamp": 1871333.13560754,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
@@ -46,7 +46,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 421641.157599252,
+      "timestamp": 1873042.607484405,
       "success": true,
       "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
     }

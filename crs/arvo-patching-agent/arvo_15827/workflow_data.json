@@ -1,5 +1,5 @@
 {
-  "vuln_id": 46,
+  "vuln_id": 330,
   "crash_result": {
     "output": "==89715==ERROR: AddressSanitizer: heap-use-after-free on address 0x604000016e28 at pc 0x0000008ab0c7 bp 0x7fff5ddc15f0 sp 0x7fff5ddc15e8\nREAD of size 8 at 0x604000016e28 thread T0\nSCARINESS: 51 (8-byte-read-heap-use-after-free)\n    #0 0x8ab0c6 in DestroyStringInfo /src/imagemagick/MagickCore/string.c:843:3\n    #1 0xad6aa1 in ReadJPEGImage_ /src/imagemagick/coders/jpeg.c:1206:31\n    #2 0xad631e in ReadJPEGImage /src/imagemagick/coders/jpeg.c:1634:10\n    #3 0x6a61b7 in ReadImage /src/imagemagick/M",
     "stack": "#0 0x8ab0c6 in DestroyStringInfo imagemagick/MagickCore/string.c:843:3\n#1 0xad6aa1 in ReadJPEGImage_ imagemagick/coders/jpeg.c:1206:31\n#2 0xad631e in ReadJPEGImage imagemagick/coders/jpeg.c:1634:10\n#3 0x6a61b7 in ReadImage imagemagick/MagickCore/constitute.c:563:15\n#4 0x63e063 in BlobToImage imagemagick/MagickCore/blob.c:475:13\n#5 0x997d83 in ReadJNXImage imagemagick/coders/jnx.c:310:18\n#6 0x6a61b7 in ReadImage imagemagick/MagickCore/constitute.c:563:15\n#7 0x63e063 in BlobToImage imagemagick/Mag",
@@ -24,54 +24,58 @@
   "analyzed_vuln": {
     "function": "ReadICCProfile",
     "file": "imagemagick/coders/jpeg.c",
-    "description": "Heap use-after-free caused by stale pointer in error_manager->profile. In ReadICCProfile(), on short-read/error path (i != length), profile is freed via DestroyStringInfo(profile) but error_manager->profile is not cleared before returning FALSE. Later, JPEG error unwinding in ReadJPEGImage_() setjmp handler unconditionally checks error_manager.profile and calls DestroyStringInfo(error_manager.profile), causing a second destroy of already-freed StringInfo and UAF in DestroyStringInfo().",
-    "conditions": "Input must reach JPEG ICC marker parsing and trigger ReadICCProfile() allocation, then hit the insufficient-data path (truncated ICC payload / EOF while reading marker body). Data flow here is encoder_jnx_fuzzer -> JNX decode -> embedded JPEG decode; crafted APP2 ICC_PROFILE marker with declared length larger than available bytes causes ReadICCProfile() to free profile and return FALSE while leaving error_manager->profile dangling, then ReadJPEGImage_ cleanup dereferences/frees it again."
+    "description": "`ReadICCProfile` frees a `StringInfo *profile` on short/EOF marker data (`profile=DestroyStringInfo(profile); return FALSE;`) but does not clear `error_manager->profile`, which was set to the same pointer before reading marker bytes. Later, JPEG error recovery in `ReadJPEGImage_` checks `error_manager.profile` and destroys it again, causing a double-destroy/use-after-free observed in `DestroyStringInfo`.",
+    "conditions": "Input must drive the JNX->JPEG path and include an ICC APP2 marker (`ICC_PROFILE`) whose declared segment length is larger than available bytes so `ReadICCProfile` hits the `i != length` error path. This leaves a dangling pointer in `jpeg_info->client_data` (`ErrorManager.profile`), then libjpeg triggers error recovery (`setjmp` path in `ReadJPEGImage_`) which destroys the stale pointer again. The provided PoC does this with truncated ICC data in the embedded JPEG stream."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.024613749999999997,
-      "total_input_tokens": 18329,
-      "total_output_tokens": 331,
-      "total_cached_tokens": 7680,
+      "total_cost": 0.02702945,
+      "total_input_tokens": 19183,
+      "total_output_tokens": 368,
+      "total_cached_tokens": 7424,
       "llm_calls": [
         {
-          "timestamp": 1773368808.805885,
+          "timestamp": 1774815779.0712543,
           "model": "gpt-5.3-codex",
-          "cost": 0.009848299999999999,
-          "input_tokens": 6202,
-          "output_tokens": 101,
-          "total_tokens": 6303,
-          "cached_tokens": 1536,
+          "cost": 0.011097099999999999,
+          "input_tokens": 6290,
+          "output_tokens": 136,
+          "total_tokens": 6426,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_rAyaGqB3CMOKXaId9PRtBwpF"
+              "tool_call_id": "call_9SkC0OHnQNjSaMYzDIFZFi6l"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_pvewm0s0xk1CwVwKmIUH7YQg"
+              "tool_call_id": "call_7vsm0JRsDkjsQkZ7jVZhIqXB"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_qEBiI2ziEBUQmWIzkgwYTN6Q"
+              "tool_call_id": "call_Du8psRyjhr4qXfCl0UQdkyEQ"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_rBioKNsXjvDyzg70aaZ3W6Pn"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368824.566049,
+          "timestamp": 1774816667.2043772,
           "model": "gpt-5.3-codex",
-          "cost": 0.01476545,
-          "input_tokens": 12127,
-          "output_tokens": 230,
-          "total_tokens": 12357,
-          "cached_tokens": 6144,
+          "cost": 0.01593235,
+          "input_tokens": 12893,
+          "output_tokens": 232,
+          "total_tokens": 13125,
+          "cached_tokens": 6272,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +84,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_cRoL2aG9hfQJDRK9WUxCdUo4"
+              "tool_call_id": "call_lXr0aGyB3q19llszsLyPM6Af"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,20 +92,20 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 6,
-      "total_cost": 0.032242,
-      "total_input_tokens": 57048,
-      "total_output_tokens": 500,
-      "total_cached_tokens": 47360,
+      "total_llm_calls": 7,
+      "total_cost": 0.0477603,
+      "total_input_tokens": 87202,
+      "total_output_tokens": 676,
+      "total_cached_tokens": 72576,
       "llm_calls": [
         {
-          "timestamp": 1773368826.4487238,
+          "timestamp": 1774816669.9874127,
           "model": "gpt-5.3-codex",
-          "cost": 0.00638295,
-          "input_tokens": 5137,
+          "cost": 0.01419775,
+          "input_tokens": 7529,
           "output_tokens": 73,
-          "total_tokens": 5210,
-          "cached_tokens": 2304,
+          "total_tokens": 7602,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -110,23 +114,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_m602Cwlhc79DELyn5S9r2KqG"
+              "tool_call_id": "call_BJdTE36tjmlgjZqi4sAkMqwn"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_sC4PBIKfYkbXrpnHXIlzPJUM"
+              "tool_call_id": "call_7aEQPtaRMb37fbVpktUg58M6"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368829.3897638,
+          "timestamp": 1774816672.5894928,
           "model": "gpt-5.3-codex",
-          "cost": 0.01027775,
-          "input_tokens": 9233,
-          "output_tokens": 156,
-          "total_tokens": 9389,
-          "cached_tokens": 5120,
+          "cost": 0.011204200000000001,
+          "input_tokens": 11580,
+          "output_tokens": 188,
+          "total_tokens": 11768,
+          "cached_tokens": 7424,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,40 +139,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_luPqEHe5TYUyy8vzpd535R7h"
+              "tool_call_id": "call_wUNG4Sdm3KG1zv88Gz9TXomq"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368831.4161372,
+          "timestamp": 1774816673.7898116,
           "model": "gpt-5.3-codex",
-          "cost": 0.00372155,
-          "input_tokens": 9549,
-          "output_tokens": 109,
-          "total_tokens": 9658,
-          "cached_tokens": 9216,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_jG4NmXgJON3LFJR3jiVyjBn6"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773368833.3924098,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0026901,
-          "input_tokens": 9822,
+          "cost": 0.0029484000000000003,
+          "input_tokens": 11928,
           "output_tokens": 30,
-          "total_tokens": 9852,
-          "cached_tokens": 9472,
+          "total_tokens": 11958,
+          "cached_tokens": 11648,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,19 +160,19 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_PtVahPDZ9edXDcCFFYbkoDkG"
+              "tool_call_id": "call_W17U8lZwq5pNgLWhJz3ybSmO"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368835.4143984,
+          "timestamp": 1774816675.8973413,
           "model": "gpt-5.3-codex",
-          "cost": 0.006359149999999999,
-          "input_tokens": 11517,
+          "cost": 0.0068033,
+          "input_tokens": 13614,
           "output_tokens": 109,
-          "total_tokens": 11626,
-          "cached_tokens": 9728,
+          "total_tokens": 13723,
+          "cached_tokens": 11776,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -198,19 +181,61 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_mSpUnipztdc109zuTTmqlcMf"
+              "tool_call_id": "call_cVpy25atVovOkKl4AAIjp8AT"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368836.7186778,
+          "timestamp": 1774816678.0202951,
           "model": "gpt-5.3-codex",
-          "cost": 0.0028104999999999996,
-          "input_tokens": 11790,
+          "cost": 0.00479465,
+          "input_tokens": 13887,
+          "output_tokens": 133,
+          "total_tokens": 14020,
+          "cached_tokens": 13568,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_iOiZlQYbWiFJ320KxbHJsHRC"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774816679.8636687,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0045381,
+          "input_tokens": 14190,
+          "output_tokens": 120,
+          "total_tokens": 14310,
+          "cached_tokens": 13952,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_896U9dZDE7vsBYqBNnyoy8cf"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774816680.9240172,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0032738999999999997,
+          "input_tokens": 14474,
           "output_tokens": 23,
-          "total_tokens": 11813,
-          "cached_tokens": 11520,
+          "total_tokens": 14497,
+          "cached_tokens": 14208,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -219,7 +244,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_1pwStFzdJ0hi3S3LoEQJngDY"
+              "tool_call_id": "call_v3LMv7CDqrbm8VSUH70vaq5k"
             }
           ],
           "finish_reason": "tool_calls"
@@ -227,10 +252,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.05685575,
-      "total_input_tokens": 75377,
-      "total_output_tokens": 831,
-      "total_llm_calls": 8
+      "total_cost": 0.07478975,
+      "total_input_tokens": 106385,
+      "total_output_tokens": 1044,
+      "total_llm_calls": 9
     }
   },
   "patch_result": {
@@ -245,34 +270,34 @@
         "tool_name": "read_source",
         "args": [
           "imagemagick/coders/jpeg.c",
-          560
+          540
         ],
         "kwargs": {},
-        "timestamp": 401115.177483943,
+        "timestamp": 1848958.56333256,
         "success": true,
-        "result_summary": "Ok({'contents': '461   image=error_manager->image;\\n462   GetProfileLength(jpeg_info,length);\\n463   if (length <= 2)\\n464     return(TRUE);\\n465   length-=2;\\n466   comment=BlobToStringInfo((const vo..."
+        "result_summary": "Ok({'contents': '441   Image\\n442     *image;\\n443 \\n444   register unsigned char\\n445     *p;\\n446 \\n447   register ssize_t\\n448     i;\\n449 \\n450   size_t\\n451     length;\\n452 \\n453   StringInfo\\n4..."
       },
       {
         "tool_name": "read_source",
         "args": [
           "imagemagick/coders/jpeg.c",
-          1206
+          1180
         ],
         "kwargs": {},
-        "timestamp": 401115.178723773,
+        "timestamp": 1848958.56429872,
         "success": true,
-        "result_summary": "Ok({'contents': '1107         jpeg_info->comp_info[2].v_samp_factor,\\n1108         jpeg_info->comp_info[3].h_samp_factor,\\n1109         jpeg_info->comp_info[3].v_samp_factor);\\n1110       break;\\n1111..."
+        "result_summary": "Ok({'contents': '1081         jpeg_info->comp_info[0].h_samp_factor,\\n1082         jpeg_info->comp_info[0].v_samp_factor);\\n1083       break;\\n1084     }\\n1085     case JCS_RGB:\\n1086     {\\n1087     ..."
       },
       {
         "tool_name": "read_source",
         "args": [
           "imagemagick/coders/jpeg.c",
-          586
+          580
         ],
         "kwargs": {},
-        "timestamp": 401121.967983697,
+        "timestamp": 1848962.365232535,
         "success": true,
-        "result_summary": "Ok({'contents': '487   }\\n488   *p=\\'\\\\0\\';\\n489   error_manager->profile=NULL;\\n490   if (i != (ssize_t) length)\\n491     {\\n492       comment=DestroyStringInfo(comment);\\n493       (void) ThrowMagic..."
+        "result_summary": "Ok({'contents': '481       c;\\n482 \\n483     c=GetCharacter(jpeg_info);\\n484     if (c == EOF)\\n485       break;\\n486     *p++=(unsigned char) c;\\n487   }\\n488   *p=\\'\\\\0\\';\\n489   error_manager->prof..."
       }
     ],
     "find_references": [],
@@ -281,10 +306,10 @@
         "tool_name": "apply_patch",
         "args": [
           "imagemagick/coders/jpeg.c",
-          "@@ -584,11 +584,13 @@ static boolean ReadICCProfile(j_decompress_ptr jpeg_info)\n     *p++=(unsigned char) c;\n   }\n   if (i != (ssize_t) length)\n     {\n+      error_manager->profile=NULL;\n       profile=DestroyStringInfo(profile);\n       (void) ThrowMagickException(exception,GetMagickModule(),\n         CorruptImageError,\"InsufficientImageDataInFile\",\"`%s'\",\n         image->filename);\n       return(FALSE);\n     }\n   error_manager->profile=NULL;\n"
+          "@@ -584,12 +584,13 @@\n     *p++=(unsigned char) c;\n   }\n   if (i != (ssize_t) length)\n     {\n+      error_manager->profile=NULL;\n       profile=DestroyStringInfo(profile);\n       (void) ThrowMagickException(exception,GetMagickModule(),\n         CorruptImageError,\"InsufficientImageDataInFile\",\"`%s'\",\n         image->filename);\n       return(FALSE);\n     }\n-  error_manager->profile=NULL;\n+  error_manager->profile=NULL;\n   icc_profile=(StringInfo *) GetImageProfile(image,\"icc\");\n   if (icc_profile != (StringInfo *) NULL)\n     {"
         ],
         "kwargs": {},
-        "timestamp": 401117.992411872,
+        "timestamp": 1848961.18840205,
         "success": true,
         "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 584): The patch context lines have introduced a typographic error. The context you provided removed `{`. Please double check ..."
       },
@@ -295,7 +320,7 @@
           "@@ -586,6 +586,7 @@\n   if (i != (ssize_t) length)\n     {\n+      error_manager->profile=NULL;\n       profile=DestroyStringInfo(profile);\n       (void) ThrowMagickException(exception,GetMagickModule(),\n         CorruptImageError,\"InsufficientImageDataInFile\",\"`%s'\",\n"
         ],
         "kwargs": {},
-        "timestamp": 401120.023733789,
+        "timestamp": 1848964.489216995,
         "success": true,
         "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 586): The patch context lines have introduced a typographic error. The context you provided inserted `)`. Please double check..."
       },
@@ -303,10 +328,21 @@
         "tool_name": "apply_patch",
         "args": [
           "imagemagick/coders/jpeg.c",
-          "@@ -586,6 +586,7 @@\n   if (i != (ssize_t) length)\n     {\n+      error_manager->profile=NULL;\n       profile=DestroyStringInfo(profile);\n       (void) ThrowMagickException(exception,GetMagickModule(),\n         CorruptImageError,\"InsufficientImageDataInFile\",\"`%s'\",\n"
+          "@@ -583,9 +583,10 @@\n       break;\n     *p++=(unsigned char) c;\n   }\n   if (i != (ssize_t) length)\n     {\n+      error_manager->profile=NULL;\n       profile=DestroyStringInfo(profile);\n       (void) ThrowMagickException(exception,GetMagickModule(),\n         CorruptImageError,\"InsufficientImageDataInFile\",\"`%s'\",\n         image->filename);\n"
         ],
         "kwargs": {},
-        "timestamp": 401124.023105845,
+        "timestamp": 1848966.614025683,
+        "success": true,
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 583): The patch context lines have introduced a typographic error. The context you provided removed `)`. Please double check ..."
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "imagemagick/coders/jpeg.c",
+          "@@ -586,7 +586,8 @@\n   if (i != (ssize_t) length)\n     {\n+      error_manager->profile=NULL;\n       profile=DestroyStringInfo(profile);\n       (void) ThrowMagickException(exception,GetMagickModule(),\n         CorruptImageError,\"InsufficientImageDataInFile\",\"`%s'\",\n         image->filename);\n       return(FALSE);\n"
+        ],
+        "kwargs": {},
+        "timestamp": 1848968.465442299,
         "success": true,
         "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 586): The patch context lines have introduced a typographic error. The context you provided inserted `)`. Please double check..."
       }

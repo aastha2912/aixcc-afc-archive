@@ -1,5 +1,5 @@
 {
-  "vuln_id": 58,
+  "vuln_id": 351,
   "crash_result": {
     "output": "AddressSanitizer:DEADLYSIGNAL\n=================================================================\n==69175==ERROR: AddressSanitizer: SEGV on unknown address (pc 0x000000be9de4 bp 0x7fffb4203e40 sp 0x7fffb4203e20 T0)\n==69175==The signal is caused by a READ memory access.\n==69175==Hint: this fault was caused by a dereference of a high value address (see register values below).  Dissassemble the provided pc to learn which register was used.\nSCARINESS: 20 (wild-addr-read)\n    #0 0xbe9de4 in zend_gc_del",
     "stack": "#0 0xbe9de4 in zend_gc_delref php-src/Zend/zend_types.h:1162:2\n#1 0xbe9de4 in i_zval_ptr_dtor php-src/Zend/zend_variables.h:43:8\n#2 0xbe9de4 in zval_ptr_dtor php-src/Zend/zend_variables.c:84:2\n#3 0xc6c247 in free_attribute php-src/Zend/zend_attributes.c:185:3\n#4 0xc6c247 in attr_free php-src/Zend/zend_attributes.c:193:2\n#5 0xc3ed24 in zend_hash_destroy php-src/Zend/zend_hash.c:1566:7\n#6 0xbbd5c4 in zend_hash_release php-src/Zend/zend_hash.h:342:4\n#7 0xbbd5c4 in destroy_op_array php-src/Zend/zend",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "zend_compile_attributes",
     "file": "php-src/Zend/zend_compile.c",
-    "description": "The bug is a partially-initialized attribute argument zval being left in `attr->argv[]` when attribute argument compilation/evaluation fails on malformed input (`s->getAtelf::FOO` in the PoC). In `zend_compile_attributes()`, `zend_add_attribute()` allocates the attribute and sets `argc`, but `attr->argv[j]` entries are not pre-initialized to `UNDEF` before `zend_const_expr_to_zval()` fills them. If that conversion aborts early for one argument, later shutdown frees the attribute via `free_attribute()` in `zend_attributes.c`, which blindly runs `zval_ptr_dtor(&attr->argv[i])` for all `i < argc`, causing destructor/GC on garbage zvals and crashing in `zend_gc_delref`.",
-    "conditions": "Trigger requires parsing code that creates attributes with argument expressions where at least one argument fails constant-expression conversion after the attribute object has already been allocated with nonzero argc. Data flow: fuzzer input -> parser/compiler -> `zend_compile_attributes()` allocates attribute (`zend_add_attribute`) and starts populating argv -> malformed attribute arg causes premature failure, leaving some argv slots uninitialized -> request shutdown destroys op_array attributes (`destroy_op_array` -> hash destroy -> `free_attribute`) -> invalid `zval_ptr_dtor` on uninitialized argv element leads to wild read/SEGV in `zend_gc_delref`."
+    "description": "`zend_compile_attributes()` allocates a `zend_attribute` with `argc = args->children` via `zend_add_attribute()`, but only initializes `attr->argv[j]` for arguments it successfully compiles. On malformed attribute argument AST (as in this PoV\u2019s corrupted token stream), some `attr->argv` entries remain uninitialized. Later, request shutdown frees attributes (`free_attribute()` in `zend_attributes.c`) and blindly calls `zval_ptr_dtor()` on all `argc` slots, causing invalid GC refcount dereference (`zend_gc_delref`) on garbage zvals.",
+    "conditions": "Trigger requires parsing source that reaches attribute compilation with an argument list count set, but with one or more argument nodes not producing a valid initialized zval in `attr->argv` (fuzzer-found malformed attribute expression in function/parameter attributes). The attribute table is retained in the op_array, and crash occurs during executor shutdown when `destroy_op_array -> zend_hash_destroy -> free_attribute` destructs every declared argument slot."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 4,
-      "total_cost": 0.04819185,
-      "total_input_tokens": 41279,
-      "total_output_tokens": 644,
-      "total_cached_tokens": 20992,
+      "total_cost": 0.025081,
+      "total_input_tokens": 25284,
+      "total_output_tokens": 503,
+      "total_cached_tokens": 16640,
       "llm_calls": [
         {
-          "timestamp": 1773373449.073494,
+          "timestamp": 1774820354.3145945,
           "model": "gpt-5.3-codex",
-          "cost": 0.0052031,
-          "input_tokens": 3202,
-          "output_tokens": 101,
-          "total_tokens": 3303,
+          "cost": 0.005469099999999999,
+          "input_tokens": 3290,
+          "output_tokens": 109,
+          "total_tokens": 3399,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_KvitUgJ8dNXbukcYqWgvi7wh"
+              "tool_call_id": "call_LW0jVlwKW0JZo0v8rQiGNjQb"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_9SzlVDUyWQNaDTGPkAJczoax"
+              "tool_name": "find_references",
+              "tool_call_id": "call_sGV5FjgqdpKp7eNnZXMYU7A5"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_642rxFJc2qVBLvtlco0R8zyW"
+              "tool_name": "find_references",
+              "tool_call_id": "call_jkKYzoZ3gdAa80rjVIbFwRfW"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773373461.201253,
+          "timestamp": 1774820542.141072,
           "model": "gpt-5.3-codex",
-          "cost": 0.018661999999999998,
-          "input_tokens": 9776,
-          "output_tokens": 111,
-          "total_tokens": 9887,
-          "cached_tokens": 0,
+          "cost": 0.0065061500000000005,
+          "input_tokens": 5753,
+          "output_tokens": 120,
+          "total_tokens": 5873,
+          "cached_tokens": 3328,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,56 +80,48 @@
           "tool_calls": [
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_WKDBEPSB3UvPQ6mXQMKyTFAq"
+              "tool_call_id": "call_LWPPCQ8su0YuzDJPV1LA8pVe"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_x40UObhaGFualsvSKXfpP03J"
+              "tool_call_id": "call_DwzUOUnLs8SQ1fuqTUQN8ORP"
             },
             {
-              "tool_name": "find_references",
-              "tool_call_id": "call_RXPLWZHrx7QPtY9RAh18xPJH"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_XxUnbtRQtp3IPvGGHYbMU0Qe"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773373589.2963772,
+          "timestamp": 1774820637.141005,
           "model": "gpt-5.3-codex",
-          "cost": 0.0039284,
-          "input_tokens": 10152,
-          "output_tokens": 106,
-          "total_tokens": 10258,
-          "cached_tokens": 9728,
+          "cost": 0.002856,
+          "input_tokens": 6560,
+          "output_tokens": 32,
+          "total_tokens": 6592,
+          "cached_tokens": 5760,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 1,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_pRYp9gbtLBRp9fTsayJSMwGP"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_c4NPHsjxMh5GehicSTj3FjU3"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_mKr4iqY0xRetjAqqhzNCaRfK"
+              "tool_call_id": "call_R1hQxwFDLh7x9ribeEZ7lOuK"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773373595.0088565,
+          "timestamp": 1774820641.666661,
           "model": "gpt-5.3-codex",
-          "cost": 0.020398350000000003,
-          "input_tokens": 18149,
-          "output_tokens": 326,
-          "total_tokens": 18475,
-          "cached_tokens": 10112,
+          "cost": 0.01024975,
+          "input_tokens": 9681,
+          "output_tokens": 242,
+          "total_tokens": 9923,
+          "cached_tokens": 6400,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -138,7 +130,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_5nwwQPkphByFpksMZVf6utqh"
+              "tool_call_id": "call_hBsyTPQCVGJgnutAG4U60mn6"
             }
           ],
           "finish_reason": "tool_calls"
@@ -147,77 +139,69 @@
     },
     "patching": {
       "total_llm_calls": 5,
-      "total_cost": 0.0261037,
-      "total_input_tokens": 24926,
-      "total_output_tokens": 448,
-      "total_cached_tokens": 15104,
+      "total_cost": 0.017794,
+      "total_input_tokens": 26976,
+      "total_output_tokens": 419,
+      "total_cached_tokens": 22400,
       "llm_calls": [
         {
-          "timestamp": 1773373597.1625347,
+          "timestamp": 1774820643.110368,
           "model": "gpt-5.3-codex",
-          "cost": 0.00571095,
-          "input_tokens": 3721,
-          "output_tokens": 130,
-          "total_tokens": 3851,
+          "cost": 0.0063777,
+          "input_tokens": 4398,
+          "output_tokens": 93,
+          "total_tokens": 4491,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 2,
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_bDPuQkNXnwvjaLt1CDmvEnoc"
+              "tool_call_id": "call_7fcy47KhUvu7dG74JIaIi5VZ"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_fr3XJEnQnMUrw470J382dEVY"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_KQIJ8WuYSdmficxuJ34xfa28"
+              "tool_call_id": "call_TA7ieVQ1z2OmKtb5NzXOTNOK"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773373620.127658,
+          "timestamp": 1774820664.0724378,
           "model": "gpt-5.3-codex",
-          "cost": 0.0030523499999999997,
-          "input_tokens": 4037,
-          "output_tokens": 131,
-          "total_tokens": 4168,
-          "cached_tokens": 3712,
+          "cost": 0.00252735,
+          "input_tokens": 4609,
+          "output_tokens": 94,
+          "total_tokens": 4703,
+          "cached_tokens": 4352,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 2,
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_Ymvk2qsEPYtCW4WZTyM9m9iO"
+              "tool_call_id": "call_XwXKosyqWiw1XKFTJ48jM59C"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_7AwbHfmmnZKac2KsXD19IYHc"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_Y9w7Q2T8m4CaERqTHRr4ohxa"
+              "tool_call_id": "call_lb4T4UweW0SRD7jYbF6dZ3LW"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773373643.969316,
+          "timestamp": 1774820682.11628,
           "model": "gpt-5.3-codex",
-          "cost": 0.01177575,
-          "input_tokens": 5529,
-          "output_tokens": 150,
-          "total_tokens": 5679,
-          "cached_tokens": 0,
+          "cost": 0.0055629,
+          "input_tokens": 5766,
+          "output_tokens": 195,
+          "total_tokens": 5961,
+          "cached_tokens": 4608,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -226,19 +210,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_cszXmTZeZrf4cW2ESoGULJJ0"
+              "tool_call_id": "call_jyCzJFcTFJT5uh1YR5W8X3IJ"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773373644.929987,
+          "timestamp": 1774820683.5047784,
           "model": "gpt-5.3-codex",
-          "cost": 0.00383705,
-          "input_tokens": 5767,
+          "cost": 0.0015081499999999998,
+          "input_tokens": 6049,
           "output_tokens": 14,
-          "total_tokens": 5781,
-          "cached_tokens": 4096,
+          "total_tokens": 6063,
+          "cached_tokens": 5888,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -247,19 +231,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_rQvVPwPYec8JqR98jMZtSRvo"
+              "tool_call_id": "call_PPApXbqPwgDtpBzIY89M48kO"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773373724.0350394,
+          "timestamp": 1774820810.8128366,
           "model": "gpt-5.3-codex",
-          "cost": 0.0017276,
-          "input_tokens": 5872,
+          "cost": 0.0018179,
+          "input_tokens": 6154,
           "output_tokens": 23,
-          "total_tokens": 5895,
-          "cached_tokens": 5632,
+          "total_tokens": 6177,
+          "cached_tokens": 5888,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -268,7 +252,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_zDBx2NBNeKYKQXGA4zX37x96"
+              "tool_call_id": "call_ep47aUFAhcvS2kv7ahairBrx"
             }
           ],
           "finish_reason": "tool_calls"
@@ -276,15 +260,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.07429555,
-      "total_input_tokens": 66205,
-      "total_output_tokens": 1092,
+      "total_cost": 0.042874999999999996,
+      "total_input_tokens": 52260,
+      "total_output_tokens": 922,
       "total_llm_calls": 9
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/Zend/zend_attributes.c\n+++ b/Zend/zend_attributes.c\n@@ -217,6 +217,10 @@\n \tattr->offset = offset;\n \tattr->argc = argc;\n \n+\tfor (uint32_t i = 0; i < argc; i++) {\n+\t\tZVAL_UNDEF(&attr->argv[i]);\n+\t}\n+\n \tzend_hash_next_index_insert_ptr(*attributes, attr);\n \n \treturn attr;\n",
+    "patch": "--- a/Zend/zend_compile.c\n+++ b/Zend/zend_compile.c\n@@ -6107,6 +6107,12 @@\n \t\tattr = zend_add_attribute(attributes, 0, offset, name, args ? args->children : 0);\n \t\tzend_string_release(name);\n \n+\t\t/* Initialize all argument slots to UNDEF so teardown can safely dtor them\n+\t\t * even if malformed AST input prevents full argument compilation. */\n+\t\tfor (j = 0; j < attr->argc; j++) {\n+\t\t\tZVAL_UNDEF(&attr->argv[j]);\n+\t\t}\n+\n \t\t/* Populate arguments */\n \t\tif (args) {\n \t\t\tZEND_ASSERT(args->kind == ZEND_AST_ARG_LIST);\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -302,41 +286,28 @@
       {
         "tool_name": "read_definition",
         "args": [
-          "free_attribute",
-          "php-src/Zend/zend_attributes.c",
-          0,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 405892.783726307,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n177 static zend_always_inline void free_attribute(zend_attribute *attr, int persistent), extra=None))"
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
           "zend_compile_attributes",
           "php-src/Zend/zend_compile.c",
           0,
           true
         ],
         "kwargs": {},
-        "timestamp": 405899.717902284,
+        "timestamp": 1852939.917182227,
         "success": true,
         "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n6090 static void zend_compile_attributes(HashTable **attributes, zend_ast *ast, uint32_t offset, uint32_t ta..."
       },
       {
         "tool_name": "read_definition",
         "args": [
-          "zend_add_attribute",
+          "free_attribute",
           "php-src/Zend/zend_attributes.c",
           0,
           true
         ],
         "kwargs": {},
-        "timestamp": 405906.584337401,
+        "timestamp": 1852951.158575465,
         "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n201 ZEND_API zend_attribute *zend_add_attribute(HashTable **attributes, zend_bool persistent, uint32_t offse..."
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n177 static zend_always_inline void free_attribute(zend_attribute *attr, int persistent), extra=None))"
       },
       {
         "tool_name": "read_definition",
@@ -347,22 +318,9 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 405915.978585862,
+        "timestamp": 1852959.707279641,
         "success": true,
         "result_summary": "Ok({'contents': '6090 static void zend_compile_attributes(HashTable **attributes, zend_ast *ast, uint32_t offset, uint32_t target) /* {{{ */\\n6091 {\\n6092 \\tzend_attribute *attr;\\n6093 \\tzend_internal..."
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "zend_add_attribute",
-          "php-src/Zend/zend_attributes.c",
-          201,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 405922.586484133,
-        "success": true,
-        "result_summary": "Ok({'contents': '201 ZEND_API zend_attribute *zend_add_attribute(HashTable **attributes, zend_bool persistent, uint32_t offset, zend_string *name, uint32_t argc)\\n202 {\\n203 \\tif (*attributes == NULL)..."
       },
       {
         "tool_name": "read_definition",
@@ -373,7 +331,7 @@
           true
         ],
         "kwargs": {},
-        "timestamp": 405929.266432774,
+        "timestamp": 1852967.967338696,
         "success": true,
         "result_summary": "Ok({'contents': '177 static zend_always_inline void free_attribute(zend_attribute *attr, int persistent)\\n178 {\\n179 \\tuint32_t i;\\n180 \\n181 \\tzend_string_release(attr->name);\\n182 \\tzend_string_rele..."
       }
@@ -384,11 +342,11 @@
       {
         "tool_name": "apply_patch",
         "args": [
-          "php-src/Zend/zend_attributes.c",
-          "@@ -216,6 +216,10 @@ ZEND_API zend_attribute *zend_add_attribute(HashTable **attributes, zend_bool p\n \tattr->lcname = zend_string_tolower_ex(attr->name, persistent);\n \tattr->offset = offset;\n \tattr->argc = argc;\n+\n+\tfor (uint32_t i = 0; i < argc; i++) {\n+\t\tZVAL_UNDEF(&attr->argv[i]);\n+\t}\n \n \tzend_hash_next_index_insert_ptr(*attributes, attr);\n "
+          "php-src/Zend/zend_compile.c",
+          "@@ -6107,6 +6107,12 @@\n \t\tattr = zend_add_attribute(attributes, 0, offset, name, args ? args->children : 0);\n \t\tzend_string_release(name);\n \n+\t\t/* Initialize all argument slots to UNDEF so teardown can safely dtor them\n+\t\t * even if malformed AST input prevents full argument compilation. */\n+\t\tfor (j = 0; j < attr->argc; j++) {\n+\t\t\tZVAL_UNDEF(&attr->argv[j]);\n+\t\t}\n+\n \t\t/* Populate arguments */\n \t\tif (args) {\n \t\t\tZEND_ASSERT(args->kind == ZEND_AST_ARG_LIST);\n"
         ],
         "kwargs": {},
-        "timestamp": 405932.559457919,
+        "timestamp": 1852970.773858635,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -398,7 +356,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 406011.456427075,
+        "timestamp": 1853098.292387412,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

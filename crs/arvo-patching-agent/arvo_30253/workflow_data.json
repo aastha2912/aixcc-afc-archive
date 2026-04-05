@@ -1,5 +1,5 @@
 {
-  "vuln_id": 291,
+  "vuln_id": 387,
   "crash_result": {
     "output": "==3350==ERROR: AddressSanitizer: memcpy-param-overlap: memory ranges [0x000000000000,0xffffffffff20ffff) and [0x766200597805, 0x7661ff7a7804) overlap\nSCARINESS: 10 (memcpy-param-overlap)\n    #0 0x49df94 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n    #1 0x5e1940 in frame_get_metalayers_from_header /src/c-blosc2/blosc/frame.c:1173:5\n    #2 0x5e1940 in frame_get_metalayers /src/c-blosc2/blosc/frame.c:1219:9\n    #3 0x5e31c3 in frame_to_schunk /sr",
     "stack": "#0 0x49df94 in __asan_memcpy llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n#1 0x5e1940 in frame_get_metalayers_from_header c-blosc2/blosc/frame.c:1173:5\n#2 0x5e1940 in frame_get_metalayers c-blosc2/blosc/frame.c:1219:9\n#3 0x5e31c3 in frame_to_schunk c-blosc2/blosc/frame.c:1432:8\n#4 0x5ccc93 in blosc2_schunk_from_buffer c-blosc2/blosc/schunk.c:439:27\n#5 0x4d2a46 in LLVMFuzzerTestOneInput c-blosc2/tests/fuzz/fuzz_decompress_frame.c:23:27\n#6 0x4d32c3 in ExecuteFilesOnyB",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "frame_get_metalayers_from_header",
     "file": "c-blosc2/blosc/frame.c",
-    "description": "In frame_get_metalayers_from_header, the metalayer content length (`content_len`) is read from attacker-controlled frame header bytes and used directly in `malloc((size_t)content_len)` and `memcpy(content, content_marker + 5, (size_t)content_len)` without validating that `content_len` is non-negative and that `offset + 1 + 4 + content_len <= header_len`. A negative `content_len` is cast to a huge size_t, causing invalid memcpy parameters (wild destination / overlap) and ASan memcpy-param-overlap crash at line 1173.",
-    "conditions": "The fuzz harness calls `blosc2_schunk_from_buffer(data, size, false)`, which parses untrusted in-memory frame bytes via `frame_to_schunk -> frame_get_metalayers -> frame_get_metalayers_from_header`. The input must pass basic marker checks (e.g., metalayer index marker 0xde, offset marker 0xd2, content marker 0xc6) and provide an in-range `offset`, but set the 32-bit `content_len` field to a negative value (or otherwise inconsistent large value). Because bounds checks use `header_pos += content_len` (can decrease on negative) and no direct range check on `content_len`, memcpy is invoked with a huge length and crashes."
+    "description": "`frame_get_metalayers_from_header` trusts the attacker-controlled `content_len` read from the header marker (`0xc6`) and uses it in `header_pos += content_len` and then `memcpy(content, content_marker + 5, content_len)` without validating that `content_len` is non-negative and that `offset + 1 + 4 + content_len` stays within `header_len`. A negative `content_len` can pass the `header_len < header_pos` check (by decreasing `header_pos`), then gets cast to `size_t` for `malloc`/`memcpy`, producing invalid huge copy ranges and the ASan memcpy overlap/wild-pointer crash.",
+    "conditions": "In `decompress_frame_fuzzer`, arbitrary input is passed directly to `blosc2_schunk_from_buffer(..., copy=false)`, which reaches `frame_to_schunk -> frame_get_metalayers -> frame_get_metalayers_from_header` on in-memory frame data. Trigger requires a crafted frame header with valid enough markers/index to enter metalayer parsing, plus a metalayer `offset` that points inside header to a `0xc6` marker and a forged 32-bit `content_len` (notably negative) so bounds checks based on `header_pos` are bypassed before `memcpy` uses `(size_t)content_len`."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 2,
-      "total_cost": 0.028737449999999998,
-      "total_input_tokens": 16423,
-      "total_output_tokens": 475,
-      "total_cached_tokens": 4224,
+      "total_llm_calls": 3,
+      "total_cost": 0.02869055,
+      "total_input_tokens": 15641,
+      "total_output_tokens": 771,
+      "total_cached_tokens": 6016,
       "llm_calls": [
         {
-          "timestamp": 1773760534.427765,
+          "timestamp": 1774838085.2824986,
           "model": "gpt-5.3-codex",
-          "cost": 0.005873349999999999,
-          "input_tokens": 3081,
-          "output_tokens": 164,
-          "total_tokens": 3245,
+          "cost": 0.00692335,
+          "input_tokens": 3169,
+          "output_tokens": 228,
+          "total_tokens": 3397,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -50,36 +50,73 @@
           "tool_call_count": 5,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_YV91DnDx6ACPXRF2LrJkvY8w"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_syTCeszan1ydQiejoV283lQ0"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_F6aWK2EHPDHuGRkNp80s5iFc"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_tr2vraEwTR7sEkhNtG0DDxKj"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_fHkGW63RAHcNqSn9swhi1M7O"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ZMXpcFE9M3I5Pdly5nltrUAx"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_4OGXIpbW7UflnzYLXxrEi6us"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_E2CNkk9vh4rzblQfGRiDR5QC"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_f4kB0MofXApRrXEqIfsBLcfs"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_oCLtsLwCDLU9s2qaJlYEMS2B"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773760544.338432,
+          "timestamp": 1774838443.041267,
           "model": "gpt-5.3-codex",
-          "cost": 0.0228641,
-          "input_tokens": 13342,
-          "output_tokens": 311,
-          "total_tokens": 13653,
-          "cached_tokens": 3072,
+          "cost": 0.0044306499999999995,
+          "input_tokens": 3703,
+          "output_tokens": 228,
+          "total_tokens": 3931,
+          "cached_tokens": 3328,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_uNShxOV4XtoLolmc9AdBF0Ui"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_6wGmjaM0nsW1DOmD1zEEmugX"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_gPGzmC32oHK3OiqHbN95yd0U"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_vfyGMDzcnD7HxhAW0zSlg6lm"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_yGod5uqoiHg69TiwDTy2q7Iq"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774838504.9897232,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01733655,
+          "input_tokens": 8769,
+          "output_tokens": 315,
+          "total_tokens": 9084,
+          "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -88,7 +125,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_ToULt1zV0yg3F7zNW7HHfaAk"
+              "tool_call_id": "call_p1tEU0ogc4BH5m9iYwDA5SbI"
             }
           ],
           "finish_reason": "tool_calls"
@@ -97,19 +134,19 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.026237749999999997,
-      "total_input_tokens": 22993,
-      "total_output_tokens": 440,
-      "total_cached_tokens": 12800,
+      "total_cost": 0.02810115,
+      "total_input_tokens": 26173,
+      "total_output_tokens": 478,
+      "total_cached_tokens": 15488,
       "llm_calls": [
         {
-          "timestamp": 1773760546.539423,
+          "timestamp": 1774838506.708703,
           "model": "gpt-5.3-codex",
-          "cost": 0.0075005,
-          "input_tokens": 3598,
+          "cost": 0.0052297,
+          "input_tokens": 4374,
           "output_tokens": 86,
-          "total_tokens": 3684,
-          "cached_tokens": 0,
+          "total_tokens": 4460,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -118,23 +155,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_DDbW3x3sDmrFTAImUHAoG7Xh"
+              "tool_call_id": "call_5Pa7zKHzGBSz36QiJkNNz7xy"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_NXwCa6DOyYLbhmv3QhyoI1jq"
+              "tool_call_id": "call_5SfkZPdfbubmjon0MPocglEl"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773760845.0691357,
+          "timestamp": 1774838523.9614415,
           "model": "gpt-5.3-codex",
-          "cost": 0.015217999999999999,
-          "input_tokens": 6160,
-          "output_tokens": 317,
-          "total_tokens": 6477,
-          "cached_tokens": 0,
+          "cost": 0.014487199999999999,
+          "input_tokens": 6936,
+          "output_tokens": 355,
+          "total_tokens": 7291,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -143,19 +180,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_JAErhgVmr4F0iDsH9L9aPGNr"
+              "tool_call_id": "call_d27xPnVXUje81p3fvDFGuKC8"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773760846.5158415,
+          "timestamp": 1774838525.169153,
           "model": "gpt-5.3-codex",
-          "cost": 0.0016047499999999998,
-          "input_tokens": 6565,
+          "cost": 0.00625485,
+          "input_tokens": 7379,
           "output_tokens": 14,
-          "total_tokens": 6579,
-          "cached_tokens": 6400,
+          "total_tokens": 7393,
+          "cached_tokens": 4352,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -164,19 +201,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_wd5l3x0CbcCayOdzVZBYvaBu"
+              "tool_call_id": "call_OH6D0WhxbUFUxI1BIif43NBL"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773761246.4986231,
+          "timestamp": 1774838810.036191,
           "model": "gpt-5.3-codex",
-          "cost": 0.0019145,
-          "input_tokens": 6670,
+          "cost": 0.0021294,
+          "input_tokens": 7484,
           "output_tokens": 23,
-          "total_tokens": 6693,
-          "cached_tokens": 6400,
+          "total_tokens": 7507,
+          "cached_tokens": 7168,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -185,7 +222,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_4RtcqiqFQ2ZUhrzCTHMRYQus"
+              "tool_call_id": "call_Spd6IHAs9KHGFv9W2SY7NLxJ"
             }
           ],
           "finish_reason": "tool_calls"
@@ -193,15 +230,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.054975199999999995,
-      "total_input_tokens": 39416,
-      "total_output_tokens": 915,
-      "total_llm_calls": 6
+      "total_cost": 0.0567917,
+      "total_input_tokens": 41814,
+      "total_output_tokens": 1249,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/blosc/frame.c\n+++ b/blosc/frame.c\n@@ -1162,6 +1162,12 @@\n       return BLOSC2_ERROR_READ_BUFFER;\n     }\n     swap_store(&content_len, content_marker + 1, sizeof(content_len));\n+    if (content_len < 0) {\n+      return BLOSC2_ERROR_DATA;\n+    }\n+    if ((int64_t)offset + 1 + (int64_t)sizeof(content_len) + (int64_t)content_len > header_len) {\n+      return BLOSC2_ERROR_READ_BUFFER;\n+    }\n     metalayer->content_len = content_len;\n \n     // Finally, read the content\n@@ -1170,7 +1176,7 @@\n       return BLOSC2_ERROR_READ_BUFFER;\n     }\n     char* content = malloc((size_t)content_len);\n-    memcpy(content, content_marker + 1 + 4, (size_t)content_len);\n+    memcpy(content, content_marker + 1 + sizeof(content_len), (size_t)content_len);\n     metalayer->content = (uint8_t*)content;\n   }\n \n",
+    "patch": "--- a/blosc/frame.c\n+++ b/blosc/frame.c\n@@ -1162,6 +1162,12 @@\n       return BLOSC2_ERROR_READ_BUFFER;\n     }\n     swap_store(&content_len, content_marker + 1, sizeof(content_len));\n+    if (content_len < 0) {\n+      return BLOSC2_ERROR_DATA;\n+    }\n+    if ((int64_t)offset + 1 + (int64_t)sizeof(content_len) + (int64_t)content_len > header_len) {\n+      return BLOSC2_ERROR_READ_BUFFER;\n+    }\n     metalayer->content_len = content_len;\n \n     // Finally, read the content\n@@ -1169,8 +1175,11 @@\n     if (header_len < header_pos) {\n       return BLOSC2_ERROR_READ_BUFFER;\n     }\n-    char* content = malloc((size_t)content_len);\n-    memcpy(content, content_marker + 1 + 4, (size_t)content_len);\n+    char* content = NULL;\n+    if (content_len > 0) {\n+      content = malloc((size_t)content_len);\n+      memcpy(content, content_marker + 1 + 4, (size_t)content_len);\n+    }\n     metalayer->content = (uint8_t*)content;\n   }\n \n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -224,7 +261,7 @@
           1173
         ],
         "kwargs": {},
-        "timestamp": 792835.141660165,
+        "timestamp": 1870795.285732062,
         "success": true,
         "result_summary": "Ok({'contents': '1074   int64_t header_pos = FRAME_IDX_SIZE;\\n1075 \\n1076   // Get the size for the index of metalayers\\n1077   uint16_t idx_size;\\n1078   header_pos += sizeof(idx_size);\\n1079   if (h..."
       }
@@ -238,7 +275,7 @@
           false
         ],
         "kwargs": {},
-        "timestamp": 793128.128613448,
+        "timestamp": 1870808.590920868,
         "success": true,
         "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/frame.c', refs=[FileReference(line=1219, content='  ret = frame_get_metalayers_from_header(frame, schunk, header, header_len);', enclosing_definition='fram..."
       }
@@ -248,10 +285,10 @@
         "tool_name": "apply_patch",
         "args": [
           "c-blosc2/blosc/frame.c",
-          "@@ -1158,16 +1158,21 @@\n     // Read the size of the content\n     int32_t content_len;\n     header_pos += sizeof(content_len);\n     if (header_len < header_pos) {\n       return BLOSC2_ERROR_READ_BUFFER;\n     }\n     swap_store(&content_len, content_marker + 1, sizeof(content_len));\n+    if (content_len < 0) {\n+      return BLOSC2_ERROR_DATA;\n+    }\n+    if ((int64_t)offset + 1 + (int64_t)sizeof(content_len) + (int64_t)content_len > header_len) {\n+      return BLOSC2_ERROR_READ_BUFFER;\n+    }\n     metalayer->content_len = content_len;\n \n     // Finally, read the content\n     header_pos += content_len;\n     if (header_len < header_pos) {\n       return BLOSC2_ERROR_READ_BUFFER;\n     }\n     char* content = malloc((size_t)content_len);\n-    memcpy(content, content_marker + 1 + 4, (size_t)content_len);\n+    memcpy(content, content_marker + 1 + sizeof(content_len), (size_t)content_len);\n     metalayer->content = (uint8_t*)content;\n   }\n"
+          "@@ -1158,16 +1158,24 @@\n     // Read the size of the content\n     int32_t content_len;\n     header_pos += sizeof(content_len);\n     if (header_len < header_pos) {\n       return BLOSC2_ERROR_READ_BUFFER;\n     }\n     swap_store(&content_len, content_marker + 1, sizeof(content_len));\n+    if (content_len < 0) {\n+      return BLOSC2_ERROR_DATA;\n+    }\n+    if ((int64_t)offset + 1 + (int64_t)sizeof(content_len) + (int64_t)content_len > header_len) {\n+      return BLOSC2_ERROR_READ_BUFFER;\n+    }\n     metalayer->content_len = content_len;\n \n     // Finally, read the content\n     header_pos += content_len;\n     if (header_len < header_pos) {\n       return BLOSC2_ERROR_READ_BUFFER;\n     }\n-    char* content = malloc((size_t)content_len);\n-    memcpy(content, content_marker + 1 + 4, (size_t)content_len);\n+    char* content = NULL;\n+    if (content_len > 0) {\n+      content = malloc((size_t)content_len);\n+      memcpy(content, content_marker + 1 + 4, (size_t)content_len);\n+    }\n     metalayer->content = (uint8_t*)content;\n   }\n"
         ],
         "kwargs": {},
-        "timestamp": 793133.678416413,
+        "timestamp": 1870812.60403403,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -261,7 +298,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 793532.600144764,
+        "timestamp": 1871097.453729053,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

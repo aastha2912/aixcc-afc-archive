@@ -1,5 +1,5 @@
 {
-  "vuln_id": 210,
+  "vuln_id": 433,
   "crash_result": {
     "output": "==9787==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x60e00000029d at pc 0x0000006def67 bp 0x7fff524914b0 sp 0x7fff524914a8\nREAD of size 1 at 0x60e00000029d thread T0\nSCARINESS: 12 (1-byte-read-heap-buffer-overflow)\n    #0 0x6def66 in ndpi_search_kerberos /src/ndpi/src/lib/./protocols/kerberos.c:501:17\n    #1 0x60da40 in check_ndpi_detection_func /src/ndpi/src/lib/ndpi_main.c:8746:5\n    #2 0x61933c in ndpi_check_flow_func /src/ndpi/src/lib/ndpi_main.c\n    #3 0x61933c in ndpi_interna",
     "stack": "#0 0x6def66 in ndpi_search_kerberos ndpi/src/lib/./protocols/kerberos.c:501:17\n#1 0x60da40 in check_ndpi_detection_func ndpi/src/lib/ndpi_main.c:8746:5\n#2 0x61933c in ndpi_check_flow_func ndpi/src/lib/ndpi_main.c\n#3 0x61933c in ndpi_internal_detection_process_packet ndpi/src/lib/ndpi_main.c:10521:15\n#4 0x61933c in ndpi_detection_process_packet ndpi/src/lib/ndpi_main.c:10646:3\n#5 0x55d11e in LLVMFuzzerTestOneInput ndpi/fuzz/fuzz_process_packet.c:22:5\n#6 0x4552f3 in fuzzer::Fuzzer::ExecuteCallback",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "ndpi_search_kerberos",
     "file": "ndpi/src/lib/protocols/kerberos.c",
-    "description": "Heap out-of-bounds read due to missing bounds check before reading `packet->payload[name_offset]` at line ~501 in the AS-REQ parsing path. The code conditionally adjusts `name_offset` (including increments at lines ~488, ~492, ~498) but does not re-validate that `name_offset < packet->payload_packet_len` immediately before dereferencing. This allows `name_offset` to become equal to payload length and causes a 1-byte read past the buffer end.",
-    "conditions": "In `fuzz_process_packet`, attacker-controlled `Data/Size` are passed directly to `ndpi_detection_process_packet`, which reaches Kerberos dissector `ndpi_search_kerberos`. A crafted Kerberos-like payload that satisfies earlier ASN.1/msg-type checks and enters the AS-REQ branch can drive `name_offset` updates so it lands at the end of the packet; then `cname_len = packet->payload[name_offset]` reads out of bounds. No additional heap grooming is required; just packet contents/length that pass the parser\u2019s preceding checks."
+    "description": "In the AS-REQ parsing path, `name_offset` is advanced based on several ASN.1 heuristics, but then `cname_len = packet->payload[name_offset];` is read without re-validating that `name_offset < packet->payload_packet_len`. Earlier checks only ensure `name_offset < payload_len - 1` before subsequent increments (`name_offset += 1`, optional `name_offset++`, optional `name_offset += 2`), so `name_offset` can become exactly `payload_len` and cause a 1-byte OOB read. This is the direct missing-bounds-check bug (crash at kerberos.c:501).",
+    "conditions": "Triggered via `fuzz_process_packet` calling `ndpi_detection_process_packet` on attacker-controlled packet bytes. Input must be parsed as Kerberos AS-REQ (`msg_type == 0x0A`) and reach the cname extraction block where `name_offset` is near the end of the payload; crafted bytes make the optional offset-adjustment branches fire so `name_offset` is incremented past the last valid byte before reading `packet->payload[name_offset]`. The provided PoC packet (157 bytes) satisfies these conditions and causes heap-buffer-overflow read at the end of the fuzz buffer."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.0181377,
-      "total_input_tokens": 15414,
-      "total_output_tokens": 420,
-      "total_cached_tokens": 9344,
+      "total_cost": 0.0193193,
+      "total_input_tokens": 15678,
+      "total_output_tokens": 457,
+      "total_cached_tokens": 9216,
       "llm_calls": [
         {
-          "timestamp": 1773525509.2746391,
+          "timestamp": 1774853568.535636,
           "model": "gpt-5.3-codex",
-          "cost": 0.00548905,
-          "input_tokens": 3863,
+          "cost": 0.006247849999999999,
+          "input_tokens": 3951,
           "output_tokens": 82,
-          "total_tokens": 3945,
-          "cached_tokens": 1536,
+          "total_tokens": 4033,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,23 +51,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_7Fpq1F6BBjZHmrkhW5wGraFz"
+              "tool_call_id": "call_EuXZQfwXNffqkx3y58ZnZQ5X"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_v0rtGPMd1exKaojPfgOVVxtQ"
+              "tool_call_id": "call_tZQgw2pWDJwKxGD3ovp4mp70"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773525702.480569,
+          "timestamp": 1774853846.9501727,
           "model": "gpt-5.3-codex",
-          "cost": 0.00213325,
-          "input_tokens": 4051,
+          "cost": 0.00208565,
+          "input_tokens": 4139,
           "output_tokens": 78,
-          "total_tokens": 4129,
-          "cached_tokens": 3840,
+          "total_tokens": 4217,
+          "cached_tokens": 3968,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -76,23 +76,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_YN8VLytGuhW3SYBB5byhIX1q"
+              "tool_call_id": "call_bhcJYdm0v2OGHQ4nbK9i8VIT"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_kzfq8a4EVes5RBQgsNTh8Jjh"
+              "tool_call_id": "call_RTDbFlR6kKh1adT3CzLcKmqi"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773525709.6691775,
+          "timestamp": 1774853852.388397,
           "model": "gpt-5.3-codex",
-          "cost": 0.010515400000000001,
-          "input_tokens": 7500,
-          "output_tokens": 260,
-          "total_tokens": 7760,
-          "cached_tokens": 3968,
+          "cost": 0.0109858,
+          "input_tokens": 7588,
+          "output_tokens": 297,
+          "total_tokens": 7885,
+          "cached_tokens": 4096,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -101,7 +101,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_P9LVeab7Leq5LYMFadvV3HuZ"
+              "tool_call_id": "call_f5odyaTqOYQfm07ThQ7P7aAV"
             }
           ],
           "finish_reason": "tool_calls"
@@ -109,19 +109,19 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 3,
-      "total_cost": 0.01922865,
-      "total_input_tokens": 20127,
-      "total_output_tokens": 384,
-      "total_cached_tokens": 13568,
+      "total_llm_calls": 11,
+      "total_cost": 0.06956145,
+      "total_input_tokens": 67303,
+      "total_output_tokens": 1567,
+      "total_cached_tokens": 44544,
       "llm_calls": [
         {
-          "timestamp": 1773525711.5514681,
+          "timestamp": 1774853854.0527852,
           "model": "gpt-5.3-codex",
-          "cost": 0.0050757,
-          "input_tokens": 3710,
-          "output_tokens": 86,
-          "total_tokens": 3796,
+          "cost": 0.0067732,
+          "input_tokens": 4712,
+          "output_tokens": 82,
+          "total_tokens": 4794,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -131,23 +131,48 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_BjVCGPrJu4Aqe08hluscefkg"
+              "tool_call_id": "call_kQRw2beb0QdPNlmn8yjI5VRw"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_7qy1uYyVJg46JNQjtBpUjCMJ"
+              "tool_call_id": "call_k5RiV2cieo27TaljmWXKCRrk"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773526171.878689,
+          "timestamp": 1774853878.3009303,
           "model": "gpt-5.3-codex",
-          "cost": 0.0111566,
-          "input_tokens": 8084,
-          "output_tokens": 204,
-          "total_tokens": 8288,
-          "cached_tokens": 3712,
+          "cost": 0.0025039,
+          "input_tokens": 4890,
+          "output_tokens": 86,
+          "total_tokens": 4976,
+          "cached_tokens": 4608,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_hLoC6dkeCyppQCD06225rVe5"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_dAyJPxF4zsLMcZGOoDtCxUHH"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774855070.3443713,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0165872,
+          "input_tokens": 9264,
+          "output_tokens": 214,
+          "total_tokens": 9478,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,19 +181,131 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_D9Z5iIsDA6uZyGW3jr5yuCw0"
+              "tool_call_id": "call_0Srv8vE29lqyhF2ERQDoRA5K"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773526174.0908425,
+          "timestamp": 1774855074.5482903,
           "model": "gpt-5.3-codex",
-          "cost": 0.00299635,
-          "input_tokens": 8333,
-          "output_tokens": 94,
-          "total_tokens": 8427,
-          "cached_tokens": 8192,
+          "cost": 0.0051404499999999995,
+          "input_tokens": 9523,
+          "output_tokens": 228,
+          "total_tokens": 9751,
+          "cached_tokens": 9344,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "source_questions",
+              "tool_call_id": "call_bBonkHwoARndegq4KkTXf8aB"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774855077.074101,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00501725,
+          "input_tokens": 1963,
+          "output_tokens": 113,
+          "total_tokens": 2076,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_4QDaUFIjs1nknN54hKzmlEQd"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_6RgURQNFbg8evvzbhsVAeule"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_3Gdq4zxYF7xT1Hbu2U17y0Yt"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774855116.9255815,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0021262499999999997,
+          "input_tokens": 2215,
+          "output_tokens": 91,
+          "total_tokens": 2306,
+          "cached_tokens": 1920,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_QMUehk0pOojd5BL0R90zbhVh"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_8kR18FNWYOqnvbHvb2g8EEK9"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774855144.260847,
+          "model": "gpt-5.3-codex",
+          "cost": 0.005313,
+          "input_tokens": 2764,
+          "output_tokens": 34,
+          "total_tokens": 2798,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_aWM577V3PPuRCdSW7mjcvtwT"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774855148.3363457,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01279075,
+          "input_tokens": 5781,
+          "output_tokens": 191,
+          "total_tokens": 5972,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": false,
+          "tool_call_count": 0,
+          "tool_calls": null,
+          "finish_reason": "stop"
+        },
+        {
+          "timestamp": 1774855152.8776574,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0042434,
+          "input_tokens": 5996,
+          "output_tokens": 216,
+          "total_tokens": 6212,
+          "cached_tokens": 5888,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,7 +314,49 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_V6BA5lAJBs6LIQSB0GKvM7rB"
+              "tool_call_id": "call_GHrBopZG9GMKqk3JlYfomasi"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774855156.6074126,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00573545,
+          "input_tokens": 9967,
+          "output_tokens": 215,
+          "total_tokens": 10182,
+          "cached_tokens": 9344,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_Rz0v0sdfWNSpk7zSh91P0jum"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774855159.2000945,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0033305999999999995,
+          "input_tokens": 10228,
+          "output_tokens": 97,
+          "total_tokens": 10325,
+          "cached_tokens": 10112,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_WsGVgVelHXQPRyH9KlePH7YE"
             }
           ],
           "finish_reason": "tool_calls"
@@ -185,10 +364,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.03736635,
-      "total_input_tokens": 35541,
-      "total_output_tokens": 804,
-      "total_llm_calls": 6
+      "total_cost": 0.08888075,
+      "total_input_tokens": 82981,
+      "total_output_tokens": 2024,
+      "total_llm_calls": 14
     }
   },
   "patch_result": {
@@ -196,9 +375,32 @@
     "failure_reason": "the agent did not produce a result"
   },
   "context_retrieval": {
-    "source_questions": [],
+    "source_questions": [
+      {
+        "tool_name": "source_questions",
+        "args": [
+          "I need to patch ndpi/src/lib/protocols/kerberos.c, but apply_patch says this file is a fuzzer harness file. Is this a tooling/path issue? What source file path should be used for ndpi_search_kerberos definition around line ~501?",
+          "I'm fixing an ASAN-reported OOB read in ndpi_search_kerberos at kerberos.c:501 in AS-REQ parsing. I successfully read code from ndpi/src/lib/protocols/kerberos.c showing `cname_len = packet->payload[name_offset];` after multiple increments to name_offset without a final bounds check. I attempted to patch that file directly, but apply_patch returned: 'ndpi/src/lib/protocols/kerberos.c is a fuzzer harness file. Patching fuzzer harness files is prohibited.' This appears incorrect because the file is protocol parser code, not fuzz harness. I need the correct editable path or explanation of repository layout so I can apply the fix in the right C/C++ source file."
+        ],
+        "kwargs": {},
+        "timestamp": 1887441.452784545,
+        "success": true,
+        "result_summary": "Ok(SourceQuestionsResult(answer='Yes \u2014 this is a path/tooling mismatch, not an actual harness file issue in source intent.\\n\\nUse this file path for the Kerberos parser and `ndpi_search_kerberos`:\\n- ..."
+      }
+    ],
     "read_definition": [],
     "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "src/lib/protocols/kerberos.c",
+          501
+        ],
+        "kwargs": {},
+        "timestamp": 1886144.646033864,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'src/lib/protocols/kerberos.c' does not exist in directory tree. Similar paths: ndpi/src/lib/protocols/kerberos.c, extra=None))"
+      },
       {
         "tool_name": "read_source",
         "args": [
@@ -206,7 +408,7 @@
           501
         ],
         "kwargs": {},
-        "timestamp": 558000.185601726,
+        "timestamp": 1886166.878107864,
         "success": true,
         "result_summary": "Ok({'contents': '402 \\t    if((packet->payload[base_offset+i] == 0x03)\\n403 \\t       && (packet->payload[base_offset+i+1] == 0x02)\\n404 \\t       && (packet->payload[base_offset+i+2] == 0x01)\\n405 \\t  ..."
       }
@@ -216,11 +418,23 @@
         "tool_name": "find_references",
         "args": [
           "name_offset",
+          "src/lib/protocols/kerberos.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1886165.153061364,
+        "success": true,
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: ndpi/src/lib/protocols/kerberos.c, extra=None))"
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "name_offset",
           "ndpi/src/lib/protocols/kerberos.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 558457.450695412,
+        "timestamp": 1887355.207295287,
         "success": true,
         "result_summary": "Ok([FileReferences(file_name='ndpi/src/lib/protocols/kerberos.c', refs=[FileReference(line=474, content='\\t\\tu_int16_t name_offset = body_offset + 13;', enclosing_definition='ndpi_search_kerberos'), F..."
       }

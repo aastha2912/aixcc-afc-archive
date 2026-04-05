@@ -1,5 +1,5 @@
 {
-  "vuln_id": 47,
+  "vuln_id": 324,
   "crash_result": {
     "output": "UndefinedBehaviorSanitizer:DEADLYSIGNAL\n==20635==ERROR: UndefinedBehaviorSanitizer: SEGV on unknown address 0x000076a04d20 (pc 0x75cde19a2268 bp 0x7ffd38032440 sp 0x7ffd38032428 T20635)\n==20635==The signal is caused by a READ memory access.\n    #0 0x75cde19a2268  (/lib/x86_64-linux-gnu/libc.so.6+0x14e268)\n    #1 0x799ef4 in H5MM_memcpy /src/hdf5-1.12.0/src/H5MM.c:597:11\n    #2 0xa9858a in H5VM_memcpyvv /src/hdf5-1.12.0/src/H5VM.c:1713:13\n    #3 0xaff738 in H5D__compact_readvv /src/hdf5-1.12.0/sr",
     "stack": "#0 0x75cde19a2268  (/lib/x86_64-linux-gnu/libc.so.6+0x14e268)\n#1 0x799ef4 in H5MM_memcpy hdf5-1.12.0/src/H5MM.c:597:11\n#2 0xa9858a in H5VM_memcpyvv hdf5-1.12.0/src/H5VM.c:1713:13\n#3 0xaff738 in H5D__compact_readvv hdf5-1.12.0/src/H5Dcompact.c:295:21\n#4 0x677fdc in H5D__select_io hdf5-1.12.0/src/H5Dselect.c:215:36\n#5 0x677786 in H5D__select_read hdf5-1.12.0/src/H5Dselect.c:283:8\n#6 0xb01ff1 in H5D__contig_read hdf5-1.12.0/src/H5Dcontig.c:621:8\n#7 0x66d81d in H5D__read hdf5-1.12.0/src/H5Dio.c:566:",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "Mat_H5ReadNextReferenceData",
     "file": "matio/src/mat73.c",
-    "description": "Invalid type/size mismatch is not validated before HDF5 read in reference-dataset path. In Mat_H5ReadNextReferenceData(), matvar->class_type is trusted to pick data_type_id and data_size, then buffer size is computed from dims*data_size and passed to H5Dread via Mat_H5ReadData(). The code never verifies that the on-disk dataset datatype/element size matches the expected class_type. For this PoV, a referenced dataset is read with an incompatible expected type, causing HDF5 internals (H5D__compact_readvv -> H5VM_memcpyvv -> H5MM_memcpy) to perform an invalid read and crash.",
-    "conditions": "Fuzzer input is a MAT v7.3 (HDF5) file containing object references (cell/struct path) so Mat_VarRead73() calls Mat_H5ReadNextReferenceData() (seen at mat73.c:2751/1246). The referenced dataset metadata drives matvar->class_type/data_size inconsistently with the actual HDF5 dataset type/layout. When Mat_H5ReadNextReferenceData computes nbytes from expected type and calls H5Dread without datatype compatibility checks, HDF5 attempts a copy using invalid source bounds/pointers, leading to SEGV in H5MM_memcpy."
+    "description": "The root cause is missing validation of the referenced HDF5 dataset\u2019s actual datatype/shape before reading. Mat_H5ReadNextReferenceData derives a destination type and byte size from matvar->class_type metadata (DataType2H5T/ClassType2H5T + computed nbytes), allocates a buffer, and calls H5Dread via Mat_H5ReadData with H5S_ALL for both spaces. If the file\u2019s referenced dataset metadata is inconsistent/corrupted, HDF5\u2019s compact read path (H5D__compact_readvv -> H5VM_memcpyvv -> memcpy) uses invalid source offsets and crashes on read. So the unsafe state propagation is in matio\u2019s reference-data read logic, not in memcpy itself.",
+    "conditions": "Trigger requires a MATLAB v7.3/HDF5 file containing object/reference-driven variables (e.g., under #refs#) where matio infers class_type/dimensions from metadata but the referenced dataset\u2019s real layout/type is malformed or inconsistent. During Mat_VarRead73 -> Mat_H5ReadNextReferenceData, matio computes nelems/nbytes and performs H5Dread without verifying that the referenced dataset datatype and extent are compatible with expected class_type and allocated buffer assumptions. This lets crafted input drive HDF5 into invalid compact-dataset vector copy and a segfault."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.2655597,
-      "total_input_tokens": 264038,
-      "total_output_tokens": 407,
-      "total_cached_tokens": 128384,
+      "total_cost": 0.26576235000000004,
+      "total_input_tokens": 264173,
+      "total_output_tokens": 419,
+      "total_cached_tokens": 128512,
       "llm_calls": [
         {
-          "timestamp": 1773368990.5507197,
+          "timestamp": 1774814788.1805146,
           "model": "gpt-5.3-codex",
-          "cost": 0.22618925,
-          "input_tokens": 128443,
-          "output_tokens": 101,
-          "total_tokens": 128544,
+          "cost": 0.22644125,
+          "input_tokens": 128531,
+          "output_tokens": 108,
+          "total_tokens": 128639,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,81 +51,26 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_z8xk2bhbFnui5wfZtzWPvJAV"
+              "tool_call_id": "call_22grDU0cvPDPG9KAomZOcXsW"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ek16ajR1xhwuM0wzSLGOApn3"
+              "tool_call_id": "call_V1r9Q70de3N6l0PKt6VdCKGS"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ILsjbNnZbs1iCN8CIFNYUGOC"
+              "tool_call_id": "call_x2yit3BeL7ikBY389PhlsqzG"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368998.010332,
+          "timestamp": 1774814905.1880856,
           "model": "gpt-5.3-codex",
-          "cost": 0.03937045,
-          "input_tokens": 135595,
-          "output_tokens": 306,
-          "total_tokens": 135901,
-          "cached_tokens": 128384,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "terminate",
-              "tool_call_id": "call_Oe648FCjimgqYBxgtbVo2Kfy"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        }
-      ]
-    },
-    "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.30743824999999997,
-      "total_input_tokens": 529575,
-      "total_output_tokens": 475,
-      "total_cached_tokens": 397440,
-      "llm_calls": [
-        {
-          "timestamp": 1773369002.4420552,
-          "model": "gpt-5.3-codex",
-          "cost": 0.22336545,
-          "input_tokens": 128543,
-          "output_tokens": 74,
-          "total_tokens": 128617,
-          "cached_tokens": 1664,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_6EcBL3wcc3wD7YhOIePeQCN4"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_BjV1shzoldZ43aEs6Wc7rubp"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773369011.016787,
-          "model": "gpt-5.3-codex",
-          "cost": 0.036036349999999995,
-          "input_tokens": 133341,
-          "output_tokens": 364,
-          "total_tokens": 133705,
+          "cost": 0.0393211,
+          "input_tokens": 135642,
+          "output_tokens": 311,
+          "total_tokens": 135953,
           "cached_tokens": 128512,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -134,20 +79,75 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_9uYGDJc66fS50jD0jl4JCuk0"
+              "tool_name": "terminate",
+              "tool_call_id": "call_ZYFkKZOo565FrkBwjf00x3yD"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 4,
+      "total_cost": 0.31394195,
+      "total_input_tokens": 528837,
+      "total_output_tokens": 859,
+      "total_cached_tokens": 395904,
+      "llm_calls": [
+        {
+          "timestamp": 1774814909.2574308,
+          "model": "gpt-5.3-codex",
+          "cost": 0.22812475000000002,
+          "input_tokens": 129685,
+          "output_tokens": 84,
+          "total_tokens": 129769,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_V6LxiPshdTBM7pCSc4uANjdm"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_4mqSFEwuvmgpMUtfyEJf7vTq"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773369012.7298791,
+          "timestamp": 1774814964.865024,
           "model": "gpt-5.3-codex",
-          "cost": 0.02386335,
-          "input_tokens": 133793,
+          "cost": 0.03792495,
+          "input_tokens": 132465,
+          "output_tokens": 738,
+          "total_tokens": 133203,
+          "cached_tokens": 129664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_3uzfuAh5KyjtwKuuMGIg9bfy"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774814966.7329261,
+          "model": "gpt-5.3-codex",
+          "cost": 0.02379125,
+          "input_tokens": 133291,
           "output_tokens": 14,
-          "total_tokens": 133807,
-          "cached_tokens": 133632,
+          "total_tokens": 133305,
+          "cached_tokens": 133120,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,19 +156,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_5hlqjQ6STk3gZqhw84HHsMjM"
+              "tool_call_id": "call_oJMPKpewC8zeAeCszclS70dj"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773369098.0801587,
+          "timestamp": 1774815110.287716,
           "model": "gpt-5.3-codex",
-          "cost": 0.0241731,
-          "input_tokens": 133898,
+          "cost": 0.024100999999999997,
+          "input_tokens": 133396,
           "output_tokens": 23,
-          "total_tokens": 133921,
-          "cached_tokens": 133632,
+          "total_tokens": 133419,
+          "cached_tokens": 133120,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,7 +177,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_QXqElEH5kuvMubND9SOb2SV7"
+              "tool_call_id": "call_94wDRKAT2576ntM3ZKhB312s"
             }
           ],
           "finish_reason": "tool_calls"
@@ -185,15 +185,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.57299795,
-      "total_input_tokens": 793613,
-      "total_output_tokens": 882,
+      "total_cost": 0.5797043000000001,
+      "total_input_tokens": 793010,
+      "total_output_tokens": 1278,
       "total_llm_calls": 6
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/mat73.c\n+++ b/src/mat73.c\n@@ -1216,6 +1216,7 @@\n         case H5I_DATASET:\n         {\n             hid_t data_type_id, dset_id;\n+            hid_t dset_type_id;\n             if ( MAT_C_CHAR == matvar->class_type ) {\n                 matvar->data_type = MAT_T_UINT8;\n                 matvar->data_size = (int)Mat_SizeOf(MAT_T_UINT8);\n@@ -1237,6 +1238,14 @@\n \n             dset_id = ref_id;\n \n+            dset_type_id = H5Dget_type(dset_id);\n+            if ( dset_type_id < 0 || H5Tequal(dset_type_id, data_type_id) <= 0 ) {\n+                if ( dset_type_id >= 0 ) {\n+                    H5Tclose(dset_type_id);\n+                }\n+                H5Dclose(dset_id);\n+                break;\n+            }\n             if ( !matvar->isComplex ) {\n                 matvar->data = malloc(matvar->nbytes);\n             } else {\n@@ -1246,6 +1255,7 @@\n                 err = Mat_H5ReadData(dset_id, data_type_id,\n                     H5S_ALL, H5S_ALL, matvar->isComplex, matvar->data);\n             }\n+            H5Tclose(dset_type_id);\n             H5Dclose(dset_id);\n             break;\n         }\n",
+    "patch": "--- a/src/mat73.c\n+++ b/src/mat73.c\n@@ -1216,6 +1216,7 @@\n         case H5I_DATASET:\n         {\n             hid_t data_type_id, dset_id;\n+            hid_t file_type_id = -1, file_space_id = -1;\n             if ( MAT_C_CHAR == matvar->class_type ) {\n                 matvar->data_type = MAT_T_UINT8;\n                 matvar->data_size = (int)Mat_SizeOf(MAT_T_UINT8);\n@@ -1237,6 +1238,39 @@\n \n             dset_id = ref_id;\n \n+            file_type_id = H5Dget_type(dset_id);\n+            file_space_id = H5Dget_space(dset_id);\n+            if ( file_type_id < 0 || file_space_id < 0 ) {\n+                if ( file_type_id >= 0 )\n+                    H5Tclose(file_type_id);\n+                if ( file_space_id >= 0 )\n+                    H5Sclose(file_space_id);\n+                H5Dclose(dset_id);\n+                break;\n+            }\n+\n+            {\n+                hsize_t file_nelems = H5Sget_simple_extent_npoints(file_space_id);\n+                size_t file_type_size = H5Tget_size(file_type_id);\n+\n+                if ( file_nelems != (hsize_t)nelems || file_type_size != (size_t)matvar->data_size ) {\n+                    H5Sclose(file_space_id);\n+                    H5Tclose(file_type_id);\n+                    H5Dclose(dset_id);\n+                    break;\n+                }\n+\n+                if ( MAT_C_CHAR == matvar->class_type &&\n+                     !(H5Tequal(file_type_id, H5T_NATIVE_UCHAR) > 0 ||\n+                       H5Tequal(file_type_id, H5T_STD_U8LE) > 0 ||\n+                       H5Tequal(file_type_id, H5T_STD_U8BE) > 0) ) {\n+                    H5Sclose(file_space_id);\n+                    H5Tclose(file_type_id);\n+                    H5Dclose(dset_id);\n+                    break;\n+                }\n+            }\n+\n             if ( !matvar->isComplex ) {\n                 matvar->data = malloc(matvar->nbytes);\n             } else {\n@@ -1246,6 +1280,8 @@\n                 err = Mat_H5ReadData(dset_id, data_type_id,\n                     H5S_ALL, H5S_ALL, matvar->isComplex, matvar->data);\n             }\n+            H5Sclose(file_space_id);\n+            H5Tclose(file_type_id);\n             H5Dclose(dset_id);\n             break;\n         }\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -213,35 +213,37 @@
         "tool_name": "read_source",
         "args": [
           "matio/src/mat73.c",
-          1148
-        ],
-        "kwargs": {},
-        "timestamp": 401291.046229095,
-        "success": true,
-        "result_summary": "Ok({'contents': '1049                     err = Mat_H5ReadDatasetInfo(mat,fields[k],field_id);\\n1050                 }\\n1051                 H5Dclose(field_id);\\n1052             } else if ( object_in..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "matio/src/mat73.c",
           1246
         ],
         "kwargs": {},
-        "timestamp": 401291.051864902,
+        "timestamp": 1847197.834331944,
         "success": true,
         "result_summary": "Ok({'contents': '1147     if ( !isComplex ) {\\n1148         herr = H5Dread(dset_id,h5_type,mem_space,dset_space,H5P_DEFAULT,data);\\n1149         if ( herr < 0 ) {\\n1150             return MATIO_E_GENE..."
       }
     ],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "Mat_H5ReadNextReferenceData",
+          "matio/src/mat73.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1847245.706028537,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='matio/src/mat73.c', refs=[FileReference(line=116, content='static int     Mat_H5ReadNextReferenceData(hid_t ref_id,matvar_t *matvar,mat_t *mat);', enclosing_definition='M..."
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "matio/src/mat73.c",
-          "@@ -1216,6 +1216,7 @@\n         case H5I_DATASET:\n         {\n             hid_t data_type_id, dset_id;\n+            hid_t dset_type_id;\n             if ( MAT_C_CHAR == matvar->class_type ) {\n                 matvar->data_type = MAT_T_UINT8;\n                 matvar->data_size = (int)Mat_SizeOf(MAT_T_UINT8);\n@@ -1238,6 +1239,14 @@\n \n             dset_id = ref_id;\n \n+            dset_type_id = H5Dget_type(dset_id);\n+            if ( dset_type_id < 0 || H5Tequal(dset_type_id, data_type_id) <= 0 ) {\n+                if ( dset_type_id >= 0 ) {\n+                    H5Tclose(dset_type_id);\n+                }\n+                H5Dclose(dset_id);\n+                break;\n+            }\n             if ( !matvar->isComplex ) {\n                 matvar->data = malloc(matvar->nbytes);\n             } else {\n@@ -1246,6 +1255,7 @@\n                 err = Mat_H5ReadData(dset_id, data_type_id,\n                     H5S_ALL, H5S_ALL, matvar->isComplex, matvar->data);\n             }\n+            H5Tclose(dset_type_id);\n             H5Dclose(dset_id);\n             break;\n         }"
+          "@@ -1216,6 +1216,7 @@ Mat_H5ReadNextReferenceData(hid_t ref_id,matvar_t *matvar,mat_t *mat)\n         case H5I_DATASET:\n         {\n             hid_t data_type_id, dset_id;\n+            hid_t file_type_id = -1, file_space_id = -1;\n             if ( MAT_C_CHAR == matvar->class_type ) {\n                 matvar->data_type = MAT_T_UINT8;\n                 matvar->data_size = (int)Mat_SizeOf(MAT_T_UINT8);\n@@ -1238,6 +1239,38 @@ Mat_H5ReadNextReferenceData(hid_t ref_id,matvar_t *matvar,mat_t *mat)\n \n             dset_id = ref_id;\n \n+            file_type_id = H5Dget_type(dset_id);\n+            file_space_id = H5Dget_space(dset_id);\n+            if ( file_type_id < 0 || file_space_id < 0 ) {\n+                if ( file_type_id >= 0 )\n+                    H5Tclose(file_type_id);\n+                if ( file_space_id >= 0 )\n+                    H5Sclose(file_space_id);\n+                H5Dclose(dset_id);\n+                break;\n+            }\n+\n+            {\n+                hsize_t file_nelems = H5Sget_simple_extent_npoints(file_space_id);\n+                size_t file_type_size = H5Tget_size(file_type_id);\n+\n+                if ( file_nelems != (hsize_t)nelems || file_type_size != (size_t)matvar->data_size ) {\n+                    H5Sclose(file_space_id);\n+                    H5Tclose(file_type_id);\n+                    H5Dclose(dset_id);\n+                    break;\n+                }\n+\n+                if ( MAT_C_CHAR == matvar->class_type &&\n+                     !(H5Tequal(file_type_id, H5T_NATIVE_UCHAR) > 0 ||\n+                       H5Tequal(file_type_id, H5T_STD_U8LE) > 0 ||\n+                       H5Tequal(file_type_id, H5T_STD_U8BE) > 0) ) {\n+                    H5Sclose(file_space_id);\n+                    H5Tclose(file_type_id);\n+                    H5Dclose(dset_id);\n+                    break;\n+                }\n+            }\n+\n             if ( !matvar->isComplex ) {\n                 matvar->data = malloc(matvar->nbytes);\n             } else {\n@@ -1246,6 +1279,8 @@ Mat_H5ReadNextReferenceData(hid_t ref_id,matvar_t *matvar,mat_t *mat)\n                 err = Mat_H5ReadData(dset_id, data_type_id,\n                     H5S_ALL, H5S_ALL, matvar->isComplex, matvar->data);\n             }\n+            H5Sclose(file_space_id);\n+            H5Tclose(file_type_id);\n             H5Dclose(dset_id);\n             break;\n         }"
         ],
         "kwargs": {},
-        "timestamp": 401299.696989244,
+        "timestamp": 1847253.564516402,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -251,7 +253,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 401382.356770937,
+        "timestamp": 1847397.359123799,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

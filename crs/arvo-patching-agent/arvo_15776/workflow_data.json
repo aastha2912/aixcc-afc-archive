@@ -1,5 +1,5 @@
 {
-  "vuln_id": 45,
+  "vuln_id": 321,
   "crash_result": {
     "output": "==97938==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x78bb15262838 at pc 0x000000433359 bp 0x7ffd3568a860 sp 0x7ffd3568a020\nREAD of size 8188 at 0x78bb15262838 thread T0\nSCARINESS: 41 (multi-byte-read-stack-buffer-overflow)\n    #0 0x433358 in strlen /src/llvm/projects/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc:365:5\n    #1 0x8a2ea2 in ConstantString /src/imagemagick/MagickCore/string.c:710:13\n    #2 0x7f875d in SetImageProperty /src/imagemagick/Magi",
     "stack": "#0 0x433358 in strlen llvm/projects/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc:365:5\n#1 0x8a2ea2 in ConstantString imagemagick/MagickCore/string.c:710:13\n#2 0x7f875d in SetImageProperty imagemagick/MagickCore/property.c:4569:30\n#3 0xa13511 in ReadPSInfo imagemagick/coders/ps.c:325:16\n#4 0xa0c39a in ReadPSImage imagemagick/coders/ps.c:606:3\n#5 0x69d262 in ReadImage imagemagick/MagickCore/constitute.c:547:15\n#6 0x894f7b in ReadStream imagemagick/MagickCore/stream.c:",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "ReadPSInfo",
     "file": "imagemagick/coders/ps.c",
-    "description": "In ReadPSInfo(), when parsing DocumentCustomColors / CMYKCustomColor / SpotColor records, the code reads bytes into a stack buffer `char name[MagickPathExtent]` until whitespace, then calls `ConstantString(name)`. The loop only stops on `isspace(c)` or full buffer, but `isspace(c)` is invoked on raw `int c` from input without casting to unsigned char. For non-ASCII bytes (e.g. 0xCB,0x90 in the PoC), `isspace(c)` can return true unexpectedly under locale/UB behavior, causing an early break before any byte is stored; then `name[0]` is left uninitialized except for `name[i]='\\0'` at current i, and later `ConstantString(name)` calls strlen on non-NUL stack data, producing an out-of-bounds stack read (ASan at strlen -> ConstantString -> SetImageProperty). Crash site is in ConstantString/strlen, but root cause is unsafe token parsing and ctype use in ReadPSInfo.",
-    "conditions": "Trigger via EPS/PS input reaching ReadPSInfo() and matching one of the color-comment prefixes so execution enters the name-reading block. Provide crafted non-ASCII bytes around the token so the `isspace(c)` check on signed/raw byte misbehaves and the parsed `name` string is not safely initialized as a proper C string before `ConstantString(name)`. Data flow: ping_eps_fuzzer -> ReadPSImage -> ReadPSInfo -> SetImageProperty/ConstantString -> strlen OOB read."
+    "description": "In ReadPSInfo(), the code obtains a pointer from GetMagickByteBufferDatum(&buffer) and passes it to SetImageProperty() as a C string (e.g. p=...+4 for \"!PS-\" at line ~329). That buffer datum is not guaranteed to be NUL-terminated for the current parsed line/chunk, but SetImageProperty() duplicates it via ConstantString(value), which calls strlen(). This causes an out-of-bounds read from the stack buffer when no terminator exists before the end of the local buffer.",
+    "conditions": "Trigger with PS/EPS input parsed by ping/read path so ReadPSInfo() processes DSC-like tokens (notably the PostscriptLevel \"!PS-\" branch). Provide data where the MagickByteBuffer line content referenced by GetMagickByteBufferDatum() lacks an in-bounds NUL terminator (or is attacker-controlled to defer NUL), then SetImageProperty(image,\"ps:Level\",p,...) invokes ConstantString/strlen on that unterminated pointer, producing stack-buffer-overflow read."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.03161515,
-      "total_input_tokens": 21765,
-      "total_output_tokens": 488,
-      "total_cached_tokens": 8448,
+      "total_cost": 0.030265550000000002,
+      "total_input_tokens": 21941,
+      "total_output_tokens": 384,
+      "total_cached_tokens": 8576,
       "llm_calls": [
         {
-          "timestamp": 1773368355.841051,
+          "timestamp": 1774814248.307255,
           "model": "gpt-5.3-codex",
-          "cost": 0.01284535,
-          "input_tokens": 7329,
+          "cost": 0.01299935,
+          "input_tokens": 7417,
           "output_tokens": 131,
-          "total_tokens": 7460,
+          "total_tokens": 7548,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,31 +51,31 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_yYzICT2bqkbqQZraGmIKt8r6"
+              "tool_call_id": "call_UjQNftgvHJF1CPSDD2JCLbMc"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_iS28I6NN4ahj7fQ5k7CGY9EO"
+              "tool_call_id": "call_RkzEM8BwEvWfAIguetAeU2In"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_smj1UgbcwhZZafkQ5BpgAzR9"
+              "tool_call_id": "call_wGDpaen7dV2ZV7c14Z50mhon"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_a9kShowVHmilzUHO2k5aE0Aq"
+              "tool_call_id": "call_m0LwKLRU2pdQFYUqDAnCuobM"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368370.5387,
+          "timestamp": 1774814252.94749,
           "model": "gpt-5.3-codex",
-          "cost": 0.0187698,
-          "input_tokens": 14436,
-          "output_tokens": 357,
-          "total_tokens": 14793,
-          "cached_tokens": 7296,
+          "cost": 0.017266200000000002,
+          "input_tokens": 14524,
+          "output_tokens": 253,
+          "total_tokens": 14777,
+          "cached_tokens": 7424,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -84,7 +84,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_1V3WLQYU9ssF7BpJjkgafiYH"
+              "tool_call_id": "call_26WtJ8AiyGAnSgd7tqNcNwvO"
             }
           ],
           "finish_reason": "tool_calls"
@@ -93,19 +93,19 @@
     },
     "patching": {
       "total_llm_calls": 6,
-      "total_cost": 0.048920899999999996,
-      "total_input_tokens": 76670,
-      "total_output_tokens": 765,
-      "total_cached_tokens": 60928,
+      "total_cost": 0.044362849999999995,
+      "total_input_tokens": 72147,
+      "total_output_tokens": 832,
+      "total_cached_tokens": 59392,
       "llm_calls": [
         {
-          "timestamp": 1773368373.081786,
+          "timestamp": 1774814254.6687453,
           "model": "gpt-5.3-codex",
-          "cost": 0.0145495,
-          "input_tokens": 7722,
-          "output_tokens": 74,
-          "total_tokens": 7796,
-          "cached_tokens": 0,
+          "cost": 0.0137627,
+          "input_tokens": 8690,
+          "output_tokens": 84,
+          "total_tokens": 8774,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -114,23 +114,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ASci4bFX7lso2WBQvClE7t7A"
+              "tool_call_id": "call_DgODlatKDCt4saiS8cLO8IMr"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_QtUUshEhnMhNle7agpJOMGv2"
+              "tool_name": "find_references",
+              "tool_call_id": "call_TfKsfLWpPOSVyCJNeapwhk38"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368376.2954652,
+          "timestamp": 1774815509.5092065,
           "model": "gpt-5.3-codex",
-          "cost": 0.01211875,
-          "input_tokens": 12245,
-          "output_tokens": 199,
-          "total_tokens": 12444,
-          "cached_tokens": 7680,
+          "cost": 0.009391199999999999,
+          "input_tokens": 11192,
+          "output_tokens": 251,
+          "total_tokens": 11443,
+          "cached_tokens": 8704,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +139,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_W9RhMhVIJeIIodiJiX6ODfmY"
+              "tool_call_id": "call_pPhw8YtTvZfLzsg05RJ7vN0l"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368378.9810774,
+          "timestamp": 1774815512.129562,
           "model": "gpt-5.3-codex",
-          "cost": 0.00550165,
-          "input_tokens": 12611,
-          "output_tokens": 199,
-          "total_tokens": 12810,
-          "cached_tokens": 12288,
+          "cost": 0.005322449999999999,
+          "input_tokens": 11603,
+          "output_tokens": 197,
+          "total_tokens": 11800,
+          "cached_tokens": 11264,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +160,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_nA1yiNmBwlMtpGf8675qG0xQ"
+              "tool_call_id": "call_Dc8ngB1cYE8rA8qUOJpqF0Q0"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368380.1903365,
+          "timestamp": 1774815513.351426,
           "model": "gpt-5.3-codex",
-          "cost": 0.0031853499999999996,
-          "input_tokens": 12977,
+          "cost": 0.00305515,
+          "input_tokens": 11981,
           "output_tokens": 31,
-          "total_tokens": 13008,
-          "cached_tokens": 12672,
+          "total_tokens": 12012,
+          "cached_tokens": 11648,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,19 +181,19 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_WK9U9BzaX7yUoj0WTDAvaPOC"
+              "tool_call_id": "call_8633G4juJoXAJqjjYG8HmcZQ"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368383.0900767,
+          "timestamp": 1774815515.7526827,
           "model": "gpt-5.3-codex",
-          "cost": 0.00892465,
-          "input_tokens": 15383,
-          "output_tokens": 169,
-          "total_tokens": 15552,
-          "cached_tokens": 12928,
+          "cost": 0.00841995,
+          "input_tokens": 14165,
+          "output_tokens": 170,
+          "total_tokens": 14335,
+          "cached_tokens": 11904,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -202,19 +202,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_wSe41BAglSzCOoAB3k74XBiO"
+              "tool_call_id": "call_VJ6255THZfWf5ufU6VzjPMNk"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368385.8107672,
+          "timestamp": 1774815517.8037705,
           "model": "gpt-5.3-codex",
-          "cost": 0.004641,
-          "input_tokens": 15732,
-          "output_tokens": 93,
-          "total_tokens": 15825,
-          "cached_tokens": 15360,
+          "cost": 0.004411399999999999,
+          "input_tokens": 14516,
+          "output_tokens": 99,
+          "total_tokens": 14615,
+          "cached_tokens": 14208,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -223,7 +223,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Hf6VPIcEjRVB9huYdsaTJYzK"
+              "tool_call_id": "call_wHAWq6VyDSTIdwC63McEBwmz"
             }
           ],
           "finish_reason": "tool_calls"
@@ -231,9 +231,9 @@
       ]
     },
     "total": {
-      "total_cost": 0.08053605,
-      "total_input_tokens": 98435,
-      "total_output_tokens": 1253,
+      "total_cost": 0.0746284,
+      "total_input_tokens": 94088,
+      "total_output_tokens": 1216,
       "total_llm_calls": 8
     }
   },
@@ -252,7 +252,7 @@
           325
         ],
         "kwargs": {},
-        "timestamp": 400661.82743827,
+        "timestamp": 1846543.246985652,
         "success": true,
         "result_summary": "Ok({'contents': '226 #define ICCProfile \"BeginICCProfile:\"\\n227 #define PhotoshopProfile  \"BeginPhotoshop:\"\\n228 \\n229   MagickByteBuffer\\n230     buffer;\\n231 \\n232   int\\n233     c;\\n234 \\n235   Mag..."
       },
@@ -260,59 +260,61 @@
         "tool_name": "read_source",
         "args": [
           "imagemagick/coders/ps.c",
-          353
+          318
         ],
         "kwargs": {},
-        "timestamp": 400661.829299762,
+        "timestamp": 1847801.927506173,
         "success": true,
-        "result_summary": "Ok({'contents': '254   short int\\n255     hex_digits[256];\\n256 \\n257   unsigned long\\n258     extent,\\n259     spotcolor;\\n260 \\n261   (void) memset(&bounds,0,sizeof(bounds));\\n262   (void) memset(ps..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "imagemagick/coders/ps.c",
-          360
-        ],
-        "kwargs": {},
-        "timestamp": 400668.765698863,
-        "success": true,
-        "result_summary": "Ok({'contents': '261   (void) memset(&bounds,0,sizeof(bounds));\\n262   (void) memset(ps_info,0,sizeof(*ps_info));\\n263   ps_info->cmyk=image_info->colorspace == CMYKColorspace ? MagickTrue :\\n264     ..."
+        "result_summary": "Ok({'contents': '219 #define DocumentCustomColors  \"DocumentCustomColors:\"\\n220 #define SpotColor  \"+ \"\\n221 #define BoundingBox  \"BoundingBox:\"\\n222 #define DocumentMedia  \"DocumentMedia:\"\\n223 #defi..."
       }
     ],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "GetMagickByteBufferDatum",
+          "imagemagick/coders/ps.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1847794.834191908,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='imagemagick/coders/ps.c', refs=[FileReference(line=324, content='      skip=MagickFalse;', enclosing_definition='PhotoshopProfile'), FileReference(line=329, content='    ..."
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "imagemagick/coders/ps.c",
-          "@@ -366,10 +366,11 @@\n         (void) FormatLocaleString(property,MagickPathExtent,\n           \"pdf:SpotColor-%.20g\",(double) spotcolor++);\n         i=0;\n+        name[0]='\\0';\n         for (c=ReadMagickByteBuffer(&buffer); c != EOF; c=ReadMagickByteBuffer(&buffer))\n         {\n-          if ((isspace(c) != 0) || ((i+1) == MagickPathExtent))\n+          if ((isspace((int) ((unsigned char) c)) != 0) || ((i+1) == MagickPathExtent))\n             break;\n           name[i++]=(char) c;\n         }\n"
+          "@@ -326,9 +326,15 @@\n     if (skip != MagickFalse)\n       continue;\n     if (CompareMagickByteBuffer(&buffer,PostscriptLevel,strlen(PostscriptLevel)) != MagickFalse)\n-      {\n-        p=GetMagickByteBufferDatum(&buffer)+4;\n-        (void) SetImageProperty(image,\"ps:Level\",p,exception);\n-      }\n+    {\n+      char\n+        level[MagickPathExtent];\n+\n+      p=GetMagickByteBufferDatum(&buffer)+4;\n+      (void) CopyMagickString(level,p,MagickPathExtent);\n+      (void) StripString(level);\n+      (void) SetImageProperty(image,\"ps:Level\",level,exception);\n+    }\n     if (CompareMagickByteBuffer(&buffer,ImageData,strlen(ImageData)) != MagickFalse)\n       {\n         p=GetMagickByteBufferDatum(&buffer);\n"
         ],
         "kwargs": {},
-        "timestamp": 400664.898619109,
+        "timestamp": 1847798.12360309,
         "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 366): The patch context lines have introduced a typographic error. The context you provided inserted `)`. Please double check..."
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 326): The patch context lines have introduced a typographic error. The context you provided inserted `)`. Please double check..."
       },
       {
         "tool_name": "apply_patch",
         "args": [
           "imagemagick/coders/ps.c",
-          "@@ -366,10 +366,11 @@\n         (void) FormatLocaleString(property,MagickPathExtent,\n           \"pdf:SpotColor-%.20g\",(double) spotcolor++);\n         i=0;\n+        name[0]='\\0';\n         for (c=ReadMagickByteBuffer(&buffer); c != EOF; c=ReadMagickByteBuffer(&buffer))\n         {\n-          if ((isspace(c) != 0) || ((i+1) == MagickPathExtent))\n+          if ((isspace((int) ((unsigned char) c)) != 0) || ((i+1) == MagickPathExtent))\n             break;\n           name[i++]=(char) c;\n         }\n"
+          "@@ -327,8 +327,14 @@\n     if (CompareMagickByteBuffer(&buffer,PostscriptLevel,strlen(PostscriptLevel)) != MagickFalse)\n-      {\n-        p=GetMagickByteBufferDatum(&buffer)+4;\n-        (void) SetImageProperty(image,\"ps:Level\",p,exception);\n-      }\n+      {\n+        char\n+          level[MagickPathExtent];\n+\n+        p=GetMagickByteBufferDatum(&buffer)+4;\n+        (void) CopyMagickString(level,p,MagickPathExtent);\n+        (void) StripString(level);\n+        (void) SetImageProperty(image,\"ps:Level\",level,exception);\n+      }\n"
         ],
         "kwargs": {},
-        "timestamp": 400667.578484207,
+        "timestamp": 1847800.72371938,
         "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 366): The patch context lines have introduced a typographic error. The context you provided inserted `)`. Please double check..."
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 327): The patch context lines have introduced a typographic error. The context you provided inserted `)`. Please double check..."
       },
       {
         "tool_name": "apply_patch",
         "args": [
           "imagemagick/coders/ps.c",
-          "@@ -368,8 +368,9 @@\n         i=0;\n+        name[0]='\\0';\n         for (c=ReadMagickByteBuffer(&buffer); c != EOF; c=ReadMagickByteBuffer(&buffer))\n         {\n-          if ((isspace(c) != 0) || ((i+1) == MagickPathExtent))\n+          if ((isspace((int) ((unsigned char) c)) != 0) ||\n+              ((i+1) == MagickPathExtent))\n             break;\n           name[i++]=(char) c;\n         }\n"
+          "@@ -327,6 +327,12 @@\n     if (CompareMagickByteBuffer(&buffer,PostscriptLevel,strlen(PostscriptLevel)) != MagickFalse)\n       {\n+        char\n+          level[MagickPathExtent];\n+\n         p=GetMagickByteBufferDatum(&buffer)+4;\n-        (void) SetImageProperty(image,\"ps:Level\",p,exception);\n+        (void) CopyMagickString(level,p,MagickPathExtent);\n+        (void) StripString(level);\n+        (void) SetImageProperty(image,\"ps:Level\",level,exception);\n       }\n"
         ],
         "kwargs": {},
-        "timestamp": 400671.684430425,
+        "timestamp": 1847804.345447639,
         "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 368): The patch context lines have introduced a typographic error. The context you provided inserted `)`. Please double check..."
+        "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 327): The patch context lines have introduced a typographic error. The context you provided inserted `)`. Please double check..."
       }
     ],
     "test_patch": [],

@@ -1,5 +1,5 @@
 {
-  "vuln_id": 273,
+  "vuln_id": 403,
   "crash_result": {
     "output": "==2711==ERROR: AddressSanitizer: heap-buffer-overflow on address 0xec203e32 at pc 0x085c2a0b bp 0xfff49bf8 sp 0xfff49bf0\nWRITE of size 16 at 0xec203e32 thread T0\nSCARINESS: 45 (multi-byte-write-heap-buffer-overflow)\n    #0 0x85c2a0a in ZSTD_safecopy /src/c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c:753:29\n    #1 0x85c2a0a in ZSTD_execSequenceEnd /src/c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c:783:5\n    #2 0x85b946a in ZSTD_execSequence /s",
     "stack": "#0 0x85c2a0a in ZSTD_safecopy c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c:753:29\n#1 0x85c2a0a in ZSTD_execSequenceEnd c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c:783:5\n#2 0x85b946a in ZSTD_execSequence c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c:831:16\n#3 0x85b946a in ZSTD_decompressSequences_body c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c:1184:39\n#4 0x85b946a in ZSTD_decompressSe",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "ZSTD_execSequenceEnd",
     "file": "c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c",
-    "description": "Heap OOB write occurs because ZSTD_execSequenceEnd computes `oend_w = oend - WILDCOPY_OVERLENGTH` without guarding small output buffers. When `oend` is smaller than `WILDCOPY_OVERLENGTH` (as in this PoV\u2019s tiny 176-byte destination block), `oend_w` underflows before the destination buffer. `ZSTD_safecopy()` then takes the `op <= oend_w` path and performs `ZSTD_wildcopy()` to an invalid bound, followed by leftover byte copies, resulting in a write past the allocated heap buffer. Crash is observed at ZSTD_safecopy line 753, but root cause is unsafe end-pointer arithmetic and bound handling in ZSTD_execSequenceEnd/ZSTD_safecopy for near-end sequences on small dst buffers.",
-    "conditions": "Fuzzer input is parsed as a Blosc frame and routed to zstd decompression (`blosc_d -> zstd_wrap_decompress -> ZSTD_decompressDCtx -> ... -> ZSTD_decompressSequences`). A crafted compressed sequence makes execution enter the slow path `ZSTD_execSequenceEnd` (near-end match/literal conditions). With a small output block size from the frame metadata, `oend_w` becomes invalid (`oend - WILDCOPY_OVERLENGTH` underflow), and sequence copy logic writes beyond the destination allocation, triggering ASan heap-buffer-overflow."
+    "description": "Heap-buffer-overflow is caused by incorrect end-of-buffer handling in ZSTD_execSequenceEnd(): it computes `oend_w = oend - WILDCOPY_OVERLENGTH` and then calls `ZSTD_safecopy()` for literals/matches assuming writes up to `oend_w + WILDCOPY_OVERLENGTH` are safe. When the destination buffer is smaller than `WILDCOPY_OVERLENGTH` (here ~176 bytes, so only 2 bytes slack), `oend_w` points before the output start and `ZSTD_safecopy` can perform a 16-byte vectorized/leftover copy that writes past the real `oend`, triggering the ASan write overflow at line 753.",
+    "conditions": "Fuzzer input drives frame/chunk metadata so blosc allocates a small destination chunk buffer, then zstd sequence decoding reaches the slow-path `ZSTD_execSequenceEnd` (near block end). With crafted sequence literal/match lengths that pass existing `sequenceLength <= oend-op` checks but execute safecopy near the end, the `oend_w` underflow/assumption mismatch allows an out-of-bounds write past the heap chunk. Data flow: fuzz_decompress_frame -> frame_decompress_chunk -> blosc_d/zstd_wrap_decompress -> ZSTD_decompressBlock_internal -> ZSTD_decompressSequences -> ZSTD_execSequenceEnd -> ZSTD_safecopy."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.0298977,
-      "total_input_tokens": 18302,
-      "total_output_tokens": 467,
+      "total_cost": 0.0328552,
+      "total_input_tokens": 19760,
+      "total_output_tokens": 496,
       "total_cached_tokens": 5504,
       "llm_calls": [
         {
-          "timestamp": 1773717439.5919893,
+          "timestamp": 1774843438.1546392,
           "model": "gpt-5.3-codex",
-          "cost": 0.011245499999999999,
-          "input_tokens": 5450,
-          "output_tokens": 122,
-          "total_tokens": 5572,
+          "cost": 0.0117915,
+          "input_tokens": 5538,
+          "output_tokens": 150,
+          "total_tokens": 5688,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,26 +51,26 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_2FwQDnkT4dY4atxkSX6XzjiH"
+              "tool_call_id": "call_id8Tr6Ffks0b7QObc2sVpxX8"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_irkDiNWsATe3FrL0uxFfDwG2"
+              "tool_call_id": "call_zZFyGM12nnQMrDiggOstYBK4"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Pr7XoN10AScEXDp6hAsDAvDa"
+              "tool_call_id": "call_SYi6SS1uKD4tNSNLqqSznG5R"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773717449.6785965,
+          "timestamp": 1774843444.2694607,
           "model": "gpt-5.3-codex",
-          "cost": 0.0186522,
-          "input_tokens": 12852,
-          "output_tokens": 345,
-          "total_tokens": 13197,
+          "cost": 0.0210637,
+          "input_tokens": 14222,
+          "output_tokens": 346,
+          "total_tokens": 14568,
           "cached_tokens": 5504,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -80,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_py2mrTOLBo7nDtTDcu4LpKtD"
+              "tool_call_id": "call_lJMGOIWjMMsc4QAllWzkYchC"
             }
           ],
           "finish_reason": "tool_calls"
@@ -89,19 +89,19 @@
     },
     "patching": {
       "total_llm_calls": 5,
-      "total_cost": 0.03174395,
-      "total_input_tokens": 48253,
+      "total_cost": 0.03558625,
+      "total_input_tokens": 58167,
       "total_output_tokens": 599,
-      "total_cached_tokens": 38784,
+      "total_cached_tokens": 47360,
       "llm_calls": [
         {
-          "timestamp": 1773717452.4290135,
+          "timestamp": 1774843446.0216255,
           "model": "gpt-5.3-codex",
-          "cost": 0.0074032,
-          "input_tokens": 4880,
+          "cost": 0.0098357,
+          "input_tokens": 6846,
           "output_tokens": 106,
-          "total_tokens": 4986,
-          "cached_tokens": 1664,
+          "total_tokens": 6952,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -110,23 +110,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_OKRqb4RIrJIBXkwMpLQXE1JZ"
+              "tool_call_id": "call_Y5k0nT7dyO4I4A3Cssqvjlse"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_1aP8WRbA4LfY3ogXWnJZvYu6"
+              "tool_call_id": "call_eYB1UUrsAf48KLPkNRVOJfIX"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773717456.7615254,
+          "timestamp": 1774843448.8426156,
           "model": "gpt-5.3-codex",
-          "cost": 0.0138362,
-          "input_tokens": 10444,
+          "cost": 0.014289449999999999,
+          "input_tokens": 12431,
           "output_tokens": 230,
-          "total_tokens": 10674,
-          "cached_tokens": 4864,
+          "total_tokens": 12661,
+          "cached_tokens": 6784,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,19 +135,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_wgWcQtGKffVsXl1XwkfAXiey"
+              "tool_call_id": "call_wgU1YNt2t6H1r4JKrYrYsrWL"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773717460.1489313,
+          "timestamp": 1774843451.5198236,
           "model": "gpt-5.3-codex",
-          "cost": 0.0054138,
-          "input_tokens": 10732,
+          "cost": 0.005665450000000001,
+          "input_tokens": 12719,
           "output_tokens": 226,
-          "total_tokens": 10958,
-          "cached_tokens": 10496,
+          "total_tokens": 12945,
+          "cached_tokens": 12544,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,19 +156,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_GVZ9UA2fIfIh3ynHAFSXs10G"
+              "tool_call_id": "call_sCzYtHwxu282RDbmKWIuC2bW"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773717461.3242068,
+          "timestamp": 1774843452.5604985,
           "model": "gpt-5.3-codex",
-          "cost": 0.0023905,
-          "input_tokens": 11046,
+          "cost": 0.00284375,
+          "input_tokens": 13033,
           "output_tokens": 14,
-          "total_tokens": 11060,
-          "cached_tokens": 10880,
+          "total_tokens": 13047,
+          "cached_tokens": 12800,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,19 +177,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_iILxaMhZx4g5SKkpOF52ct1j"
+              "tool_call_id": "call_jaURgnAdpCy1QDWDqOmd69AK"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773717626.4288177,
+          "timestamp": 1774843535.8335197,
           "model": "gpt-5.3-codex",
-          "cost": 0.0027002499999999995,
-          "input_tokens": 11151,
+          "cost": 0.0029519000000000004,
+          "input_tokens": 13138,
           "output_tokens": 23,
-          "total_tokens": 11174,
-          "cached_tokens": 10880,
+          "total_tokens": 13161,
+          "cached_tokens": 12928,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -198,7 +198,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_5r0N8fkTcHAPOOQq7nNi3HJD"
+              "tool_call_id": "call_HRml3J5HYqOYYcDdpqQC3kim"
             }
           ],
           "finish_reason": "tool_calls"
@@ -206,15 +206,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.06164165,
-      "total_input_tokens": 66555,
-      "total_output_tokens": 1066,
+      "total_cost": 0.06844145,
+      "total_input_tokens": 77927,
+      "total_output_tokens": 1095,
       "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c\n+++ b/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c\n@@ -771,7 +771,7 @@\n     size_t const sequenceLength = sequence.litLength + sequence.matchLength;\n     const BYTE* const iLitEnd = *litPtr + sequence.litLength;\n     const BYTE* match = oLitEnd - sequence.offset;\n-    BYTE* const oend_w = oend - WILDCOPY_OVERLENGTH;\n+    BYTE* const oend_w = (oend - op > WILDCOPY_OVERLENGTH) ? oend - WILDCOPY_OVERLENGTH : op;\n \n     /* bounds checks : careful of address space overflow in 32-bit mode */\n     RETURN_ERROR_IF(sequenceLength > (size_t)(oend - op), dstSize_tooSmall, \"last match must fit within dstBuffer\");\n",
+    "patch": "--- a/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c\n+++ b/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c\n@@ -771,7 +771,7 @@\n     size_t const sequenceLength = sequence.litLength + sequence.matchLength;\n     const BYTE* const iLitEnd = *litPtr + sequence.litLength;\n     const BYTE* match = oLitEnd - sequence.offset;\n-    BYTE* const oend_w = oend - WILDCOPY_OVERLENGTH;\n+    BYTE* const oend_w = (oend - op) >= WILDCOPY_OVERLENGTH ? oend - WILDCOPY_OVERLENGTH : op;\n \n     /* bounds checks : careful of address space overflow in 32-bit mode */\n     RETURN_ERROR_IF(sequenceLength > (size_t)(oend - op), dstSize_tooSmall, \"last match must fit within dstBuffer\");\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -237,7 +237,7 @@
           780
         ],
         "kwargs": {},
-        "timestamp": 749741.005478476,
+        "timestamp": 1875734.597075115,
         "success": true,
         "result_summary": "Ok({'contents': '681  *  Copies 8 bytes from ip to op and updates op and ip where ip <= op.\\n682  *  If the offset is < 8 then the offset is spread to at least 8 bytes.\\n683  *\\n684  *  Precondition: ..."
       },
@@ -245,12 +245,12 @@
         "tool_name": "read_source",
         "args": [
           "c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c",
-          730
+          740
         ],
         "kwargs": {},
-        "timestamp": 749741.008689884,
+        "timestamp": 1875734.598721695,
         "success": true,
-        "result_summary": "Ok({'contents': '631                                                       OF_base, OF_bits,\\n632                                                       OF_defaultDTable, dctx->fseEntropy,\\n633        ..."
+        "result_summary": "Ok({'contents': '641                                                       MLtype, MaxML, MLFSELog,\\n642                                                       ip, iend-ip,\\n643                        ..."
       }
     ],
     "find_references": [],
@@ -259,10 +259,10 @@
         "tool_name": "apply_patch",
         "args": [
           "internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c",
-          "@@ -771,7 +771,7 @@ size_t ZSTD_execSequenceEnd(BYTE* op,\n     size_t const sequenceLength = sequence.litLength + sequence.matchLength;\n     const BYTE* const iLitEnd = *litPtr + sequence.litLength;\n     const BYTE* match = oLitEnd - sequence.offset;\n-    BYTE* const oend_w = oend - WILDCOPY_OVERLENGTH;\n+    BYTE* const oend_w = (oend - op > WILDCOPY_OVERLENGTH) ? oend - WILDCOPY_OVERLENGTH : op;\n \n     /* bounds checks : careful of address space overflow in 32-bit mode */\n     RETURN_ERROR_IF(sequenceLength > (size_t)(oend - op), dstSize_tooSmall, \"last match must fit within dstBuffer\");\n"
+          "@@ -771,7 +771,7 @@ size_t ZSTD_execSequenceEnd(BYTE* op,\n     size_t const sequenceLength = sequence.litLength + sequence.matchLength;\n     const BYTE* const iLitEnd = *litPtr + sequence.litLength;\n     const BYTE* match = oLitEnd - sequence.offset;\n-    BYTE* const oend_w = oend - WILDCOPY_OVERLENGTH;\n+    BYTE* const oend_w = (oend - op) >= WILDCOPY_OVERLENGTH ? oend - WILDCOPY_OVERLENGTH : op;\n \n     /* bounds checks : careful of address space overflow in 32-bit mode */\n     RETURN_ERROR_IF(sequenceLength > (size_t)(oend - op), dstSize_tooSmall, \"last match must fit within dstBuffer\");\n"
         ],
         "kwargs": {},
-        "timestamp": 749748.772805132,
+        "timestamp": 1875740.113244093,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -272,7 +272,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 749913.145198041,
+        "timestamp": 1875822.941505563,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

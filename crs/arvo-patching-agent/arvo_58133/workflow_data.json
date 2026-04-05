@@ -1,5 +1,5 @@
 {
-  "vuln_id": 171,
+  "vuln_id": 491,
   "crash_result": {
     "output": "==5274==ERROR: AddressSanitizer: attempting double-free on 0x6020000000b0 in thread T0:\nSCARINESS: 42 (double-free)\n    #0 0x56b55d in operator delete[](void*) /src/llvm-project/compiler-rt/lib/asan/asan_new_delete.cpp:155:3\n    #1 0x661c62 in HashMgr::~HashMgr() /src/hunspell/src/hunspell/hashmgr.cxx:133:5\n    #2 0x573c64 in HunspellImpl::~HunspellImpl() /src/hunspell/src/hunspell/hunspell.cxx:209:5\n    #3 0x5a4de2 in Hunspell::~Hunspell() /src/hunspell/src/hunspell/hunspell.cxx:2128:3\n    #4 0",
     "stack": "#0 0x56b55d in operator delete[](void*) llvm-project/compiler-rt/lib/asan/asan_new_delete.cpp:155:3\n#1 0x661c62 in HashMgr::~HashMgr() hunspell/src/hunspell/hashmgr.cxx:133:5\n#2 0x573c64 in HunspellImpl::~HunspellImpl() hunspell/src/hunspell/hunspell.cxx:209:5\n#3 0x5a4de2 in Hunspell::~Hunspell() hunspell/src/hunspell/hunspell.cxx:2128:3\n#4 0x56e439 in LLVMFuzzerTestOneInput hunspell/./src/tools/affdicfuzzer.cxx:69:1\n#5 0x43ec23 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned l",
@@ -22,85 +22,97 @@
     "dedup": "operator delete[](void*)--HashMgr::~HashMgr()--HunspellImpl::~HunspellImpl()"
   },
   "analyzed_vuln": {
-    "function": "HashMgr::free_flag",
+    "function": "HashMgr::parse_aliasf",
     "file": "hunspell/src/hunspell/hashmgr.cxx",
-    "description": "Double-free of flag arrays due to ownership confusion between dictionary entries and alias table entries. `parse_aliasf()` stores pointers returned by `decode_flags()` into `aliasf`. Later, when dictionary words use alias flags (`get_aliasf`), their `hentry->astr` points directly to those same `aliasf` buffers. During teardown, `HashMgr::free_table()` calls `free_flag(ptr->astr, ptr->alen)`, and `free_flag` may delete `astr` even when it is alias-owned (it only skips free when `aliasf` is non-empty and `ONLYUPCASEFLAG` is not set). Then `HashMgr::~HashMgr()` unconditionally iterates `aliasf` and `delete[]`s each entry again, causing the ASan double-free seen at destructor line 133.",
-    "conditions": "PoV must define an AF alias table (`parse_aliasf`) and then create at least one dictionary entry that references an alias index so `hentry->astr` aliases `aliasf[index-1]`. With crafted numeric flags in FLAG num mode (as in the PoV), cleanup path is reached: `Hunspell` destruction -> `HashMgr::free_table` frees the aliased flag buffer once, then `HashMgr::~HashMgr` frees `aliasf` buffers a second time. Trigger does not require large input; malformed/edge AF entries that still allocate alias buffers are sufficient."
+    "description": "Double-free is caused by parse_aliasf storing duplicate ownership pointers in aliasf when decode_flags() returns the same heap pointer for malformed numeric FLAG aliases. In FLAG_NUM mode, an entry like \"AF -25\" is parsed by decode_flags as len=1 with value 0xFFE7 (unsigned cast of negative), and parse_aliasf sorts/stores that pointer without validating negativity or canonicalizing ownership. Later, HashMgr::free_table() frees ptr->astr via free_flag() for dictionary entries using that alias (because TESTAFF(..., ONLYUPCASEFLAG, alen) can be true for this malformed value), and then HashMgr::~HashMgr() unconditionally delete[]s all aliasf entries, freeing the same allocation again.",
+    "conditions": "Trigger via affdicfuzzer with an affix file using \"FLAG num\" and AF alias table entries containing negative numeric flags (e.g., \"AF -25\") plus alias references in dictionary words (e.g., \"/1\"). Data flow: load_config()->parse_aliasf()->decode_flags allocates alias flag arrays and stores them in aliasf; load_tables()/add_word attaches alias pointers to hentry::astr; on destruction free_table() may free alias-owned astr, then destructor frees aliasf again, causing double-free."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.03072055,
-      "total_input_tokens": 22681,
-      "total_output_tokens": 540,
-      "total_cached_tokens": 10496,
+      "total_cost": 0.03422335,
+      "total_input_tokens": 25625,
+      "total_output_tokens": 595,
+      "total_cached_tokens": 12032,
       "llm_calls": [
         {
-          "timestamp": 1773467390.412233,
+          "timestamp": 1774876446.3296363,
           "model": "gpt-5.3-codex",
-          "cost": 0.01039325,
-          "input_tokens": 5123,
-          "output_tokens": 102,
-          "total_tokens": 5225,
-          "cached_tokens": 0,
+          "cost": 0.00950285,
+          "input_tokens": 5211,
+          "output_tokens": 157,
+          "total_tokens": 5368,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 5,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_e0hwIKFOFoT49xRV7tevnMbp"
+              "tool_call_id": "call_Gaqo5JOJJP34lGQaez0Ml8ei"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_fzcHMBwi7R4aDuAUPnjXA2a5"
+              "tool_call_id": "call_8avUAWjg1duDmCJADzfkz99l"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_oLVC9SJXPTUIia1x3niFiEPx"
+              "tool_call_id": "call_o6lPWJY2rlupowTdqoX5dvND"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_9njCDMlqleYIDIKrL1Yi3oth"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_SW1S82NNCWwAr79Xoy8xjwoK"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467393.925782,
+          "timestamp": 1774876458.0674207,
           "model": "gpt-5.3-codex",
-          "cost": 0.00284725,
-          "input_tokens": 5371,
-          "output_tokens": 108,
-          "total_tokens": 5479,
-          "cached_tokens": 5120,
+          "cost": 0.0034839,
+          "input_tokens": 5610,
+          "output_tokens": 138,
+          "total_tokens": 5748,
+          "cached_tokens": 5248,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_oU8FSJgebQK4myPUoNwDDHeF"
+              "tool_call_id": "call_YftZZ5aMidvUa9ohePKrBIBT"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_pTssrxPxpedFopMp44gjETO9"
+              "tool_call_id": "call_nZwFvHxtcMNI3AKx3KmZGqJN"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_SoQGwlMcsBSruBjQ6tazoOAz"
+              "tool_call_id": "call_T6U8rS6VNxv3jpL9ra55Jd2U"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_YJIuPTUR2KyR5YE4ULaTrUgI"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467400.5949464,
+          "timestamp": 1774876464.566808,
           "model": "gpt-5.3-codex",
-          "cost": 0.01748005,
-          "input_tokens": 12187,
-          "output_tokens": 330,
-          "total_tokens": 12517,
-          "cached_tokens": 5376,
+          "cost": 0.021236599999999998,
+          "input_tokens": 14804,
+          "output_tokens": 300,
+          "total_tokens": 15104,
+          "cached_tokens": 5632,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -109,7 +121,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Kr68MzPPWJmtGpERpIVNHUuB"
+              "tool_call_id": "call_9E3I1QuuTJIghDTVDl7LxbSW"
             }
           ],
           "finish_reason": "tool_calls"
@@ -118,19 +130,19 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.031617599999999996,
-      "total_input_tokens": 40144,
-      "total_output_tokens": 394,
-      "total_cached_tokens": 28032,
+      "total_cost": 0.03279605,
+      "total_input_tokens": 47651,
+      "total_output_tokens": 375,
+      "total_cached_tokens": 35456,
       "llm_calls": [
         {
-          "timestamp": 1773467402.4019947,
+          "timestamp": 1774876466.7984521,
           "model": "gpt-5.3-codex",
-          "cost": 0.009684499999999999,
-          "input_tokens": 4670,
+          "cost": 0.0103082,
+          "input_tokens": 6524,
           "output_tokens": 108,
-          "total_tokens": 4778,
-          "cached_tokens": 0,
+          "total_tokens": 6632,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,27 +151,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_jULh1c3RcKQrMnKAOEJh56Ko"
+              "tool_call_id": "call_RvRf5RPxQ8n4SE70gs8E8mrr"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_KPG9Gbz025lAeB0vdWfa7kmJ"
+              "tool_call_id": "call_3GwgQfiy9tjr6oA0LPzV3dpQ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_HWAIyc4kzSM7IZxvaJ1jsuIn"
+              "tool_call_id": "call_3BLMttrOihMMc3d0CvyHj6N9"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467406.0736196,
+          "timestamp": 1774876470.6919487,
           "model": "gpt-5.3-codex",
-          "cost": 0.01646715,
-          "input_tokens": 11565,
-          "output_tokens": 249,
-          "total_tokens": 11814,
-          "cached_tokens": 4608,
+          "cost": 0.0164969,
+          "input_tokens": 13462,
+          "output_tokens": 230,
+          "total_tokens": 13692,
+          "cached_tokens": 6528,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -168,19 +180,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_P2Mg830hZ70TgUhQSodCgI79"
+              "tool_call_id": "call_JUSsbYqRvKNghzsoYRsEcKoa"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467407.1057954,
+          "timestamp": 1774876471.9231777,
           "model": "gpt-5.3-codex",
-          "cost": 0.0026789,
-          "input_tokens": 11902,
+          "cost": 0.0029414000000000003,
+          "input_tokens": 13780,
           "output_tokens": 14,
-          "total_tokens": 11916,
-          "cached_tokens": 11648,
+          "total_tokens": 13794,
+          "cached_tokens": 13568,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -189,19 +201,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_BXrVTiM94sq8TnvUtnJWR2q5"
+              "tool_call_id": "call_v2ix4AZ1efS9ZDT7uReWWh6I"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773467437.285713,
+          "timestamp": 1774876509.2867851,
           "model": "gpt-5.3-codex",
-          "cost": 0.00278705,
-          "input_tokens": 12007,
+          "cost": 0.00304955,
+          "input_tokens": 13885,
           "output_tokens": 23,
-          "total_tokens": 12030,
-          "cached_tokens": 11776,
+          "total_tokens": 13908,
+          "cached_tokens": 13696,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -210,7 +222,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_WKP0N6zJFMGeVYbzT5gLtbaS"
+              "tool_call_id": "call_pen9SraK7N5mC4vpvr0e9L3x"
             }
           ],
           "finish_reason": "tool_calls"
@@ -218,15 +230,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.062338149999999995,
-      "total_input_tokens": 62825,
-      "total_output_tokens": 934,
+      "total_cost": 0.0670194,
+      "total_input_tokens": 73276,
+      "total_output_tokens": 970,
       "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/hunspell/hashmgr.cxx\n+++ b/src/hunspell/hashmgr.cxx\n@@ -107,7 +107,21 @@\n }\n \n void HashMgr::free_flag(unsigned short* astr, int alen) {\n-  if (astr && (aliasf.empty() || TESTAFF(astr, ONLYUPCASEFLAG, alen)))\n+  if (!astr)\n+    return;\n+\n+  // AF alias entries are owned by aliasf and released in ~HashMgr().\n+  // Dictionary entries may point directly to those buffers via get_aliasf(),\n+  // so avoid freeing alias-owned pointers here.\n+  for (const auto& alias : aliasf) {\n+    if (astr == alias)\n+      return;\n+  }\n+\n+  // Keep existing behavior for dynamically allocated per-entry flags.\n+  if (aliasf.empty() || TESTAFF(astr, ONLYUPCASEFLAG, alen))\n+    delete[] astr;\n+  else\n     delete[] astr;\n }\n \n",
+    "patch": "--- a/src/hunspell/hashmgr.cxx\n+++ b/src/hunspell/hashmgr.cxx\n@@ -769,14 +769,14 @@\n         }\n       }\n       int i = atoi(src);\n-      if (i >= DEFAULTFLAGS) {\n+      if ((i >= DEFAULTFLAGS || i < 0) && af != NULL) {\n         HUNSPELL_WARNING(stderr,\n                          \"error: line %d: flag id %d is too large (max: %d)\\n\",\n                          af->getlinenum(), i, DEFAULTFLAGS - 1);\n         i = 0;\n       }\n       *dest = (unsigned short)i;\n-      if (*dest == 0)\n+      if (*dest == 0 && af != NULL)\n         HUNSPELL_WARNING(stderr, \"error: line %d: 0 is wrong flag id\\n\",\n                          af->getlinenum());\n       break;\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -246,12 +258,23 @@
         "tool_name": "read_source",
         "args": [
           "hunspell/src/hunspell/hashmgr.cxx",
-          1120
+          1110
         ],
         "kwargs": {},
-        "timestamp": 499690.97834239,
+        "timestamp": 1908755.375210977,
         "success": true,
-        "result_summary": "Ok({'contents': '1021     if (line.compare(0, 4, \"LANG\", 4) == 0) {\\n1022       if (!parse_string(line, lang, afflst->getlinenum())) {\\n1023         delete afflst;\\n1024         return 1;\\n1025       ..."
+        "result_summary": "Ok({'contents': '1011       if (!parse_string(line, enc, afflst->getlinenum())) {\\n1012         delete afflst;\\n1013         return 1;\\n1014       }\\n1015       if (enc == \"UTF-8\") {\\n1016         utf..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "hunspell/src/hunspell/hashmgr.cxx",
+          720
+        ],
+        "kwargs": {},
+        "timestamp": 1908755.378451911,
+        "success": true,
+        "result_summary": "Ok({'contents': '621         } else {\\n622           ++dp_pos;\\n623         }\\n624         break;\\n625       }\\n626       ++dp_pos;\\n627     }\\n628 \\n629     // tabulator is the old morphological fiel..."
       },
       {
         "tool_name": "read_source",
@@ -260,20 +283,9 @@
           90
         ],
         "kwargs": {},
-        "timestamp": 499690.979210789,
+        "timestamp": 1908755.379841757,
         "success": true,
         "result_summary": "Ok({'contents': '  1 /* ***** BEGIN LICENSE BLOCK *****\\n  2  * Version: MPL 1.1/GPL 2.0/LGPL 2.1\\n  3  *\\n  4  * Copyright (C) 2002-2022 N\u00e9meth L\u00e1szl\u00f3\\n  5  *\\n  6  * The contents of this file are su..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "hunspell/src/hunspell/hashmgr.cxx",
-          120
-        ],
-        "kwargs": {},
-        "timestamp": 499690.980074813,
-        "success": true,
-        "result_summary": "Ok({'contents': ' 21  * Dvornik L\u00e1szl\u00f3, Gefferth Andr\u00e1s, Nagy Viktor, Varga D\u00e1niel, Chris Halls,\\n 22  * Rene Engelhard, Bram Moolenaar, Dafydd Jones, Harri Pitk\u00e4nen\\n 23  *\\n 24  * Alternatively, the..."
       }
     ],
     "find_references": [],
@@ -282,10 +294,10 @@
         "tool_name": "apply_patch",
         "args": [
           "hunspell/src/hunspell/hashmgr.cxx",
-          "@@ -109,8 +109,23 @@\n void HashMgr::free_flag(unsigned short* astr, int alen) {\n-  if (astr && (aliasf.empty() || TESTAFF(astr, ONLYUPCASEFLAG, alen)))\n-    delete[] astr;\n+  if (!astr)\n+    return;\n+\n+  // AF alias entries are owned by aliasf and released in ~HashMgr().\n+  // Dictionary entries may point directly to those buffers via get_aliasf(),\n+  // so avoid freeing alias-owned pointers here.\n+  for (const auto& alias : aliasf) {\n+    if (astr == alias)\n+      return;\n+  }\n+\n+  // Keep existing behavior for dynamically allocated per-entry flags.\n+  if (aliasf.empty() || TESTAFF(astr, ONLYUPCASEFLAG, alen))\n+    delete[] astr;\n+  else\n+    delete[] astr;\n }\n"
+          "@@ -771,12 +771,12 @@ int HashMgr::decode_flags(unsigned short** result, const std::string& flags, Fi\n       int i = atoi(src);\n-      if (i >= DEFAULTFLAGS) {\n+      if ((i >= DEFAULTFLAGS || i < 0) && af != NULL) {\n         HUNSPELL_WARNING(stderr,\n                          \"error: line %d: flag id %d is too large (max: %d)\\n\",\n                          af->getlinenum(), i, DEFAULTFLAGS - 1);\n         i = 0;\n       }\n       *dest = (unsigned short)i;\n-      if (*dest == 0)\n+      if (*dest == 0 && af != NULL)\n         HUNSPELL_WARNING(stderr, \"error: line %d: 0 is wrong flag id\\n\",\n                          af->getlinenum());\n       break;\n"
         ],
         "kwargs": {},
-        "timestamp": 499694.688959725,
+        "timestamp": 1908759.297505328,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -295,7 +307,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 499724.622064878,
+        "timestamp": 1908795.772414738,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

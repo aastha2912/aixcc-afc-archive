@@ -9,9 +9,20 @@
         223
       ],
       "kwargs": {},
-      "timestamp": 395871.306849181,
+      "timestamp": 1846910.36664956,
       "success": true,
-      "result_summary": "Ok({'contents': \"124 \\t  hb_glyph_info_t *info = buffer->info;\\n125 \\t  hb_glyph_info_t buf[4];\\n126 \\n127 \\t  memcpy (buf, info + start, l * sizeof (buf[0]));\\n128 \\t  memcpy (buf + 2, info + end - r..."
+      "result_summary": "Ok({'contents': \"124 \\n125 \\tif (end - start >= l + r)\\n126 \\t{\\n127 \\t  buffer->merge_clusters (start, MIN (buffer->idx + 1, buffer->len));\\n128 \\t  buffer->merge_clusters (start, end);\\n129 \\n130 \\t..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "harfbuzz/src/hb-aat-layout-morx-table.hh",
+        330
+      ],
+      "kwargs": {},
+      "timestamp": 1846919.391856823,
+      "success": true,
+      "result_summary": "Ok({'contents': '231         return false;\\n232 \\n233       return entry->data.markIndex != 0xFFFF || entry->data.currentIndex != 0xFFFF;\\n234     }\\n235     bool transition (StateTableDriver<Types, E..."
     }
   ],
   "find_references": [
@@ -23,9 +34,9 @@
         false
       ],
       "kwargs": {},
-      "timestamp": 395899.891078618,
+      "timestamp": 1846918.108146025,
       "success": true,
-      "result_summary": "Ok([FileReferences(file_name='harfbuzz/src/hb-aat-layout-morx-table.hh', refs=[FileReference(line=210, content='\\tsubs (table+table->substitutionTables) {}', enclosing_definition='subs'), FileReferenc..."
+      "result_summary": "Ok([FileReferences(file_name='harfbuzz/src/hb-aat-layout-morx-table.hh', refs=[FileReference(line=223, content='\\tsubs (table+table->substitutionTables) {}', enclosing_definition='subs'), FileReferenc..."
     }
   ],
   "apply_patch": [
@@ -33,10 +44,10 @@
       "tool_name": "apply_patch",
       "args": [
         "harfbuzz/src/hb-aat-layout-morx-table.hh",
-        "@@ -206,9 +206,10 @@ struct ContextualSubtable\n     inline driver_context_t (const ContextualSubtable *table) :\n \tret (false),\n \tmark_set (false),\n \tmark (0),\n-\tsubs (table+table->substitutionTables) {}\n+\tsubs (table+table->substitutionTables),\n+\tsubs_valid (table->substitutionTables.sanitize (&hb_sanitize_context_t::noop (), table, 0)) {}\n@@ -232,7 +233,7 @@ struct ContextualSubtable\n       if (entry->data.markIndex != 0xFFFF)\n       {\n-\tconst Lookup<GlyphID> &lookup = subs[entry->data.markIndex];\n+\tconst Lookup<GlyphID> &lookup = subs_valid ? subs[entry->data.markIndex] : Null(Lookup<GlyphID>);\n \thb_glyph_info_t *info = buffer->info;\n \tconst GlyphID *replacement = lookup.get_value (info[mark].codepoint, driver->num_glyphs);\n \tif (replacement)\n@@ -244,7 +245,7 @@ struct ContextualSubtable\n       if (entry->data.currentIndex != 0xFFFF)\n       {\n         unsigned int idx = MIN (buffer->idx, buffer->len - 1);\n-\tconst Lookup<GlyphID> &lookup = subs[entry->data.currentIndex];\n+\tconst Lookup<GlyphID> &lookup = subs_valid ? subs[entry->data.currentIndex] : Null(Lookup<GlyphID>);\n \thb_glyph_info_t *info = buffer->info;\n \tconst GlyphID *replacement = lookup.get_value (info[idx].codepoint, driver->num_glyphs);\n \tif (replacement)\n@@ -269,6 +270,7 @@ struct ContextualSubtable\n     private:\n     bool mark_set;\n     unsigned int mark;\n+    bool subs_valid;\n     const UnsizedOffsetListOf<Lookup<GlyphID>, HBUINT32> &subs;\n   };\n"
+        "@@ -330,7 +330,22 @@\n     unsigned int num_entries = 0;\n     if (unlikely (!machine.sanitize (c, &num_entries))) return_trace (false);\n \n-    if (!Types::extended) return_trace (true);\n+    if (!Types::extended)\n+    {\n+      /* Obsolete (non-extended) contextual subtables still dereference\n+       * substitutionTables in driver_context_t by constructing `subs` from\n+       * table + substitutionTables.  Ensure the offset points to at least a\n+       * complete UnsizedOffsetListOf header and one offset entry to avoid\n+       * out-of-bounds reads when the list is indexed later. */\n+      const UnsizedOffsetListOf<Lookup<GlyphID>, HBUINT, false> &subs =\n+        this + substitutionTables;\n+      if (unlikely (!subs.sanitize_shallow (c)))\n+        return_trace (false);\n+\n+      const HBUINT *offsets = &subs[0];\n+      if (unlikely (!offsets->sanitize (c)))\n+        return_trace (false);\n+\n+      return_trace (true);\n+    }\n \n     unsigned int num_lookups = 0;\n "
       ],
       "kwargs": {},
-      "timestamp": 395905.612169696,
+      "timestamp": 1846923.984500735,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
@@ -46,7 +57,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 395967.311367222,
+      "timestamp": 1846984.886834666,
       "success": true,
       "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
     }

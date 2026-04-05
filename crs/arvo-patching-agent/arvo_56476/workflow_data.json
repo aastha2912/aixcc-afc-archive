@@ -1,5 +1,5 @@
 {
-  "vuln_id": 161,
+  "vuln_id": 477,
   "crash_result": {
     "output": "==4543==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x607000000063 at pc 0x00000049dc51 bp 0x7fff9e4fc420 sp 0x7fff9e4fbbf0\nREAD of size 4 at 0x607000000063 thread T0\nSCARINESS: 17 (4-byte-read-heap-buffer-overflow)\n    #0 0x49dc50 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n    #1 0x4ed3b8 in _dwarf_memcpy_noswap_bytes /src/libdwarf/src/lib/libdwarf/dwarf_memcpy_swap.c:49:5\n    #2 0x4fa5ba in dwarf_get_rnglist_offset_index_value ",
     "stack": "#0 0x49dc50 in __asan_memcpy llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n#1 0x4ed3b8 in _dwarf_memcpy_noswap_bytes libdwarf/src/lib/libdwarf/dwarf_memcpy_swap.c:49:5\n#2 0x4fa5ba in dwarf_get_rnglist_offset_index_value libdwarf/src/lib/libdwarf/dwarf_rnglists.c:529:5\n#3 0x4da5aa in LLVMFuzzerTestOneInput libdwarf/fuzz/fuzz_rng.c:76:18\n#4 0x4d9c9a in ExecuteFilesOnyByOne aflplusplus/utils/aflpp_driver/aflpp_driver.c:234:7\n#5 0x4d9a6c in main aflplusplus/utils/aflpp_d",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "dwarf_get_rnglist_offset_index_value",
     "file": "libdwarf/src/lib/libdwarf/dwarf_rnglists.c",
-    "description": "Heap out-of-bounds read in dwarf_get_rnglist_offset_index_value(): it computes offsetptr = con->rc_offsets_array + (offsetentry_index * con->rc_offset_size) and then READ_UNALIGNED_CK copies offset_len bytes from offsetptr, but does not verify that (offsetentry_index+1)*offset_len stays within the actual loaded .debug_rnglists section buffer. The only guard is offsetentry_index < rc_offset_entry_count, so if rc_offset_entry_count/rc_offset_size metadata parsed from malformed input is inconsistent with section size, _dwarf_memcpy_noswap_bytes reads past the heap allocation.",
-    "conditions": "In fuzz_rng, attacker-controlled ELF/.debug_rnglists data is loaded by dwarf_load_rnglists(), which builds rnglists context fields (including rc_offset_entry_count, rc_offset_size, rc_offsets_array). The harness then iterates e < offset_entry_count from dwarf_get_rnglist_context_basics() and calls dwarf_get_rnglist_offset_index_value(dbg,i,e,...). A crafted file with inflated/invalid offset table metadata causes the computed offsetptr for some e to point at/just beyond the end of the allocated section (67-byte region in ASan report), and the 4-byte READ_UNALIGNED_CK triggers a heap-buffer-overflow read."
+    "description": "The root cause is missing bounds validation when reading an offset-table entry from .debug_rnglists. In dwarf_get_rnglist_offset_index_value(), offsetptr is computed as rc_offsets_array + (offsetentry_index * rc_offset_size), then READ_UNALIGNED_CK copies rc_offset_size bytes from that pointer, but there is no check that this read stays within the loaded section/offset-table bounds. If rc_offset_entry_count/rc_offset_size metadata is inconsistent with actual section size, this permits out-of-bounds read (seen as memcpy read overflow in _dwarf_memcpy_noswap_bytes).",
+    "conditions": "Via fuzz_rng, attacker-controlled ELF .debug_rnglists data is loaded by dwarf_load_rnglists() into de_debug_rnglists.dss_data. A crafted rnglists header/context sets values such that offsetentry_index passes the count check but rc_offsets_array + index*rc_offset_size points near section end (or beyond valid table extent). Then LLVMFuzzerTestOneInput calls dwarf_get_rnglist_offset_index_value(), which performs READ_UNALIGNED_CK with rc_offset_size bytes and triggers heap OOB read on the malloc'd section buffer."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 4,
-      "total_cost": 0.2427915,
-      "total_input_tokens": 244050,
-      "total_output_tokens": 444,
-      "total_cached_tokens": 120960,
+      "total_llm_calls": 3,
+      "total_cost": 0.1430429,
+      "total_input_tokens": 185110,
+      "total_output_tokens": 557,
+      "total_cached_tokens": 119808,
       "llm_calls": [
         {
-          "timestamp": 1773464755.2544417,
+          "timestamp": 1774873840.1535912,
           "model": "gpt-5.3-codex",
-          "cost": 0.1048481,
-          "input_tokens": 59710,
-          "output_tokens": 155,
-          "total_tokens": 59865,
-          "cached_tokens": 1152,
+          "cost": 0.10692850000000001,
+          "input_tokens": 59798,
+          "output_tokens": 163,
+          "total_tokens": 59961,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,77 +51,56 @@
           "tool_calls": [
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_92SDM3SyMR9kyapSCvXMVaLW"
+              "tool_call_id": "call_0jzjlWxsFSCOEp291wCndlKG"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_20Suaoxa4qY5vRqyvknRsX0O"
+              "tool_call_id": "call_XhmxBeuMNPtKE3164txoGgBZ"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_TDBYDJY7WqSrVKTX9PkTrGbp"
+              "tool_call_id": "call_UGz36ktzJVpCMbet0hU5CMFN"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773464760.0137515,
+          "timestamp": 1774873848.0334973,
           "model": "gpt-5.3-codex",
-          "cost": 0.01209005,
-          "input_tokens": 60051,
-          "output_tokens": 82,
-          "total_tokens": 60133,
+          "cost": 0.0126588,
+          "input_tokens": 60096,
+          "output_tokens": 117,
+          "total_tokens": 60213,
           "cached_tokens": 59776,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_AfW0YOyTqE8ClKusAhCfZpMF"
+              "tool_call_id": "call_nhiEWqbnh593uMeTzGYVaxeM"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_oljppiHRbyBJLGlgswpaaDdH"
+              "tool_call_id": "call_pRzq2B2Vz1l9ECjaGsVbtGee"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_aFjpjpNgYk9Ex8NSfh9FeIy8"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773464763.6662152,
+          "timestamp": 1774873853.8595095,
           "model": "gpt-5.3-codex",
-          "cost": 0.01199135,
-          "input_tokens": 60241,
-          "output_tokens": 80,
-          "total_tokens": 60321,
+          "cost": 0.0234556,
+          "input_tokens": 65216,
+          "output_tokens": 277,
+          "total_tokens": 65493,
           "cached_tokens": 60032,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_5YwDwEWF9ao5L3f5iw3V6yLO"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_hQPgUjOPuiW3RuB80kKE8ywx"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773464770.6283066,
-          "model": "gpt-5.3-codex",
-          "cost": 0.113862,
-          "input_tokens": 64048,
-          "output_tokens": 127,
-          "total_tokens": 64175,
-          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -130,7 +109,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_x4Eq8uXw0QJl9yrScP8fAver"
+              "tool_call_id": "call_tErphmROP08s3KWoEQ1YStxf"
             }
           ],
           "finish_reason": "tool_calls"
@@ -139,19 +118,19 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.24521489999999999,
-      "total_input_tokens": 249078,
-      "total_output_tokens": 435,
-      "total_cached_tokens": 124928,
+      "total_cost": 0.14853475,
+      "total_input_tokens": 251701,
+      "total_output_tokens": 459,
+      "total_cached_tokens": 189440,
       "llm_calls": [
         {
-          "timestamp": 1773464773.8996263,
+          "timestamp": 1774873856.801616,
           "model": "gpt-5.3-codex",
-          "cost": 0.106414,
-          "input_tokens": 60152,
-          "output_tokens": 82,
-          "total_tokens": 60234,
-          "cached_tokens": 0,
+          "cost": 0.10546095,
+          "input_tokens": 60969,
+          "output_tokens": 99,
+          "total_tokens": 61068,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -159,24 +138,24 @@
           "tool_call_count": 2,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_dhCoVOIP2cWGtO1ioGagAfSD"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Pwvw29hj1BSa5M682nJ1M3bQ"
             },
             {
-              "tool_name": "find_references",
-              "tool_call_id": "call_o3S1D7U3V3umxPPTue9Y8j1M"
+              "tool_name": "read_source",
+              "tool_call_id": "call_zaxgusL2xofo8Khe2jtGyNji"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773464792.32858,
+          "timestamp": 1774873870.4159856,
           "model": "gpt-5.3-codex",
-          "cost": 0.11409825,
-          "input_tokens": 62671,
-          "output_tokens": 316,
-          "total_tokens": 62987,
-          "cached_tokens": 0,
+          "cost": 0.019281149999999997,
+          "input_tokens": 63269,
+          "output_tokens": 323,
+          "total_tokens": 63592,
+          "cached_tokens": 60928,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -185,19 +164,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_heU8SQhqMfVmDrwQRbIf03eo"
+              "tool_call_id": "call_nXhFM8gXIJaTvNSoiWAC1CWP"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773464793.630518,
+          "timestamp": 1774873871.7713506,
           "model": "gpt-5.3-codex",
-          "cost": 0.01300285,
-          "input_tokens": 63075,
+          "cost": 0.01204385,
+          "input_tokens": 63679,
           "output_tokens": 14,
-          "total_tokens": 63089,
-          "cached_tokens": 61952,
+          "total_tokens": 63693,
+          "cached_tokens": 63232,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -206,19 +185,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_Y3q4zRCOlz5wbXLLMcJQfN4h"
+              "tool_call_id": "call_AqWB8omVbWu3KGc559qtkAG5"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773464838.499206,
+          "timestamp": 1774873919.0515935,
           "model": "gpt-5.3-codex",
-          "cost": 0.011699799999999998,
-          "input_tokens": 63180,
+          "cost": 0.0117488,
+          "input_tokens": 63784,
           "output_tokens": 23,
-          "total_tokens": 63203,
-          "cached_tokens": 62976,
+          "total_tokens": 63807,
+          "cached_tokens": 63616,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -227,7 +206,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_EP1YtOggMbNSauu0vDNZ4I8N"
+              "tool_call_id": "call_fRHbBwkMZv9dCm3fhqWBHv3d"
             }
           ],
           "finish_reason": "tool_calls"
@@ -235,15 +214,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.48800639999999995,
-      "total_input_tokens": 493128,
-      "total_output_tokens": 879,
-      "total_llm_calls": 8
+      "total_cost": 0.29157765,
+      "total_input_tokens": 436811,
+      "total_output_tokens": 1016,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/lib/libdwarf/dwarf_rnglists.c\n+++ b/src/lib/libdwarf/dwarf_rnglists.c\n@@ -523,7 +523,28 @@\n     if (offsetentry_index >= con->rc_offset_entry_count) {\n         return DW_DLV_NO_ENTRY;\n     }\n+    if (!con->rc_offsets_array) {\n+        return DW_DLV_NO_ENTRY;\n+    }\n     offset_len = con->rc_offset_size;\n+    if (!offset_len) {\n+        return DW_DLV_NO_ENTRY;\n+    }\n+    {\n+        Dwarf_Small *base = con->rc_offsets_array;\n+        Dwarf_Small *end = con->rc_endaddr;\n+        Dwarf_Unsigned byteoff = offsetentry_index * offset_len;\n+\n+        if (end <= base) {\n+            return DW_DLV_NO_ENTRY;\n+        }\n+        if (byteoff > (Dwarf_Unsigned)(end - base)) {\n+            return DW_DLV_NO_ENTRY;\n+        }\n+        if (offset_len > (Dwarf_Unsigned)(end - (base + byteoff))) {\n+            return DW_DLV_NO_ENTRY;\n+        }\n+    }\n     offsetptr = con->rc_offsets_array +\n         (offsetentry_index*offset_len);\n     READ_UNALIGNED_CK(dbg,targetoffset,Dwarf_Unsigned,\n",
+    "patch": "--- a/src/lib/libdwarf/dwarf_rnglists.c\n+++ b/src/lib/libdwarf/dwarf_rnglists.c\n@@ -523,9 +523,21 @@\n     if (offsetentry_index >= con->rc_offset_entry_count) {\n         return DW_DLV_NO_ENTRY;\n     }\n+    if (!con->rc_offsets_array || !con->rc_endaddr) {\n+        _dwarf_error_string(dbg, error, DW_DLE_RNGLISTS_ERROR,\n+            \"DW_DLE_RNGLISTS_ERROR .debug_rnglists \"\n+            \"offset table pointers are invalid\");\n+        return DW_DLV_ERROR;\n+    }\n     offset_len = con->rc_offset_size;\n     offsetptr = con->rc_offsets_array +\n         (offsetentry_index*offset_len);\n+    if (offset_len > (Dwarf_Unsigned)(con->rc_endaddr - offsetptr)) {\n+        _dwarf_error_string(dbg, error, DW_DLE_RNGLISTS_ERROR,\n+            \"DW_DLE_RNGLISTS_ERROR .debug_rnglists \"\n+            \"offset table entry extends past section end\");\n+        return DW_DLV_ERROR;\n+    }\n     READ_UNALIGNED_CK(dbg,targetoffset,Dwarf_Unsigned,\n         offsetptr,\n         offset_len,error,con->rc_endaddr);\n",
     "build_artifacts_count": 1,
     "tested_povs_count": 1,
     "last_validation": {
@@ -257,43 +236,44 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "dwarf_get_rnglist_offset_index_value",
+          "libdwarf/src/lib/libdwarf/dwarf_rnglists.c",
+          1,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1906147.687976076,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n484 dwarf_get_rnglist_offset_index_value(, extra=None))"
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
           "libdwarf/src/lib/libdwarf/dwarf_rnglists.c",
-          529
+          500
         ],
         "kwargs": {},
-        "timestamp": 497062.47693824,
+        "timestamp": 1906145.378761602,
         "success": true,
-        "result_summary": "Ok({'contents': '430     }\\n431     if (!dbg->de_debug_rnglists.dss_size) {\\n432         /* nothing there. */\\n433         return DW_DLV_NO_ENTRY;\\n434     }\\n435     if (!dbg->de_debug_rnglists.dss_d..."
+        "result_summary": "Ok({'contents': '401     is missing or empty.\\n402     Intended to be done quite early and\\n403     done exactly once.\\n404     Harmless to do more than once.\\n405     With DW_DLV_OK it returns the nu..."
       }
     ],
-    "find_references": [
-      {
-        "tool_name": "find_references",
-        "args": [
-          "dwarf_get_rnglist_offset_index_value",
-          "",
-          false
-        ],
-        "kwargs": {},
-        "timestamp": 497073.37389494,
-        "success": true,
-        "result_summary": "Ok([FileReferences(file_name='libdwarf/fuzz/fuzz_rng.c', refs=[FileReference(line=76, content='          resc = dwarf_get_rnglist_offset_index_value(', enclosing_definition='LLVMFuzzerTestOneInput')])..."
-      }
-    ],
+    "find_references": [],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "libdwarf/src/lib/libdwarf/dwarf_rnglists.c",
-          "@@ -523,10 +523,28 @@ dwarf_get_rnglist_offset_index_value(\n     if (offsetentry_index >= con->rc_offset_entry_count) {\n         return DW_DLV_NO_ENTRY;\n     }\n+    if (!con->rc_offsets_array) {\n+        return DW_DLV_NO_ENTRY;\n+    }\n     offset_len = con->rc_offset_size;\n+    if (!offset_len) {\n+        return DW_DLV_NO_ENTRY;\n+    }\n+    {\n+        Dwarf_Small *base = con->rc_offsets_array;\n+        Dwarf_Small *end = con->rc_endaddr;\n+        Dwarf_Unsigned byteoff = offsetentry_index * offset_len;\n+\n+        if (end <= base) {\n+            return DW_DLV_NO_ENTRY;\n+        }\n+        if (byteoff > (Dwarf_Unsigned)(end - base)) {\n+            return DW_DLV_NO_ENTRY;\n+        }\n+        if (offset_len > (Dwarf_Unsigned)(end - (base + byteoff))) {\n+            return DW_DLV_NO_ENTRY;\n+        }\n+    }\n     offsetptr = con->rc_offsets_array +\n         (offsetentry_index*offset_len);\n     READ_UNALIGNED_CK(dbg,targetoffset,Dwarf_Unsigned,\n"
+          "@@ -523,10 +523,22 @@ dwarf_get_rnglist_offset_index_value(\n     if (offsetentry_index >= con->rc_offset_entry_count) {\n         return DW_DLV_NO_ENTRY;\n     }\n+    if (!con->rc_offsets_array || !con->rc_endaddr) {\n+        _dwarf_error_string(dbg, error, DW_DLE_RNGLISTS_ERROR,\n+            \"DW_DLE_RNGLISTS_ERROR .debug_rnglists \"\n+            \"offset table pointers are invalid\");\n+        return DW_DLV_ERROR;\n+    }\n     offset_len = con->rc_offset_size;\n     offsetptr = con->rc_offsets_array +\n         (offsetentry_index*offset_len);\n+    if (offset_len > (Dwarf_Unsigned)(con->rc_endaddr - offsetptr)) {\n+        _dwarf_error_string(dbg, error, DW_DLE_RNGLISTS_ERROR,\n+            \"DW_DLE_RNGLISTS_ERROR .debug_rnglists \"\n+            \"offset table entry extends past section end\");\n+        return DW_DLV_ERROR;\n+    }\n     READ_UNALIGNED_CK(dbg,targetoffset,Dwarf_Unsigned,\n         offsetptr,\n         offset_len,error,con->rc_endaddr);\n"
         ],
         "kwargs": {},
-        "timestamp": 497080.944627396,
+        "timestamp": 1906159.018848919,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -303,7 +283,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 497125.747727615,
+        "timestamp": 1906205.983145487,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

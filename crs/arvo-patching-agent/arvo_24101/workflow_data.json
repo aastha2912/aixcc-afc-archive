@@ -1,5 +1,5 @@
 {
-  "vuln_id": 203,
+  "vuln_id": 350,
   "crash_result": {
     "output": "==799==ERROR: AddressSanitizer: negative-size-param: (size=-30)\nSCARINESS: 10 (negative-size-param)\n    #0 0x58eb24 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n    #1 0x9ea1c0 in arrow::ConcatenateBuffers(std::__1::vector<std::__1::shared_ptr<arrow::Buffer>, std::__1::allocator<std::__1::shared_ptr<arrow::Buffer> > > const&, arrow::MemoryPool*) /src/arrow/cpp/src/arrow/buffer.cc:261:5\n    #2 0x92c6fe in arrow::ConcatenateImpl::Visit(arrow::Bin",
     "stack": "#0 0x58eb24 in __asan_memcpy llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n#1 0x9ea1c0 in arrow::ConcatenateBuffers(std::__1::vector<std::__1::shared_ptr<arrow::Buffer>, std::__1::allocator<std::__1::shared_ptr<arrow::Buffer> > > const&, arrow::MemoryPool*) arrow/cpp/src/arrow/buffer.cc:261:5\n#2 0x92c6fe in arrow::ConcatenateImpl::Visit(arrow::BinaryType const&) arrow/cpp/src/arrow/array/concatenate.cc:212:12\n#3 0x92ab7b in arrow::Status arrow::VisitTypeInline<arrow:",
@@ -22,59 +22,55 @@
     "dedup": "__asan_memcpy--arrow::ConcatenateBuffers(std::__1::vector<std::__1::shared_ptr<arrow::Buffer>, std::__1::allocator<std::__1::shared_ptr<arrow::Buffer> > > const&, arrow::MemoryPool*)--arrow::ConcatenateImpl::Visit(arrow::BinaryType const&)"
   },
   "analyzed_vuln": {
-    "function": "PutOffsets",
-    "file": "arrow/cpp/src/arrow/array/concatenate.cc",
-    "description": "When concatenating Binary/LargeBinary arrays (used by dictionary delta handling), PutOffsets computes values_range->length as `*src_end - src_begin[0]` without validating monotonic/non-decreasing offsets. For malformed IPC dictionary data, this can become negative. That negative range is later used by ConcatenateImpl::Visit(BinaryType) -> Buffers(2, value_ranges) -> SliceBuffer, producing buffers with negative `size()`, and finally ConcatenateBuffers calls memcpy with that negative size (seen as negative-size-param crash in buffer.cc:261). Crash site is ConcatenateBuffers/memcpy, but root cause is missing offset validation in PutOffsets during concatenation of untrusted data.",
-    "conditions": "Fuzzed IPC stream provides a DictionaryBatch delta (`isDelta`) with a dictionary array of Binary/LargeBinary type whose offsets buffer is structurally valid enough to pass `dictionary->Validate()` but contains decreasing/inconsistent offsets. Data flow: stream_fuzz -> reader ReadDictionary -> DictionaryMemo::AddDictionaryDelta -> Concatenate -> ConcatenateImpl::Visit(BinaryType) -> PutOffsets computes negative value range -> ConcatenateBuffers memcpy with negative size. Trigger requires dictionary delta concatenation path and malformed binary offsets causing `last_offset < first_offset` for one concatenated chunk."
+    "function": "ConcatenateBuffers",
+    "file": "arrow/cpp/src/arrow/buffer.cc",
+    "description": "`ConcatenateBuffers` sums `buffer->size()` into `out_length` and then calls `memcpy(..., buffer->size())` without validating that each input buffer size is non-negative. In this PoV, malformed IPC dictionary-delta data causes a sliced value buffer with a negative length to be produced upstream during array concatenation, and that negative `size()` is passed to `memcpy`, triggering ASan `negative-size-param`.",
+    "conditions": "Fuzzed IPC stream input reaches `RecordBatchStreamReaderImpl::ReadInitialDictionaries` -> `ReadDictionary` -> `DictionaryMemo::AddDictionaryDelta`, which concatenates existing and delta dictionaries (`Concatenate`). For variable-width/binary dictionary values, crafted offsets/ranges can yield a `Buffer` slice with negative length; when `ConcatenateImpl::Visit(BinaryType)` calls `ConcatenateBuffers` on those value buffers, the unchecked negative `buffer->size()` is used as a memcpy length, causing the crash."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.0313033,
-      "total_input_tokens": 21542,
-      "total_output_tokens": 436,
-      "total_cached_tokens": 7936,
+      "total_cost": 0.025681249999999996,
+      "total_input_tokens": 19411,
+      "total_output_tokens": 344,
+      "total_cached_tokens": 8320,
       "llm_calls": [
         {
-          "timestamp": 1773523449.7972531,
+          "timestamp": 1774820555.881756,
           "model": "gpt-5.3-codex",
-          "cost": 0.01194935,
-          "input_tokens": 6753,
-          "output_tokens": 139,
-          "total_tokens": 6892,
-          "cached_tokens": 1152,
+          "cost": 0.01107855,
+          "input_tokens": 6841,
+          "output_tokens": 109,
+          "total_tokens": 6950,
+          "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Op7An0b1Z4Qjqe8Vg4qnNKD0"
+              "tool_call_id": "call_OypMUnSxhewmQXaIkei0RGOr"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_oZktqYTVd5BT1k6rizAfKXCV"
+              "tool_call_id": "call_kv3zi6RmWReVHjfjfnLT4XxF"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_kqHKhFhgU5sXsnahb1iyfVhk"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_5VDPkeouJe0NKaH8IIcLcsSn"
+              "tool_call_id": "call_CRqBXmkYw17pHNAM4NcnKBxk"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773523462.2215068,
+          "timestamp": 1774820560.9952166,
           "model": "gpt-5.3-codex",
-          "cost": 0.01935395,
-          "input_tokens": 14789,
-          "output_tokens": 297,
-          "total_tokens": 15086,
+          "cost": 0.014602699999999998,
+          "input_tokens": 12570,
+          "output_tokens": 235,
+          "total_tokens": 12805,
           "cached_tokens": 6784,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -84,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_XpN1VZauPKr0sXXybgdnlc9Z"
+              "tool_call_id": "call_DxytDjDE1WfShToMMPl7VGxB"
             }
           ],
           "finish_reason": "tool_calls"
@@ -92,20 +88,87 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 12,
-      "total_cost": 0.0952952,
-      "total_input_tokens": 157808,
-      "total_output_tokens": 1308,
-      "total_cached_tokens": 126464,
+      "total_llm_calls": 11,
+      "total_cost": 0.05779935,
+      "total_input_tokens": 131649,
+      "total_output_tokens": 1050,
+      "total_cached_tokens": 118912,
       "llm_calls": [
         {
-          "timestamp": 1773523463.9708734,
+          "timestamp": 1774820563.1036966,
           "model": "gpt-5.3-codex",
-          "cost": 0.012444249999999999,
-          "input_tokens": 6455,
-          "output_tokens": 82,
-          "total_tokens": 6537,
-          "cached_tokens": 0,
+          "cost": 0.011531449999999999,
+          "input_tokens": 7975,
+          "output_tokens": 86,
+          "total_tokens": 8061,
+          "cached_tokens": 2304,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_MgFfK7lXvgiVpQ3bqhxY3KuR"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_hDjiinkRVjHiNYDCbpd2vrIh"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774820640.9834034,
+          "model": "gpt-5.3-codex",
+          "cost": 0.008308300000000001,
+          "input_tokens": 9458,
+          "output_tokens": 304,
+          "total_tokens": 9762,
+          "cached_tokens": 7936,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_gVHPhnbajNis2EXaQ7kjrfbO"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774820641.8738463,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0023135,
+          "input_tokens": 9850,
+          "output_tokens": 14,
+          "total_tokens": 9864,
+          "cached_tokens": 9600,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_IOO9UfN9ZAXPTAYOMot5Gxag"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774820696.6301847,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00330365,
+          "input_tokens": 9979,
+          "output_tokens": 83,
+          "total_tokens": 10062,
+          "cached_tokens": 9728,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -114,23 +177,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_QYhiuhLbhlk1S1gluH0G4IW6"
+              "tool_call_id": "call_3ZXBClOObyf7aGbI6uk1hsb0"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_MEp9tKiY861XnzOBgwbavQNy"
+              "tool_name": "find_references",
+              "tool_call_id": "call_ZUrtG1CkkHoxJZ1yYzyTxPtD"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773523468.1350853,
+          "timestamp": 1774820707.567321,
           "model": "gpt-5.3-codex",
-          "cost": 0.012843249999999999,
-          "input_tokens": 11323,
-          "output_tokens": 222,
-          "total_tokens": 11545,
-          "cached_tokens": 6400,
+          "cost": 0.0095942,
+          "input_tokens": 11508,
+          "output_tokens": 370,
+          "total_tokens": 11878,
+          "cached_tokens": 9984,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,19 +202,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_kitDooOA6Zd0q4GDEfG7YHE2"
+              "tool_call_id": "call_LGYplwuZfN351ubjHC1100Iy"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773523469.1103783,
+          "timestamp": 1774820708.6450825,
           "model": "gpt-5.3-codex",
-          "cost": 0.0026113499999999997,
-          "input_tokens": 11633,
+          "cost": 0.0025892999999999997,
+          "input_tokens": 11966,
           "output_tokens": 14,
-          "total_tokens": 11647,
-          "cached_tokens": 11392,
+          "total_tokens": 11980,
+          "cached_tokens": 11776,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,61 +223,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_OvFeTkb18VBR1cW9h0m69wg5"
+              "tool_call_id": "call_u6QjqjkKYUQlaN5aAl4ZnpLv"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773523567.4578266,
+          "timestamp": 1774820774.8924124,
           "model": "gpt-5.3-codex",
-          "cost": 0.0073254999999999995,
-          "input_tokens": 11762,
-          "output_tokens": 349,
-          "total_tokens": 12111,
-          "cached_tokens": 11520,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_8hTk1hlA61dIzCM6kHBn2uzC"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773523576.3937585,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00259385,
-          "input_tokens": 12199,
-          "output_tokens": 14,
-          "total_tokens": 12213,
-          "cached_tokens": 12032,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "test_patch",
-              "tool_call_id": "call_ELwxjXBbPouaVFU2vKENERT6"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773523653.378318,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0031136000000000002,
-          "input_tokens": 12328,
+          "cost": 0.00290745,
+          "input_tokens": 12095,
           "output_tokens": 35,
-          "total_tokens": 12363,
-          "cached_tokens": 12032,
+          "total_tokens": 12130,
+          "cached_tokens": 11904,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -223,61 +244,19 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_rv9HCwc7Sk8k5SYnZw5yi84B"
+              "tool_call_id": "call_8KKCtrlA7G4PaV5lzuW5ZCBe"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773523663.2774603,
+          "timestamp": 1774820782.1863236,
           "model": "gpt-5.3-codex",
-          "cost": 0.0112609,
-          "input_tokens": 14766,
-          "output_tokens": 341,
-          "total_tokens": 15107,
-          "cached_tokens": 12288,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_s1IGt65PplcT399Hj5Tw2Sc7"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773523664.476193,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00320005,
-          "input_tokens": 15195,
-          "output_tokens": 14,
-          "total_tokens": 15209,
-          "cached_tokens": 14976,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "test_patch",
-              "tool_call_id": "call_VzwWqmqU2pqsJUesHqmt1z9k"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773523730.0146048,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0042602000000000004,
-          "input_tokens": 15324,
-          "output_tokens": 88,
-          "total_tokens": 15412,
-          "cached_tokens": 15104,
+          "cost": 0.0080276,
+          "input_tokens": 14536,
+          "output_tokens": 110,
+          "total_tokens": 14646,
+          "cached_tokens": 12032,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -286,19 +265,35 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_0GWQAAmpUhyloI2r7N8KarX0"
+              "tool_call_id": "call_jzvbnyP0ac566p4EQMEc2OqK"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773523731.5547252,
+          "timestamp": 1774820783.1825635,
           "model": "gpt-5.3-codex",
-          "cost": 0.0033131,
-          "input_tokens": 15482,
+          "cost": 0.0030282,
+          "input_tokens": 14716,
+          "output_tokens": 4,
+          "total_tokens": 14720,
+          "cached_tokens": 14464,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": false,
+          "tool_call_count": 0,
+          "tool_calls": null,
+          "finish_reason": "stop"
+        },
+        {
+          "timestamp": 1774820784.3483698,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0030191000000000003,
+          "input_tokens": 14738,
           "output_tokens": 15,
-          "total_tokens": 15497,
-          "cached_tokens": 15232,
+          "total_tokens": 14753,
+          "cached_tokens": 14592,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -307,57 +302,28 @@
           "tool_calls": [
             {
               "tool_name": "undo_last_patch",
-              "tool_call_id": "call_B2D3O1AOX38RT0Ip895KNZq9"
+              "tool_call_id": "call_BEpYf3FgXNyinizGmtAEAV5b"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773523733.9542816,
+          "timestamp": 1774820785.4050226,
           "model": "gpt-5.3-codex",
-          "cost": 0.028157500000000002,
-          "input_tokens": 15578,
-          "output_tokens": 64,
-          "total_tokens": 15642,
-          "cached_tokens": 0,
+          "cost": 0.0031766000000000003,
+          "input_tokens": 14828,
+          "output_tokens": 15,
+          "total_tokens": 14843,
+          "cached_tokens": 14592,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 1,
           "tool_calls": [
             {
               "tool_name": "undo_last_patch",
-              "tool_call_id": "call_LuenvZXZRZWcJDC8NzBhTplN"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_2CQVC7URohNNLPFl6jDGsUd4"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773523814.062676,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00417165,
-          "input_tokens": 15763,
-          "output_tokens": 70,
-          "total_tokens": 15833,
-          "cached_tokens": 15488,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "undo_last_patch",
-              "tool_call_id": "call_BQG3g6r9fftJrzzq2mUxgZvn"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_YPyRTeQV3knHr6zHvQkBVfQL"
+              "tool_call_id": "call_UhAQVteJLfF74kkO1u0WCOF2"
             }
           ],
           "finish_reason": "tool_calls"
@@ -365,10 +331,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.1265985,
-      "total_input_tokens": 179350,
-      "total_output_tokens": 1744,
-      "total_llm_calls": 14
+      "total_cost": 0.08348059999999999,
+      "total_input_tokens": 151060,
+      "total_output_tokens": 1394,
+      "total_llm_calls": 13
     }
   },
   "patch_result": {
@@ -392,29 +358,38 @@
         "args": [
           "ConcatenateBuffers",
           "arrow/cpp/src/arrow/buffer.cc",
-          240,
+          1,
           true
         ],
         "kwargs": {},
-        "timestamp": 556100.81736011,
+        "timestamp": 1852925.917178729,
         "success": true,
         "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n252 Result<std::shared_ptr<Buffer>> ConcatenateBuffers(, extra=None))"
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "ConcatenateBuffers",
-          "arrow/cpp/src/arrow/buffer.cc",
-          252,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 556115.692361853,
-        "success": true,
-        "result_summary": "Ok({'contents': '252 Result<std::shared_ptr<Buffer>> ConcatenateBuffers(\\n253     const std::vector<std::shared_ptr<Buffer>>& buffers, MemoryPool* pool) {\\n254   int64_t out_length = 0;\\n255   for (co..."
       }
     ],
     "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "arrow/cpp/src/arrow/buffer.cc",
+          240
+        ],
+        "kwargs": {},
+        "timestamp": 1852851.680016761,
+        "success": true,
+        "result_summary": "Ok({'contents': '141 \\n142   ~PoolBuffer() override {\\n143     if (mutable_data_ != nullptr) {\\n144       pool_->Free(mutable_data_, capacity_);\\n145     }\\n146   }\\n147 \\n148   Status Reserve(const i..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "arrow/cpp/src/arrow/buffer.cc",
+          252
+        ],
+        "kwargs": {},
+        "timestamp": 1852991.743580594,
+        "success": true,
+        "result_summary": "Ok({'contents': '153       uint8_t* new_data;\\n154       int64_t new_capacity = BitUtil::RoundUpToMultipleOf64(capacity);\\n155       if (mutable_data_) {\\n156         RETURN_NOT_OK(pool_->Reallocate(c..."
+      },
       {
         "tool_name": "read_source",
         "args": [
@@ -422,67 +397,47 @@
           180
         ],
         "kwargs": {},
-        "timestamp": 555752.762301199,
+        "timestamp": 1853068.166249525,
         "success": true,
         "result_summary": "Ok({'contents': ' 81       internal::CopyBitmap(bitmap.data, bitmap.range.offset, bitmap.range.length, dst,\\n 82                            bitmap_offset);\\n 83     }\\n 84     bitmap_offset += bitmap...."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "arrow/cpp/src/arrow/array/concatenate.cc",
-          240
-        ],
-        "kwargs": {},
-        "timestamp": 555752.763542628,
-        "success": true,
-        "result_summary": "Ok({'contents': '141   }\\n142 \\n143   // Get the range of offsets to transfer from src\\n144   auto src_begin = reinterpret_cast<const Offset*>(src->data());\\n145   auto src_end = reinterpret_cast<cons..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "arrow/cpp/src/arrow/array/concatenate.cc",
-          100
-        ],
-        "kwargs": {},
-        "timestamp": 555947.096142075,
-        "success": true,
-        "result_summary": "Ok({'contents': '  1 // Licensed to the Apache Software Foundation (ASF) under one\\n  2 // or more contributor license agreements.  See the NOTICE file\\n  3 // distributed with this work for additiona..."
       }
     ],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "ConcatenateBuffers",
+          "arrow/cpp/src/arrow/buffer.cc",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1852985.690361851,
+        "success": true,
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: arrow/cpp/src/arrow/buffer.h, arrow/cpp/src/arrow/io/compressed_test.cc, arrow/cpp/src/parquet/column_writer.cc, ..."
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
-          "arrow/cpp/src/arrow/array/concatenate.cc",
-          "@@ -146,8 +146,13 @@ static Status PutOffsets(const std::shared_ptr<Buffer>& src, Offset first_offset,\n \n   // Compute the range of values which is spanned by this range of offsets\n   values_range->offset = src_begin[0];\n-  values_range->length = *src_end - values_range->offset;\n+  const Offset last_offset = src_end[-1];\n+  if (ARROW_PREDICT_FALSE(last_offset < values_range->offset)) {\n+    return Status::Invalid(\"negative offsets in binary array\");\n+  }\n+  values_range->length = last_offset - values_range->offset;\n   if (first_offset > std::numeric_limits<Offset>::max() - values_range->length) {\n     return Status::Invalid(\"offset overflow while concatenating arrays\");\n   }\n"
+          "arrow/cpp/src/arrow/buffer.cc",
+          "@@ -252,14 +252,21 @@\n Result<std::shared_ptr<Buffer>> ConcatenateBuffers(\n     const std::vector<std::shared_ptr<Buffer>>& buffers, MemoryPool* pool) {\n   int64_t out_length = 0;\n   for (const auto& buffer : buffers) {\n+    if (ARROW_PREDICT_FALSE(buffer->size() < 0)) {\n+      return Status::Invalid(\"Negative buffer size: \", buffer->size());\n+    }\n     out_length += buffer->size();\n   }\n   ARROW_ASSIGN_OR_RAISE(auto out, AllocateBuffer(out_length, pool));\n   auto out_data = out->mutable_data();\n   for (const auto& buffer : buffers) {\n-    std::memcpy(out_data, buffer->data(), buffer->size());\n-    out_data += buffer->size();\n+    const int64_t buffer_size = buffer->size();\n+    if (buffer_size > 0) {\n+      std::memcpy(out_data, buffer->data(), static_cast<size_t>(buffer_size));\n+      out_data += buffer_size;\n+    }\n   }\n   return std::move(out);\n }\n"
         ],
         "kwargs": {},
-        "timestamp": 555756.737369967,
+        "timestamp": 1852929.575384543,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       },
       {
         "tool_name": "apply_patch",
         "args": [
-          "arrow/cpp/src/arrow/array/concatenate.cc",
-          "@@ -147,12 +147,21 @@ static Status PutOffsets(const std::shared_ptr<Buffer>& src, Offset first_offset,\n   // Compute the range of values which is spanned by this range of offsets\n   values_range->offset = src_begin[0];\n   const Offset last_offset = src_end[-1];\n-  if (ARROW_PREDICT_FALSE(last_offset < values_range->offset)) {\n+  if (ARROW_PREDICT_FALSE(values_range->offset < 0 || last_offset < 0 ||\n+                          last_offset < values_range->offset)) {\n     return Status::Invalid(\"negative offsets in binary array\");\n   }\n   values_range->length = last_offset - values_range->offset;\n   if (first_offset > std::numeric_limits<Offset>::max() - values_range->length) {\n     return Status::Invalid(\"offset overflow while concatenating arrays\");\n   }\n+\n+  // Ensure offsets are non-decreasing to avoid creating invalid value slices.\n+  for (auto p = src_begin + 1; p != src_end; ++p) {\n+    if (ARROW_PREDICT_FALSE(p[-1] > p[0])) {\n+      return Status::Invalid(\"non-monotonic offsets in binary array\");\n+    }\n+  }\n \n   // Write offsets into dst, ensuring that the first offset written is\n   // first_offset\n"
+          "arrow/cpp/src/arrow/buffer.cc",
+          "@@ -253,17 +253,21 @@\n     const std::vector<std::shared_ptr<Buffer>>& buffers, MemoryPool* pool) {\n   int64_t out_length = 0;\n   for (const auto& buffer : buffers) {\n-    if (ARROW_PREDICT_FALSE(buffer->size() < 0)) {\n-      return Status::Invalid(\"Negative buffer size: \", buffer->size());\n+    if (ARROW_PREDICT_FALSE(buffer == nullptr)) {\n+      return Status::Invalid(\"Cannot concatenate null buffer\");\n     }\n-    out_length += buffer->size();\n+    if (ARROW_PREDICT_FALSE(buffer->size() < 0)) {\n+      return Status::Invalid(\"Negative buffer size: \", buffer->size());\n+    }\n+    ARROW_ASSIGN_OR_RAISE(out_length, internal::AddWithOverflow(out_length, buffer->size()));\n   }\n   ARROW_ASSIGN_OR_RAISE(auto out, AllocateBuffer(out_length, pool));\n   auto out_data = out->mutable_data();\n   for (const auto& buffer : buffers) {\n     const int64_t buffer_size = buffer->size();\n     if (buffer_size > 0) {\n-      std::memcpy(out_data, buffer->data(), static_cast<size_t>(buffer_size));\n+      std::memcpy(out_data, buffer->data(), static_cast<size_t>(buffer_size));\n       out_data += buffer_size;\n     }\n   }\n"
         ],
         "kwargs": {},
-        "timestamp": 555862.445445284,
+        "timestamp": 1852996.190186955,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
-      },
-      {
-        "tool_name": "apply_patch",
-        "args": [
-          "arrow/cpp/src/arrow/array/concatenate.cc",
-          "@@ -111,6 +111,9 @@ static Status ConcatenateOffsets(const BufferVector& buffers, MemoryPool* pool,\n     out_length += buffer->size() / sizeof(Offset);\n   }\n   ARROW_ASSIGN_OR_RAISE(*out, AllocateBuffer((out_length + 1) * sizeof(Offset), pool));\n+  if (ARROW_PREDICT_FALSE(out_length == 0)) {\n+    return Status::Invalid(\"offset buffer has no elements\");\n+  }\n   auto dst = reinterpret_cast<Offset*>((*out)->mutable_data());\n@@ -172,7 +175,11 @@ static Status PutOffsets(const std::shared_ptr<Buffer>& src, Offset first_offset,\n   // NOTE: Concatenate can be called during IPC reads to append delta dictionaries.\n   // Avoid UB on non-validated input by doing the addition in the unsigned domain.\n   // (the result can later be validated using Array::ValidateFull)\n-  std::transform(src_begin, src_end, dst, [adjustment](Offset offset) {\n+  std::transform(src_begin, src_end, dst, [adjustment, first_offset](Offset offset) {\n+    if (ARROW_PREDICT_FALSE(offset < 0)) {\n+      return first_offset;\n+    }\n     return internal::SafeSignedAdd(offset, adjustment);\n   });\n   return Status::OK();\n"
-        ],
-        "kwargs": {},
-        "timestamp": 555951.894932036,
-        "success": true,
-        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
     ],
     "test_patch": [
@@ -490,7 +445,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 555850.971581436,
+        "timestamp": 1852983.703506421,
         "success": true,
         "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'arrow-ipc-stream-fuzz', 'dedup': '__asan_memcpy--arrow::ConcatenateBuffers(std::__1::vector..."
       },
@@ -498,15 +453,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 555940.761462446,
-        "success": true,
-        "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'arrow-ipc-stream-fuzz', 'dedup': '__asan_memcpy--arrow::ConcatenateBuffers(std::__1::vector..."
-      },
-      {
-        "tool_name": "test_patch",
-        "args": [],
-        "kwargs": {},
-        "timestamp": 556016.212277962,
+        "timestamp": 1853062.228192124,
         "success": true,
         "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'arrow-ipc-stream-fuzz', 'dedup': '__asan_memcpy--arrow::ConcatenateBuffers(std::__1::vector..."
       }
@@ -516,15 +463,7 @@
         "tool_name": "undo_last_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 556020.129389952,
-        "success": true,
-        "result_summary": "Ok({'total_edits': 2})"
-      },
-      {
-        "tool_name": "undo_last_patch",
-        "args": [],
-        "kwargs": {},
-        "timestamp": 556022.52932234,
+        "timestamp": 1853072.923138755,
         "success": true,
         "result_summary": "Ok({'total_edits': 1})"
       },
@@ -532,7 +471,7 @@
         "tool_name": "undo_last_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 556102.637241756,
+        "timestamp": 1853073.979568201,
         "success": true,
         "result_summary": "Ok({'total_edits': 0})"
       }

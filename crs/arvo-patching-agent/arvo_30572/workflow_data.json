@@ -1,5 +1,5 @@
 {
-  "vuln_id": 236,
+  "vuln_id": 385,
   "crash_result": {
     "output": "==38628==ERROR: AddressSanitizer: attempting free on address which was not malloc()-ed: 0x70c09d7e4080 in thread T0\nSCARINESS: 40 (bad-free)\n    #0 0x52189d in operator delete(void*) /src/llvm-project/compiler-rt/lib/asan/asan_new_delete.cpp:160:3\n    #1 0x8c7244 in void std::__1::__libcpp_operator_delete<void*>(void*) /usr/local/bin/../include/c++/v1/new:245:3\n    #2 0x8c7244 in void std::__1::__do_deallocate_handle_size<>(void*, unsigned long) /usr/local/bin/../include/c++/v1/new:269:10\n    #3",
     "stack": "#0 0x52189d in operator delete(void*) llvm-project/compiler-rt/lib/asan/asan_new_delete.cpp:160:3\n#1 0x8c7244 in void std::__1::__libcpp_operator_delete<void*>(void*) /usr/local/bin/../include/c++/v1/new:245:3\n#2 0x8c7244 in void std::__1::__do_deallocate_handle_size<>(void*, unsigned long) /usr/local/bin/../include/c++/v1/new:269:10\n#3 0x8c7244 in std::__1::__libcpp_deallocate(void*, unsigned long, unsigned long) /usr/local/bin/../include/c++/v1/new:279:12\n#4 0x8c7244 in std::__1::allocator<std",
@@ -24,50 +24,54 @@
   "analyzed_vuln": {
     "function": "labelRecursivePatterns",
     "file": "rdkit/Code/GraphMol/SmilesParse/SmilesParse.cpp",
-    "description": "`labelRecursivePatterns()` maintains a `state` stack (`std::list<SmaState>`) for SMARTS parentheses, but on `')'` it unconditionally does `state.back(); state.pop_back();` without checking emptiness. Malformed SMARTS with unmatched closing parens can pop the initial BASE state and then pop from an empty list, corrupting list internals and later causing an invalid free (ASan bad-free in `std::list::pop_back`). Crash is observed in `labelRecursivePatterns` during `SmartsToMol` called from Marvin SMARTS property parsing.",
-    "conditions": "In the `mol_data_stream_to_mol_fuzzer` path, attacker-controlled mol block text reaches `ParseMolBlockProperties()` and `ParseMarvinSmartsLine()` (`M  MRV SMA` line). The SMARTS substring is passed to `SmartsToMol()`, which first calls `labelRecursivePatterns()`. If that SMARTS contains more `')'` than pushed states (e.g., excessive/unbalanced close parens in recursive SMARTS content), `labelRecursivePatterns()` underflows its `state` list and triggers memory corruption leading to bad-free."
+    "description": "`labelRecursivePatterns()` maintains a manual parse stack (`state`) for parentheses/`$(` recursion markers, but it unconditionally executes `state.back()`/`state.pop_back()` on every `')'`. If input has more closing parentheses than the function\u2019s tracked opens (possible with malformed SMARTS from `M  MRV SMA`), the stack can be popped down to empty and then accessed again, corrupting `std::list` internals and leading to an invalid free in `std::list::pop_back()` (ASan bad-free on stack address). Root cause is missing balance/emptiness validation before stack pop, not allocator code.",
+    "conditions": "Fuzzer path: `MolDataStreamToMol` -> `ParseV2000CTAB` -> `ParseMolBlockProperties` -> `ParseMarvinSmartsLine` -> `SmartsToMol` -> `labelRecursivePatterns`. A mol block containing an `M  MRV SMA` property with malformed SMARTS (especially unbalanced `)` relative to tracked `(` / `$(` recursion state) triggers the bug during recursive-pattern relabeling before normal SMARTS parse error handling. No special heap grooming needed; parser just needs to reach this Marvin SMARTS line with crafted text."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.023285850000000004,
-      "total_input_tokens": 14831,
-      "total_output_tokens": 371,
-      "total_cached_tokens": 4992,
+      "total_cost": 0.02403555,
+      "total_input_tokens": 16357,
+      "total_output_tokens": 421,
+      "total_cached_tokens": 6656,
       "llm_calls": [
         {
-          "timestamp": 1773546558.1389577,
+          "timestamp": 1774838084.5077198,
           "model": "gpt-5.3-codex",
-          "cost": 0.01012025,
-          "input_tokens": 5071,
-          "output_tokens": 89,
-          "total_tokens": 5160,
-          "cached_tokens": 0,
+          "cost": 0.00834505,
+          "input_tokens": 5159,
+          "output_tokens": 124,
+          "total_tokens": 5283,
+          "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_wJp46nZn1DQ05dokcGaYaOAL"
+              "tool_call_id": "call_BAMhVcpyO2NnTWOnrwMU13Ar"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_kGmHUEcitIMV6kZxf9yyZZPm"
+              "tool_call_id": "call_QBP1ibHGdoTpR5EV4oq0eAyl"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_eOh4ggOzaQUOohY5iS8cnm3Z"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773546567.1790185,
+          "timestamp": 1774838090.2691073,
           "model": "gpt-5.3-codex",
-          "cost": 0.013165600000000001,
-          "input_tokens": 9760,
-          "output_tokens": 282,
-          "total_tokens": 10042,
-          "cached_tokens": 4992,
+          "cost": 0.0156905,
+          "input_tokens": 11198,
+          "output_tokens": 297,
+          "total_tokens": 11495,
+          "cached_tokens": 5120,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -76,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_HnE2lcSbMbVySItYw4b4kuQc"
+              "tool_call_id": "call_lkByC1MfrbqtkQRfj3OQcjQG"
             }
           ],
           "finish_reason": "tool_calls"
@@ -85,18 +89,18 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.033229,
-      "total_input_tokens": 30260,
-      "total_output_tokens": 319,
-      "total_cached_tokens": 15360,
+      "total_cost": 0.03634855,
+      "total_input_tokens": 35617,
+      "total_output_tokens": 405,
+      "total_cached_tokens": 20096,
       "llm_calls": [
         {
-          "timestamp": 1773546568.8149655,
+          "timestamp": 1774838092.2470593,
           "model": "gpt-5.3-codex",
-          "cost": 0.0059157,
-          "input_tokens": 4734,
-          "output_tokens": 90,
-          "total_tokens": 4824,
+          "cost": 0.0092267,
+          "input_tokens": 6546,
+          "output_tokens": 100,
+          "total_tokens": 6646,
           "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -106,23 +110,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Jl9dYbYms3DwTbgVGTNdZT9M"
+              "tool_call_id": "call_GSHfe7y7MsHU77dtrJIRof3w"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_mUSVLRH4iqyAmKsuoM0Q2Ixm"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_TdmQK9s9WHzRWxnMSfVtpT3M"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773546571.9804761,
+          "timestamp": 1774838776.312147,
           "model": "gpt-5.3-codex",
-          "cost": 0.00973105,
-          "input_tokens": 8287,
-          "output_tokens": 192,
-          "total_tokens": 8479,
-          "cached_tokens": 4736,
+          "cost": 0.0099519,
+          "input_tokens": 9418,
+          "output_tokens": 268,
+          "total_tokens": 9686,
+          "cached_tokens": 6528,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -131,19 +135,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_r6u9N4hibiIkNjSZeVkHkcKs"
+              "tool_call_id": "call_k2sCkPMcRY3te2rJhphHVbah"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773546575.133589,
+          "timestamp": 1774838777.6119208,
           "model": "gpt-5.3-codex",
-          "cost": 0.0020842499999999997,
-          "input_tokens": 8567,
+          "cost": 0.0021804999999999997,
+          "input_tokens": 9774,
           "output_tokens": 14,
-          "total_tokens": 8581,
-          "cached_tokens": 8320,
+          "total_tokens": 9788,
+          "cached_tokens": 9600,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -152,19 +156,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_2ozu7czTQo8wfiFILV0FwuU5"
+              "tool_call_id": "call_dmxqIkaHHS0d428psaMbB6Se"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773548014.4843187,
+          "timestamp": 1774841723.9245608,
           "model": "gpt-5.3-codex",
-          "cost": 0.015498,
-          "input_tokens": 8672,
+          "cost": 0.01498945,
+          "input_tokens": 9879,
           "output_tokens": 23,
-          "total_tokens": 8695,
-          "cached_tokens": 0,
+          "total_tokens": 9902,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -173,7 +177,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_omJVqGjytJRl7mcpGVIDCAA7"
+              "tool_call_id": "call_dPMaBXuTXd67pxJZ7lQiLdY6"
             }
           ],
           "finish_reason": "tool_calls"
@@ -181,15 +185,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.056514850000000005,
-      "total_input_tokens": 45091,
-      "total_output_tokens": 690,
+      "total_cost": 0.060384099999999996,
+      "total_input_tokens": 51974,
+      "total_output_tokens": 826,
       "total_llm_calls": 6
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/Code/GraphMol/SmilesParse/SmilesParse.cpp\n+++ b/Code/GraphMol/SmilesParse/SmilesParse.cpp\n@@ -175,6 +175,12 @@\n     } else if (sma[pos] == '(') {\n       state.push_back(BRANCH);\n     } else if (sma[pos] == ')') {\n+      if (state.empty() || state.back() == BASE) {\n+        // malformed SMARTS (unmatched close paren): keep output unchanged and\n+        // avoid underflowing the parser state stack.\n+        ++pos;\n+        continue;\n+      }\n       SmaState currState = state.back();\n       state.pop_back();\n       if (currState == RECURSE) {\n",
+    "patch": "--- a/Code/GraphMol/SmilesParse/SmilesParse.cpp\n+++ b/Code/GraphMol/SmilesParse/SmilesParse.cpp\n@@ -175,9 +175,20 @@\n     } else if (sma[pos] == '(') {\n       state.push_back(BRANCH);\n     } else if (sma[pos] == ')') {\n+      // malformed SMARTS can have unmatched closing parentheses.\n+      // If the parse state is already at the BASE marker, leave this ')' to\n+      // the regular SMARTS parser and avoid underflowing the manual stack.\n+      if (state.empty() || state.back() == BASE) {\n+        ++pos;\n+        continue;\n+      }\n       SmaState currState = state.back();\n       state.pop_back();\n       if (currState == RECURSE) {\n+        if (startRecurse.empty()) {\n+          ++pos;\n+          continue;\n+        }\n         unsigned int dollarPos = startRecurse.back();\n         startRecurse.pop_back();\n         if (pos + 1 >= sma.size() || sma[pos + 1] != '_') {\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -203,29 +207,32 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "labelRecursivePatterns",
+          "rdkit/Code/GraphMol/SmilesParse/SmilesParse.cpp",
+          158,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1871061.285740026,
+        "success": true,
+        "result_summary": "Ok({'contents': '158 std::string labelRecursivePatterns(const std::string &sma) {\\n159 #ifndef NO_AUTOMATIC_SMARTS_RELABELLING\\n160   std::list<SmaState> state;\\n161   std::list<unsigned int> startRec..."
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
           "rdkit/Code/GraphMol/SmilesParse/SmilesParse.cpp",
-          150
+          170
         ],
         "kwargs": {},
-        "timestamp": 578857.446254271,
+        "timestamp": 1870380.823962422,
         "success": true,
-        "result_summary": "Ok({'contents': ' 51 int yysmarts_lex_init(void **);\\n 52 int yysmarts_lex_destroy(void *);\\n 53 size_t setup_smarts_string(const std::string &text, void *);\\n 54 extern int yysmarts_debug;\\n 55 names..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "rdkit/Code/GraphMol/SmilesParse/SmilesParse.cpp",
-          470
-        ],
-        "kwargs": {},
-        "timestamp": 578857.44713677,
-        "success": true,
-        "result_summary": "Ok({'contents': '371       SmilesParseOps::parseCXExtensions(*res, cxPart, pos);\\n372     } catch (...) {\\n373       if (params.strictCXSMILES) {\\n374         delete res;\\n375         throw;\\n376     ..."
+        "result_summary": "Ok({'contents': ' 71     throw;\\n 72   }\\n 73   yysmarts_lex_destroy(scanner);\\n 74 \\n 75   if (res == 1) {\\n 76     std::stringstream errout;\\n 77     errout << \"Failed parsing SMARTS \\'\" << inp << \"..."
       }
     ],
     "find_references": [],
@@ -234,10 +241,10 @@
         "tool_name": "apply_patch",
         "args": [
           "rdkit/Code/GraphMol/SmilesParse/SmilesParse.cpp",
-          "@@ -175,8 +175,13 @@ std::string labelRecursivePatterns(const std::string &sma) {\n     } else if (sma[pos] == '(') {\n       state.push_back(BRANCH);\n     } else if (sma[pos] == ')') {\n+      if (state.empty() || state.back() == BASE) {\n+        // malformed SMARTS (unmatched close paren): keep output unchanged and\n+        // avoid underflowing the parser state stack.\n+        ++pos;\n+        continue;\n+      }\n       SmaState currState = state.back();\n       state.pop_back();\n       if (currState == RECURSE) {\n"
+          "@@ -175,8 +175,18 @@\n     } else if (sma[pos] == '(') {\n       state.push_back(BRANCH);\n     } else if (sma[pos] == ')') {\n+      // malformed SMARTS can have unmatched closing parentheses.\n+      // If the parse state is already at the BASE marker, leave this ')' to\n+      // the regular SMARTS parser and avoid underflowing the manual stack.\n+      if (state.empty() || state.back() == BASE) {\n+        ++pos;\n+        continue;\n+      }\n       SmaState currState = state.back();\n       state.pop_back();\n       if (currState == RECURSE) {\n+        if (startRecurse.empty()) {\n+          ++pos;\n+          continue;\n+        }\n         unsigned int dollarPos = startRecurse.back();\n         startRecurse.pop_back();\n         if (pos + 1 >= sma.size() || sma[pos + 1] != '_') {\n"
         ],
         "kwargs": {},
-        "timestamp": 578860.573201501,
+        "timestamp": 1871064.924213424,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -247,7 +254,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 580301.565392738,
+        "timestamp": 1874010.732762259,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

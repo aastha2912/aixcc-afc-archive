@@ -1,5 +1,5 @@
 {
-  "vuln_id": 290,
+  "vuln_id": 426,
   "crash_result": {
     "output": "==837==ERROR: AddressSanitizer: memcpy-param-overlap: memory ranges [0x62400001b576,0x62410001b575) and [0x624000019524, 0x624100019523) overlap\nSCARINESS: 10 (memcpy-param-overlap)\n    #0 0x5069f4 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n    #1 0x9711eb in parquet::(anonymous namespace)::DeltaByteArrayDecoder::GetInternal(parquet::ByteArray*, int) /src/arrow/cpp/src/parquet/encoding.cc:2423:7\n    #2 0x963bf4 in parquet::(anonymous namespac",
     "stack": "#0 0x5069f4 in __asan_memcpy llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n#1 0x9711eb in parquet::(anonymous namespace)::DeltaByteArrayDecoder::GetInternal(parquet::ByteArray*, int) arrow/cpp/src/parquet/encoding.cc:2423:7\n#2 0x963bf4 in parquet::(anonymous namespace)::DeltaByteArrayDecoder::DecodeArrowDense(int, int, unsigned char const*, long, parquet::EncodingTraits<parquet::PhysicalType<(parquet::Type::type)6> >::Accumulator*, int*) arrow/cpp/src/parquet/encodin",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "GetInternal",
     "file": "arrow/cpp/src/parquet/encoding.cc",
-    "description": "In DeltaByteArrayDecoder::GetInternal, decoded suffix ByteArray pointers (buffer[i].ptr from suffix_decoder_) can alias the destination reconstruction buffer (buffered_data_) after Resize/reallocation, but the code unconditionally uses memcpy to append suffix bytes: memcpy(data_ptr + prefix_len_ptr[i], buffer[i].ptr, buffer[i].len). For this PoV, source and destination ranges overlap, triggering ASan memcpy-param-overlap. Root cause is missing overlap-safe copy (memmove) / alias handling when rebuilding DELTA_BYTE_ARRAY values.",
-    "conditions": "A crafted Parquet DELTA_BYTE_ARRAY page drives DeltaLengthByteArrayDecoder + DeltaByteArrayDecoder so that suffix data pointers reference memory overlapping the newly resized buffered_data_ region during GetInternal reconstruction. Via parquet-arrow-fuzz -> reader.cc -> column_reader.cc -> DeltaByteArrayDecoder::DecodeArrowDense -> GetInternal, attacker-controlled prefix/suffix lengths and payload layout cause overlapping src/dst in the second memcpy, producing the crash."
+    "description": "In DeltaByteArrayDecoder::GetInternal, decoded suffix bytes are first stored in suffix_decoder_.buffered_data_ and exposed via buffer[i].ptr, then GetInternal resizes its own buffered_data_ and reconstructs each value with two memcpy calls. The second memcpy (`memcpy(data_ptr + prefix_len_ptr[i], buffer[i].ptr, buffer[i].len)`) assumes src/dst do not overlap, but for this PoV they do (both pointers reference nearby regions from Arrow realloc-managed buffers), triggering memcpy-param-overlap. Root cause is using memcpy for potentially overlapping regions and not guarding aliasing between reconstructed output buffer and suffix-decoder source buffer.",
+    "conditions": "Trigger requires a Parquet DELTA_BYTE_ARRAY column decoded through Arrow path (DecodeArrowDense -> GetInternal) with crafted prefix/suffix lengths and sizes such that GetInternal allocates/reallocates buffered_data_ to a region overlapping the suffix source region from DeltaLengthByteArrayDecoder::Decode. Then, during reconstruction loop, `data_ptr + prefix_len` overlaps `buffer[i].ptr`, and memcpy on overlapping ranges crashes under ASan (undefined behavior otherwise). Input flows from parquet-arrow-fuzz into parquet::arrow::internal::FuzzReader, then column reader into DeltaByteArrayDecoder::DecodeArrowDense/GetInternal."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 2,
-      "total_cost": 0.11766125,
-      "total_input_tokens": 112811,
-      "total_output_tokens": 351,
-      "total_cached_tokens": 53760,
+      "total_llm_calls": 3,
+      "total_cost": 0.1350279,
+      "total_input_tokens": 170322,
+      "total_output_tokens": 537,
+      "total_cached_tokens": 108288,
       "llm_calls": [
         {
-          "timestamp": 1773726478.2983549,
+          "timestamp": 1774850798.512281,
           "model": "gpt-5.3-codex",
-          "cost": 0.0958195,
-          "input_tokens": 53826,
-          "output_tokens": 116,
-          "total_tokens": 53942,
+          "cost": 0.0962255,
+          "input_tokens": 53914,
+          "output_tokens": 134,
+          "total_tokens": 54048,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -50,28 +50,57 @@
           "tool_call_count": 3,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_4tspA2uIZDNP288dDXyEMC4x"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_ih0zglJv2vbSKpSojrCO32jd"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_d9NBI9n7YcAeUpMIzhcUoyeV"
             },
             {
               "tool_name": "read_definition",
-              "tool_call_id": "call_VVQIsl8Wz6RGgBtGgvyUy2zR"
+              "tool_call_id": "call_7EQCCJ8YpXvz0fSxrT6wlyn5"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_53jIq0n9Xzm2h8OLomlz5fEF"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773726925.2811282,
+          "timestamp": 1774851251.4473755,
           "model": "gpt-5.3-codex",
-          "cost": 0.02184175,
-          "input_tokens": 58985,
-          "output_tokens": 235,
-          "total_tokens": 59220,
-          "cached_tokens": 53760,
+          "cost": 0.011820899999999999,
+          "input_tokens": 54398,
+          "output_tokens": 107,
+          "total_tokens": 54505,
+          "cached_tokens": 53888,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_4ZHFCLINji8mpoQX9wLglZTW"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_q1OYXF88jYGlT0pwQdS6K2w1"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_tYod0iC9GzpjniYVy1zbXT3F"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774851257.5949912,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0269815,
+          "input_tokens": 62010,
+          "output_tokens": 296,
+          "total_tokens": 62306,
+          "cached_tokens": 54400,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +109,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_skInTH410kpv4OGZdde2yCqY"
+              "tool_call_id": "call_2o92ci2ug19ajLBOKuxmTzR7"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,107 +117,19 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 7,
-      "total_cost": 0.33137720000000004,
-      "total_input_tokens": 381056,
-      "total_output_tokens": 633,
-      "total_cached_tokens": 218624,
+      "total_llm_calls": 5,
+      "total_cost": 0.14715050000000002,
+      "total_input_tokens": 286046,
+      "total_output_tokens": 315,
+      "total_cached_tokens": 227200,
       "llm_calls": [
         {
-          "timestamp": 1773726929.3133419,
+          "timestamp": 1774851261.4141285,
           "model": "gpt-5.3-codex",
-          "cost": 0.0853412,
-          "input_tokens": 49640,
-          "output_tokens": 78,
-          "total_tokens": 49718,
-          "cached_tokens": 1664,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_dKelZoY3ia9N17Cfitw2DBp0"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_W5AV6wuB5Z8Jt5UQ0X8XuzAp"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773726934.9325683,
-          "model": "gpt-5.3-codex",
-          "cost": 0.020693049999999998,
-          "input_tokens": 54695,
-          "output_tokens": 214,
-          "total_tokens": 54909,
-          "cached_tokens": 49536,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_VFFJ2zxTrheRglWRFp68pr9e"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773726936.2894762,
-          "model": "gpt-5.3-codex",
-          "cost": 0.010155949999999999,
-          "input_tokens": 54997,
-          "output_tokens": 14,
-          "total_tokens": 55011,
-          "cached_tokens": 54784,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "test_patch",
-              "tool_call_id": "call_Rse07cO5vwzxd41y6CQOshkI"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773739744.4626884,
-          "model": "gpt-5.3-codex",
-          "cost": 0.09404570000000001,
-          "input_tokens": 55126,
-          "output_tokens": 14,
-          "total_tokens": 55140,
-          "cached_tokens": 1664,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "test_patch",
-              "tool_call_id": "call_hB2kGDrSlN09T1l0U9yx6pt3"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773748503.911163,
-          "model": "gpt-5.3-codex",
-          "cost": 0.10056025,
-          "input_tokens": 55255,
-          "output_tokens": 276,
-          "total_tokens": 55531,
+          "cost": 0.09756425,
+          "input_tokens": 55503,
+          "output_tokens": 31,
+          "total_tokens": 55534,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -197,19 +138,19 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_mpnW9WunIL7pflOguI0J26u5"
+              "tool_name": "read_source",
+              "tool_call_id": "call_BYqzLRhUmIQkj16PQjiLc2uu"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773748511.8901634,
+          "timestamp": 1774851263.4826062,
           "model": "gpt-5.3-codex",
-          "cost": 0.01023645,
-          "input_tokens": 55619,
-          "output_tokens": 14,
-          "total_tokens": 55633,
+          "cost": 0.010437700000000001,
+          "input_tokens": 55582,
+          "output_tokens": 33,
+          "total_tokens": 55615,
           "cached_tokens": 55424,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -218,20 +159,62 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "test_patch",
-              "tool_call_id": "call_n0LjojT1ysyRcZ0tOq7LqrAI"
+              "tool_name": "read_source",
+              "tool_call_id": "call_TDO7WHpRv5d4hCgioSBoAX6o"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773748650.4275818,
+          "timestamp": 1774851266.62021,
           "model": "gpt-5.3-codex",
-          "cost": 0.010344599999999999,
-          "input_tokens": 55724,
+          "cost": 0.0173502,
+          "input_tokens": 58084,
+          "output_tokens": 214,
+          "total_tokens": 58298,
+          "cached_tokens": 55424,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_xAXBRyK1yDAaO32Sl2yP5glU"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774851268.5117822,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0108451,
+          "input_tokens": 58386,
+          "output_tokens": 14,
+          "total_tokens": 58400,
+          "cached_tokens": 58112,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_0Xli2mPyHkpewwoi9Pmmtz8o"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774851530.8684242,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01095325,
+          "input_tokens": 58491,
           "output_tokens": 23,
-          "total_tokens": 55747,
-          "cached_tokens": 55552,
+          "total_tokens": 58514,
+          "cached_tokens": 58240,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -240,7 +223,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_kIiSbNfrp6igARKBrh6eM8Ob"
+              "tool_call_id": "call_RlHqcz0gLaHGcDXtk0kIEy88"
             }
           ],
           "finish_reason": "tool_calls"
@@ -248,15 +231,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.44903845000000003,
-      "total_input_tokens": 493867,
-      "total_output_tokens": 984,
-      "total_llm_calls": 9
+      "total_cost": 0.28217840000000005,
+      "total_input_tokens": 456368,
+      "total_output_tokens": 852,
+      "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/arrow/cpp/src/parquet/encoding.cc\n+++ b/arrow/cpp/src/parquet/encoding.cc\n@@ -2419,8 +2419,14 @@\n     uint8_t* data_ptr = buffered_data_->mutable_data();\n     for (int i = 0; i < max_values; ++i) {\n       DCHECK_LE(static_cast<const size_t>(prefix_len_ptr[i]), last_value_.length());\n-      memcpy(data_ptr, last_value_.data(), prefix_len_ptr[i]);\n-      memcpy(data_ptr + prefix_len_ptr[i], buffer[i].ptr, buffer[i].len);\n+      if (prefix_len_ptr[i] > 0) {\n+        std::memmove(data_ptr, last_value_.data(),\n+                     static_cast<size_t>(prefix_len_ptr[i]));\n+      }\n+      if (buffer[i].len > 0) {\n+        std::memmove(data_ptr + prefix_len_ptr[i], buffer[i].ptr,\n+                     static_cast<size_t>(buffer[i].len));\n+      }\n       buffer[i].ptr = data_ptr;\n       buffer[i].len += prefix_len_ptr[i];\n       data_ptr += buffer[i].len;\n",
+    "patch": "--- a/arrow/cpp/src/parquet/encoding.cc\n+++ b/arrow/cpp/src/parquet/encoding.cc\n@@ -2419,8 +2419,8 @@\n     uint8_t* data_ptr = buffered_data_->mutable_data();\n     for (int i = 0; i < max_values; ++i) {\n       DCHECK_LE(static_cast<const size_t>(prefix_len_ptr[i]), last_value_.length());\n-      memcpy(data_ptr, last_value_.data(), prefix_len_ptr[i]);\n-      memcpy(data_ptr + prefix_len_ptr[i], buffer[i].ptr, buffer[i].len);\n+      memmove(data_ptr, last_value_.data(), prefix_len_ptr[i]);\n+      memmove(data_ptr + prefix_len_ptr[i], buffer[i].ptr, buffer[i].len);\n       buffer[i].ptr = data_ptr;\n       buffer[i].len += prefix_len_ptr[i];\n       data_ptr += buffer[i].len;\n",
     "build_artifacts_count": 1,
     "tested_povs_count": 1,
     "last_validation": {
@@ -275,24 +258,24 @@
       {
         "tool_name": "read_source",
         "args": [
-          "arrow/cpp/src/parquet/encoding.cc",
+          "cpp/src/parquet/encoding.cc",
           2423
         ],
         "kwargs": {},
-        "timestamp": 759217.990038708,
+        "timestamp": 1883550.554854728,
         "success": true,
-        "result_summary": "Ok({'contents': '2324 \\n2325     // call len_decoder_.Decode to decode all the lengths.\\n2326     // all the lengths are buffered in buffered_length_.\\n2327     int ret = len_decoder_.Decode(\\n2328   ..."
+        "result_summary": "Err(CRSError(path 'cpp/src/parquet/encoding.cc' does not exist in directory tree. Similar paths: arrow/cpp/src/parquet/encoding.cc, extra=None))"
       },
       {
         "tool_name": "read_source",
         "args": [
           "arrow/cpp/src/parquet/encoding.cc",
-          2408
+          2423
         ],
         "kwargs": {},
-        "timestamp": 759217.991520234,
+        "timestamp": 1883552.058714282,
         "success": true,
-        "result_summary": "Ok({'contents': '2309   int DecodeArrow(int num_values, int null_count, const uint8_t* valid_bits,\\n2310                   int64_t valid_bits_offset,\\n2311                   typename EncodingTraits<By..."
+        "result_summary": "Ok({'contents': '2324 \\n2325     // call len_decoder_.Decode to decode all the lengths.\\n2326     // all the lengths are buffered in buffered_length_.\\n2327     int ret = len_decoder_.Decode(\\n2328   ..."
       }
     ],
     "find_references": [],
@@ -304,20 +287,9 @@
           "@@ -2419,8 +2419,8 @@\n     uint8_t* data_ptr = buffered_data_->mutable_data();\n     for (int i = 0; i < max_values; ++i) {\n       DCHECK_LE(static_cast<const size_t>(prefix_len_ptr[i]), last_value_.length());\n-      memcpy(data_ptr, last_value_.data(), prefix_len_ptr[i]);\n-      memcpy(data_ptr + prefix_len_ptr[i], buffer[i].ptr, buffer[i].len);\n+      memmove(data_ptr, last_value_.data(), prefix_len_ptr[i]);\n+      memmove(data_ptr + prefix_len_ptr[i], buffer[i].ptr, buffer[i].len);\n       buffer[i].ptr = data_ptr;\n       buffer[i].len += prefix_len_ptr[i];\n       data_ptr += buffer[i].len;\n"
         ],
         "kwargs": {},
-        "timestamp": 759223.566612982,
+        "timestamp": 1883555.369872407,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
-      },
-      {
-        "tool_name": "apply_patch",
-        "args": [
-          "arrow/cpp/src/parquet/encoding.cc",
-          "@@ -2419,8 +2419,16 @@\n     uint8_t* data_ptr = buffered_data_->mutable_data();\n     for (int i = 0; i < max_values; ++i) {\n       DCHECK_LE(static_cast<const size_t>(prefix_len_ptr[i]), last_value_.length());\n-      memmove(data_ptr, last_value_.data(), prefix_len_ptr[i]);\n-      memmove(data_ptr + prefix_len_ptr[i], buffer[i].ptr, buffer[i].len);\n+      if (prefix_len_ptr[i] > 0) {\n+        std::memmove(data_ptr, last_value_.data(),\n+                     static_cast<size_t>(prefix_len_ptr[i]));\n+      }\n+      if (buffer[i].len > 0) {\n+        std::memmove(data_ptr + prefix_len_ptr[i], buffer[i].ptr,\n+                     static_cast<size_t>(buffer[i].len));\n+      }\n       buffer[i].ptr = data_ptr;\n       buffer[i].len += prefix_len_ptr[i];\n       data_ptr += buffer[i].len;\n"
-        ],
-        "kwargs": {},
-        "timestamp": 780798.90882247,
-        "success": true,
-        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
     ],
     "test_patch": [
@@ -325,23 +297,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 772030.102961675,
-        "success": true,
-        "result_summary": "Err(CRSError(the code failed to build, extra={'validation_status': 'build_failed', 'build_error': 'Build timed out', 'suggestion': 'You may want to undo some edits before proceeding with the `undo_las..."
-      },
-      {
-        "tool_name": "test_patch",
-        "args": [],
-        "kwargs": {},
-        "timestamp": 780785.799802089,
-        "success": true,
-        "result_summary": "Err(CRSError(the code failed to build, extra={'validation_status': 'build_failed', 'build_error': 'Build timed out', 'suggestion': 'You may want to undo some edits before proceeding with the `undo_las..."
-      },
-      {
-        "tool_name": "test_patch",
-        "args": [],
-        "kwargs": {},
-        "timestamp": 780933.510443534,
+        "timestamp": 1883818.005178516,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

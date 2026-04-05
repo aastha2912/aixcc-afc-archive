@@ -1,5 +1,5 @@
 {
-  "vuln_id": 259,
+  "vuln_id": 496,
   "crash_result": {
     "output": "==105544==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x60400000cb40 at pc 0x000000f92984 bp 0x7ffc84038fe0 sp 0x7ffc84038fd8\nWRITE of size 8 at 0x60400000cb40 thread T0\nSCARINESS: 42 (8-byte-write-heap-buffer-overflow)\n    #0 0xf92983 in sp_read_unsigned_bin /src/wolfssl-normal-math/wolfcrypt/src/sp_int.c:17303:23\n    #1 0xe4c1f3 in GetASN_StoreData /src/wolfssl-normal-math/wolfcrypt/src/asn.c:1216:19\n    #2 0xe4c1f3 in GetASN_Items /src/wolfssl-normal-math/wolfcrypt/src/asn.c:1581",
     "stack": "#0 0xf92983 in sp_read_unsigned_bin wolfssl-normal-math/wolfcrypt/src/sp_int.c:17303:23\n#1 0xe4c1f3 in GetASN_StoreData wolfssl-normal-math/wolfcrypt/src/asn.c:1216:19\n#2 0xe4c1f3 in GetASN_Items wolfssl-normal-math/wolfcrypt/src/asn.c:1581:15\n#3 0xe7811d in DecodeECC_DSA_Sig wolfssl-normal-math/wolfcrypt/src/asn.c:31441:11\n#4 0xef3139 in wc_ecc_verify_hash wolfssl-normal-math/wolfcrypt/src/ecc.c:8034:19\n#5 0xdfdd5d in cryptofuzz::module::wolfCrypt_detail::OpECDSA_Verify_Generic(cryptofuzz::oper",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "GetASN_StoreData",
     "file": "wolfssl/wolfcrypt/src/asn.c",
-    "description": "Heap buffer overflow is caused by ASN.1 template decoding storing INTEGER values into mp_int without validating that the ASN INTEGER length fits the destination mp_int capacity. In GetASN_StoreData(), ASN_DATA_TYPE_MP calls mp_read_unsigned_bin(data->data.mp, input+idx, len). Under SP math this resolves to sp_read_unsigned_bin(), which sets a->used from len and writes a->dp[j] words; if len exceeds allocated mp_int size, writes go past the heap buffer (crash at sp_int.c:17303).",
-    "conditions": "Triggered via ECDSA verify path: cryptofuzz passes attacker-controlled DER signature to wc_ecc_verify_hash() -> DecodeECC_DSA_Sig() (ASN template path) -> GetASN_Items()/GetASN_StoreData(). A malformed signature with oversized r or s INTEGER length causes mp_read_unsigned_bin on fixed-size r/s mp_int allocated from ECC_KEY_MAX_BITS(key), leading to out-of-bounds write when ASN length is larger than that capacity."
+    "description": "In ASN template decoding, GetASN_StoreData handles ASN_DATA_TYPE_MP by calling mp_read_unsigned_bin() on attacker-controlled INTEGER content length without enforcing that the destination mp_int has enough digit capacity. In this build, the destination mp_int used for ECDSA verify (r/s allocated in wc_ecc_verify_hash with fixed size based on key bits) can be too small for oversized ASN INTEGERs, and sp_read_unsigned_bin writes past a->dp (heap-buffer-overflow at sp_int.c:17303). Root cause is missing size validation/rejection in ASN MP import path before reading into pre-sized mp_int.",
+    "conditions": "Trigger via wc_ecc_verify_hash on a malformed DER ECDSA signature (DecodeECC_DSA_Sig -> GetASN_Items). Provide ASN INTEGER(s) for r or s with encoded length larger than the allocated mp_int capacity for the selected ECC key (including cases with leading padding/oversized integers). Data flow: fuzz input becomes signature bytes -> DecodeECC_DSA_Sig template parser -> GetASN_StoreData(ASN_DATA_TYPE_MP) -> mp_read_unsigned_bin/sp_read_unsigned_bin, causing out-of-bounds write."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.032911199999999995,
-      "total_input_tokens": 24152,
-      "total_output_tokens": 527,
-      "total_cached_tokens": 10624,
+      "total_cost": 0.039034799999999995,
+      "total_input_tokens": 24416,
+      "total_output_tokens": 557,
+      "total_cached_tokens": 7296,
       "llm_calls": [
         {
-          "timestamp": 1773713655.5462432,
+          "timestamp": 1774877659.9908767,
           "model": "gpt-5.3-codex",
-          "cost": 0.0082166,
-          "input_tokens": 4548,
+          "cost": 0.008370599999999999,
+          "input_tokens": 4636,
           "output_tokens": 148,
-          "total_tokens": 4696,
+          "total_tokens": 4784,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,31 +51,31 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_28jcLXE3CMoF3PZsLzcT2y3L"
+              "tool_call_id": "call_nFEgVpYDnHTJqSjRP2Yejecb"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_MkURg8Jm2U00Uptn5CMBtFPP"
+              "tool_call_id": "call_sw4Ig3jlOIJxSwTeh6dRDrsb"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_8tkUoWfwYKcw2ZQzEm2TWJ3q"
+              "tool_call_id": "call_tEduGtBWVUUGvGylIl6QgB89"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_RkXbRIcaaMqdeMhF12YQE9BY"
+              "tool_call_id": "call_rSKed9UHx6WIdHRirtRsYqFv"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773713670.8897583,
+          "timestamp": 1774877682.8662047,
           "model": "gpt-5.3-codex",
-          "cost": 0.0032248999999999997,
-          "input_tokens": 4902,
+          "cost": 0.0088221,
+          "input_tokens": 4990,
           "output_tokens": 136,
-          "total_tokens": 5038,
-          "cached_tokens": 4608,
+          "total_tokens": 5126,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -84,31 +84,31 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_kSnwyLLdUOIYHWgV1cfWLLqS"
+              "tool_call_id": "call_x6ddYkOH8cY5g8l56KykjS9R"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_USxwZovNfGQr5H049geVVQTU"
+              "tool_call_id": "call_6rDk0BCsyusQpF0D7LuWdnp4"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ksjyPMWE4lnLMzPmOYQn6RV0"
+              "tool_call_id": "call_ISxF8bKIC6xOEIMBLxuXl8WU"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_aeHWxQu6Ucc7UpkquiMTpCu5"
+              "tool_call_id": "call_sQKMf5qBIBY36386H7v7BEH5"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773713680.9194493,
+          "timestamp": 1774877689.1128883,
           "model": "gpt-5.3-codex",
-          "cost": 0.021469699999999998,
-          "input_tokens": 14702,
-          "output_tokens": 243,
-          "total_tokens": 14945,
-          "cached_tokens": 4864,
+          "cost": 0.021842099999999996,
+          "input_tokens": 14790,
+          "output_tokens": 273,
+          "total_tokens": 15063,
+          "cached_tokens": 4992,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -117,7 +117,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_HATlOwLZFnRDECVqgGVg4zlv"
+              "tool_call_id": "call_ooLPVWlyab9oSPrtEBKvZOWN"
             }
           ],
           "finish_reason": "tool_calls"
@@ -125,45 +125,49 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 5,
-      "total_cost": 0.0395367,
-      "total_input_tokens": 33698,
-      "total_output_tokens": 599,
-      "total_cached_tokens": 17664,
+      "total_llm_calls": 8,
+      "total_cost": 0.0750904,
+      "total_input_tokens": 87960,
+      "total_output_tokens": 791,
+      "total_cached_tokens": 57088,
       "llm_calls": [
         {
-          "timestamp": 1773713682.6968002,
+          "timestamp": 1774877691.2966604,
           "model": "gpt-5.3-codex",
-          "cost": 0.0060942,
-          "input_tokens": 4292,
-          "output_tokens": 86,
-          "total_tokens": 4378,
+          "cost": 0.0091392,
+          "input_tokens": 5808,
+          "output_tokens": 114,
+          "total_tokens": 5922,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_JB3EhxdupsYk7gA4ArxR0bqg"
+              "tool_call_id": "call_SbHFl3lFVqfCfM2Q7a1nW0KL"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_E4qiGXl2uoWTcUH51yt8639K"
+              "tool_call_id": "call_8mCsWaqcNV3E41emupSvKSxl"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_oPHrkXhHuGxcpvP7N6XU4uPM"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773713705.288811,
+          "timestamp": 1774877739.1104486,
           "model": "gpt-5.3-codex",
-          "cost": 0.0152705,
-          "input_tokens": 6934,
-          "output_tokens": 224,
-          "total_tokens": 7158,
-          "cached_tokens": 0,
+          "cost": 0.014208249999999999,
+          "input_tokens": 11119,
+          "output_tokens": 273,
+          "total_tokens": 11392,
+          "cached_tokens": 5760,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -172,40 +176,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_ocKDxie4a8QO4EMY0lMjTkuj"
+              "tool_call_id": "call_hvvl1jxPmu9pk0n5v91q7eS8"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773713709.2546434,
+          "timestamp": 1774877740.3641975,
           "model": "gpt-5.3-codex",
-          "cost": 0.00509075,
-          "input_tokens": 7229,
-          "output_tokens": 252,
-          "total_tokens": 7481,
-          "cached_tokens": 7040,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_fdw5Ta0j5AjrG7FGEXJzdUF3"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773713710.624485,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0019505500000000001,
-          "input_tokens": 7569,
+          "cost": 0.0025451999999999996,
+          "input_tokens": 11480,
           "output_tokens": 14,
-          "total_tokens": 7583,
-          "cached_tokens": 7296,
+          "total_tokens": 11494,
+          "cached_tokens": 11264,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -214,18 +197,102 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_fQt5ptsinF56tm60Zk77G7xY"
+              "tool_call_id": "call_shWXzl1LmYkoFL9oV0Yw15QW"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773715500.5462286,
+          "timestamp": 1774879343.414895,
           "model": "gpt-5.3-codex",
-          "cost": 0.011130699999999999,
-          "input_tokens": 7674,
+          "cost": 0.018139449999999998,
+          "input_tokens": 11631,
+          "output_tokens": 29,
+          "total_tokens": 11660,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_N0DefA2eYKBudJ6l4pI2aKm4"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774879369.6524427,
+          "model": "gpt-5.3-codex",
+          "cost": 0.002709,
+          "input_tokens": 11708,
+          "output_tokens": 26,
+          "total_tokens": 11734,
+          "cached_tokens": 11520,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_MG0cckkqqFm0oY85bHP0h5AT"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774879377.6827333,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00643965,
+          "input_tokens": 11779,
+          "output_tokens": 298,
+          "total_tokens": 12077,
+          "cached_tokens": 11648,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_7ZtiO9nRnRn9bVQKeJSeGJyq"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774879398.8489354,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00273595,
+          "input_tokens": 12165,
+          "output_tokens": 14,
+          "total_tokens": 12179,
+          "cached_tokens": 11904,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_NA4fmWXZFeCMF4VkBBvFX7nx"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774881223.8949683,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0191737,
+          "input_tokens": 12270,
           "output_tokens": 23,
-          "total_tokens": 7697,
+          "total_tokens": 12293,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -235,7 +302,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_6IuexFqDJkgiYatVTbrXzKOm"
+              "tool_call_id": "call_VqxfBQnjvxJbF2qJ1PQDu1Cp"
             }
           ],
           "finish_reason": "tool_calls"
@@ -243,15 +310,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.0724479,
-      "total_input_tokens": 57850,
-      "total_output_tokens": 1126,
-      "total_llm_calls": 8
+      "total_cost": 0.1141252,
+      "total_input_tokens": 112376,
+      "total_output_tokens": 1348,
+      "total_llm_calls": 11
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/wolfcrypt/src/asn.c\n+++ b/wolfcrypt/src/asn.c\n@@ -1206,6 +1206,15 @@\n \n         case ASN_DATA_TYPE_MP:\n         case ASN_DATA_TYPE_MP_POS_NEG:\n+            /* Prevent oversized ASN INTEGER from overflowing fixed mp_int\n+             * storage (e.g. SP math fixed-precision integers). */\n+            if ((word32)len > mp_unsigned_bin_size(data->data.mp)) {\n+            #ifdef WOLFSSL_DEBUG_ASN_TEMPLATE\n+                WOLFSSL_MSG_VSNPRINTF(\"mp too small for INTEGER: %d > %u\", len,\n+                    mp_unsigned_bin_size(data->data.mp));\n+            #endif\n+                return ASN_PARSE_E;\n+            }\n             /* Initialize mp_int and read in big-endian byte array. */\n             if (mp_init(data->data.mp) != MP_OKAY) {\n             #ifdef WOLFSSL_DEBUG_ASN_TEMPLATE\n",
+    "patch": "--- a/wolfcrypt/src/asn.c\n+++ b/wolfcrypt/src/asn.c\n@@ -1207,12 +1207,29 @@\n         case ASN_DATA_TYPE_MP:\n         case ASN_DATA_TYPE_MP_POS_NEG:\n             /* Initialize mp_int and read in big-endian byte array. */\n+            if (data->data.mp == NULL) {\n+            #ifdef WOLFSSL_DEBUG_ASN_TEMPLATE\n+                WOLFSSL_MSG(\"mp_int destination is NULL\");\n+            #endif\n+                return BAD_STATE_E;\n+            }\n+            /* Ensure source INTEGER fits in destination mp_int capacity.\n+             * Some callers pre-size mp_int to fixed ECC key size and do not\n+             * expect dynamic growth during ASN import. Reject oversized input\n+             * before reading to avoid writing past allocated digits. */\n             if (mp_init(data->data.mp) != MP_OKAY) {\n             #ifdef WOLFSSL_DEBUG_ASN_TEMPLATE\n                 WOLFSSL_MSG_VSNPRINTF(\"Failed to init mp: %p\", data->data.mp);\n             #endif\n                 return MP_INIT_E;\n             }\n+            /* After initialization, ensure source INTEGER fits destination\n+             * mp_int allocated digit capacity before importing bytes. */\n+            if (mp_unsigned_bin_size(data->data.mp) < len) {\n+                mp_clear(data->data.mp);\n+                return ASN_PARSE_E;\n+            }\n+\n             err = mp_read_unsigned_bin(data->data.mp, (byte*)input + idx,\n                                        (word32)len);\n             if (err != 0) {\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -274,23 +341,56 @@
           1216
         ],
         "kwargs": {},
-        "timestamp": 745971.277373007,
+        "timestamp": 1909979.880891347,
         "success": true,
         "result_summary": "Ok({'contents': '1117  * @return  ASN_EXPECT_0_E when NULL tagged item has a non-zero length.\\n1118  * @return  MP_INIT_E when the unable to initialize an mp_int.\\n1119  * @return  ASN_GETINT_E when t..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "wolfssl/wolfcrypt/src/asn.c",
+          1581
+        ],
+        "kwargs": {},
+        "timestamp": 1909979.884391545,
+        "success": true,
+        "result_summary": "Ok({'contents': '1482             #endif\\n1483                 return ASN_BITSTR_E;\\n1484             }\\n1485             /* Not the expected tag. */\\n1486         #ifdef WOLFSSL_DEBUG_ASN_TEMPLATE\\n1..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "wolfssl/compile_error.txt",
+          1
+        ],
+        "kwargs": {},
+        "timestamp": 1911656.687881029,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'wolfssl/compile_error.txt' does not exist in directory tree. In fact, no files named 'compile_error.txt' are available., extra=None))"
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "compile_error.txt",
+          1
+        ],
+        "kwargs": {},
+        "timestamp": 1911661.55158107,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'compile_error.txt' does not exist in directory tree. In fact, no files named 'compile_error.txt' are available., extra=None))"
       }
     ],
     "find_references": [
       {
         "tool_name": "find_references",
         "args": [
-          "GetASN_StoreData",
+          "ASN_DATA_TYPE_MP",
           "wolfssl/wolfcrypt/src/asn.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 745989.391395791,
+        "timestamp": 1910023.134380567,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='wolfssl/wolfcrypt/src/asn.c', refs=[FileReference(line=1581, content='        err = GetASN_StoreData(&asn[i], &data[i], input, idx, len, zeroPadded);', enclosing_definiti..."
+        "result_summary": "Ok([FileReferences(file_name='wolfssl/wolfcrypt/src/asn.c', refs=[FileReference(line=706, content='            case ASN_DATA_TYPE_MP:', enclosing_definition='SizeASN_Items'), FileReference(line=925, c..."
       }
     ],
     "apply_patch": [
@@ -298,23 +398,23 @@
         "tool_name": "apply_patch",
         "args": [
           "wolfssl/wolfcrypt/src/asn.c",
-          "/*** Begin Patch\n*** Update File: wolfssl/wolfcrypt/src/asn.c\n@@\n         case ASN_DATA_TYPE_MP:\n         case ASN_DATA_TYPE_MP_POS_NEG:\n+            /* Prevent oversized ASN INTEGER from overflowing fixed mp_int\n+             * storage (e.g. SP math fixed-precision integers). */\n+            if ((word32)len > mp_unsigned_bin_size(data->data.mp)) {\n+            #ifdef WOLFSSL_DEBUG_ASN_TEMPLATE\n+                WOLFSSL_MSG_VSNPRINTF(\"mp too small for INTEGER: %d > %u\", len,\n+                    mp_unsigned_bin_size(data->data.mp));\n+            #endif\n+                return ASN_PARSE_E;\n+            }\n             /* Initialize mp_int and read in big-endian byte array. */\n             if (mp_init(data->data.mp) != MP_OKAY) {\n*** End Patch"
+          "@@ -1207,6 +1207,18 @@\n         case ASN_DATA_TYPE_MP:\n         case ASN_DATA_TYPE_MP_POS_NEG:\n             /* Initialize mp_int and read in big-endian byte array. */\n+            if (data->data.mp == NULL) {\n+            #ifdef WOLFSSL_DEBUG_ASN_TEMPLATE\n+                WOLFSSL_MSG(\"mp_int destination is NULL\");\n+            #endif\n+                return BAD_STATE_E;\n+            }\n+            /* Ensure source INTEGER fits in destination mp_int capacity.\n+             * Some callers pre-size mp_int to fixed ECC key size and do not\n+             * expect dynamic growth during ASN import. Reject oversized input\n+             * before reading to avoid writing past allocated digits. */\n+            if (mp_unsigned_bin_size(data->data.mp) < len)\n+                return ASN_PARSE_E;\n             if (mp_init(data->data.mp) != MP_OKAY) {\n             #ifdef WOLFSSL_DEBUG_ASN_TEMPLATE\n                 WOLFSSL_MSG_VSNPRINTF(\"Failed to init mp: %p\", data->data.mp);\n"
         ],
         "kwargs": {},
-        "timestamp": 745993.863607842,
+        "timestamp": 1910027.829572823,
         "success": true,
-        "result_summary": "Err(CRSError(Invalid patch format. Make sure it includes the hunk headers with approximate line numbers, i.e. `@@ -l,s +l,s @@`, extra={'note': 'this patch was not applied and does not need to be undo..."
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       },
       {
         "tool_name": "apply_patch",
         "args": [
           "wolfssl/wolfcrypt/src/asn.c",
-          "@@ -1204,6 +1204,16 @@\n             break;\n \n         case ASN_DATA_TYPE_MP:\n         case ASN_DATA_TYPE_MP_POS_NEG:\n+            /* Prevent oversized ASN INTEGER from overflowing fixed mp_int\n+             * storage (e.g. SP math fixed-precision integers). */\n+            if ((word32)len > mp_unsigned_bin_size(data->data.mp)) {\n+            #ifdef WOLFSSL_DEBUG_ASN_TEMPLATE\n+                WOLFSSL_MSG_VSNPRINTF(\"mp too small for INTEGER: %d > %u\", len,\n+                    mp_unsigned_bin_size(data->data.mp));\n+            #endif\n+                return ASN_PARSE_E;\n+            }\n             /* Initialize mp_int and read in big-endian byte array. */\n             if (mp_init(data->data.mp) != MP_OKAY) {\n             #ifdef WOLFSSL_DEBUG_ASN_TEMPLATE\n                 WOLFSSL_MSG_VSNPRINTF(\"Failed to init mp: %p\", data->data.mp);"
+          "@@ -1214,11 +1214,6 @@\n              * Some callers pre-size mp_int to fixed ECC key size and do not\n              * expect dynamic growth during ASN import. Reject oversized input\n              * before reading to avoid writing past allocated digits. */\n-            if (mp_unsigned_bin_size(data->data.mp) < len)\n-                return ASN_PARSE_E;\n             if (mp_init(data->data.mp) != MP_OKAY) {\n             #ifdef WOLFSSL_DEBUG_ASN_TEMPLATE\n                 WOLFSSL_MSG_VSNPRINTF(\"Failed to init mp: %p\", data->data.mp);\n@@ -1222,6 +1217,13 @@\n             #endif\n                 return MP_INIT_E;\n             }\n+            /* After initialization, ensure source INTEGER fits destination\n+             * mp_int allocated digit capacity before importing bytes. */\n+            if (mp_unsigned_bin_size(data->data.mp) < len) {\n+                mp_clear(data->data.mp);\n+                return ASN_PARSE_E;\n+            }\n+\n             err = mp_read_unsigned_bin(data->data.mp, (byte*)input + idx,\n                                        (word32)len);\n             if (err != 0) {\n"
         ],
         "kwargs": {},
-        "timestamp": 745998.008210947,
+        "timestamp": 1911685.603091674,
         "success": true,
-        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
     ],
     "test_patch": [
@@ -322,7 +422,15 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 747785.591658026,
+        "timestamp": 1911630.388668365,
+        "success": true,
+        "result_summary": "Err(CRSError(the code failed to build, extra={'validation_status': 'build_failed', 'build_error': '\\n- **Build failed**.\\n- Error details are in: `/src/wolfssl/compile_error.txt`', 'suggestion': 'You ..."
+      },
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1913510.834225912,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

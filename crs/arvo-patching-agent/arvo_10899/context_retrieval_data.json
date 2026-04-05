@@ -1,53 +1,43 @@
 {
   "source_questions": [],
-  "read_definition": [],
+  "read_definition": [
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "bsearch",
+        "harfbuzz/src/hb-open-type.hh",
+        846,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1845012.514399586,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n711   inline int bsearch (const SearchType &x) const\n838   inline const Type *bsearch (const T &key) const, ..."
+    }
+  ],
   "read_source": [
     {
       "tool_name": "read_source",
       "args": [
-        "harfbuzz/src/hb-aat-layout-kerx-table.hh",
-        650
+        "harfbuzz/src/hb-open-type.hh",
+        820
       ],
       "kwargs": {},
-      "timestamp": 391616.442887303,
+      "timestamp": 1844907.922004987,
       "success": true,
-      "result_summary": "Err(CRSError(line number out of range (only 347 lines), extra=None))"
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "harfbuzz/src/hb-aat-layout-kerx-table.hh",
-        240
-      ],
-      "kwargs": {},
-      "timestamp": 391622.133821347,
-      "success": true,
-      "result_summary": "Ok({'contents': '141       return 0;\\n142     const FWORD *v = &StructAtOffset<FWORD> (arr, offset);\\n143     if (unlikely ((const void *) v < (const void *) arr || (const void *) (v + 1) > (const voi..."
+      "result_summary": "Ok({'contents': '721         max = mid - 1;\\n722       else if (c > 0)\\n723         min = mid + 1;\\n724       else\\n725         return mid;\\n726     }\\n727     return -1;\\n728   }\\n729 };\\n730 \\n731 /..."
     }
   ],
-  "find_references": [
-    {
-      "tool_name": "find_references",
-      "args": [
-        "KerxSubTableFormat6",
-        "harfbuzz/src/hb-aat-layout-kerx-table.hh",
-        false
-      ],
-      "kwargs": {},
-      "timestamp": 391618.78778852,
-      "success": true,
-      "result_summary": "Ok([FileReferences(file_name='harfbuzz/src/hb-aat-layout-kerx-table.hh', refs=[FileReference(line=270, content='  KerxSubTableFormat6\\tformat6;', enclosing_definition='sanitize')])])"
-    }
-  ],
+  "find_references": [],
   "apply_patch": [
     {
       "tool_name": "apply_patch",
       "args": [
-        "harfbuzz/src/hb-aat-layout-kerx-table.hh",
-        "@@ -202,10 +202,19 @@ struct KerxSubTableFormat6\n   inline bool sanitize (hb_sanitize_context_t *c) const\n   {\n     TRACE_SANITIZE (this);\n-    return_trace (likely (c->check_struct (this) &&\n-\t\t\t  rowIndexTable.sanitize (c, this) &&\n-\t\t\t  columnIndexTable.sanitize (c, this) &&\n-\t\t\t  kerningArray.sanitize (c, this) &&\n-\t\t\t  kerningVector.sanitize (c, this)));\n+    if (unlikely (!(c->check_struct (this) &&\n+\t\t\t    rowIndexTable.sanitize (c, this) &&\n+\t\t\t    columnIndexTable.sanitize (c, this) &&\n+\t\t\t    kerningArray.sanitize (c, this) &&\n+\t\t\t    kerningVector.sanitize (c, this))))\n+      return_trace (false);\n+\n+    /* row/column/array lookups eventually index into kerningVector.\n+     * Ensure kerningVector can safely answer all 16-bit indices that may be\n+     * produced by malformed intermediate lookups. */\n+    const Lookup<HBUINT16> &kv = StructAtOffset<Lookup<HBUINT16> > (this, kerningVector);\n+    if (unlikely (!kv.get_value_or_null (0xFFFFu, 0xFFFFu)))\n+      return_trace (false);\n+\n+    return_trace (true);\n   }\n"
+        "harfbuzz/src/hb-open-type.hh",
+        "@@ -837,18 +837,24 @@\n   template <typename T>\n   inline const Type *bsearch (const T &key) const\n   {\n-    unsigned int size = header.unitSize;\n+    unsigned int size = header.unitSize;\n+    unsigned int count = header.nUnits;\n+    if (unlikely (size < Type::static_size))\n+      return nullptr;\n+\n     int min = 0, max = (int) header.nUnits - 1;\n     while (min <= max)\n     {\n       int mid = ((unsigned int) min + (unsigned int) max) / 2;\n-      const Type *p = (const Type *) (((const char *) &bytesZ) + (mid * size));\n+      unsigned int offset = (unsigned int) mid * size;\n+      if (unlikely (mid < 0 || (unsigned int) mid >= count ||\n+                    offset / size != (unsigned int) mid ||\n+                    offset + Type::static_size > count * size))\n+        return nullptr;\n+      const Type *p = (const Type *) (((const char *) &bytesZ) + offset);\n       int c = p->cmp (key);\n       if (c < 0)\n-\tmax = mid - 1;\n+        max = mid - 1;\n       else if (c > 0)\n-\tmin = mid + 1;\n+        min = mid + 1;\n       else\n-\treturn p;\n+\t return p;\n     }\n     return nullptr;\n   }\n"
       ],
       "kwargs": {},
-      "timestamp": 391627.24735466,
+      "timestamp": 1845017.187598576,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
@@ -57,7 +47,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 391712.597100206,
+      "timestamp": 1845151.248501652,
       "success": true,
       "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
     }

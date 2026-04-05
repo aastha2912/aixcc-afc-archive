@@ -1,5 +1,5 @@
 {
-  "vuln_id": 44,
+  "vuln_id": 325,
   "crash_result": {
     "output": "AddressSanitizer:DEADLYSIGNAL\n=================================================================\n==46284==ERROR: AddressSanitizer: SEGV on unknown address 0x621020205d21 (pc 0x7da738193c67 bp 0x7ffd0d9e10d0 sp 0x7ffd0d9e0888 T0)\n==46284==The signal is caused by a READ memory access.\nSCARINESS: 20 (wild-addr-read)\n    #0 0x7da738193c66  (/lib/x86_64-linux-gnu/libc.so.6+0x14dc66)\n    #1 0x4b3d57 in __asan_memcpy /src/llvm/projects/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cc:22:3\n    #2 ",
     "stack": "#0 0x7da738193c66  (/lib/x86_64-linux-gnu/libc.so.6+0x14dc66)\n#1 0x4b3d57 in __asan_memcpy llvm/projects/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cc:22:3\n#2 0x6ab26c in _TIFFmemcpy gdal/gdal/frmts/gtiff/libtiff/tif_vsi.c:191:2\n#3 0x61457e in DumpModeDecode gdal/gdal/frmts/gtiff/libtiff/tif_dumpmode.c:101:3\n#4 0x6a2d53 in TIFFReadEncodedTile gdal/gdal/frmts/gtiff/libtiff/tif_read.c:1007:33\n#5 0x5096ff in GTiffDataset::ReadStrile(int, void*, long long) gdal/gdal/frmts/gtiff/geotiff.cpp",
@@ -22,27 +22,27 @@
     "dedup": "__asan_memcpy--_TIFFmemcpy"
   },
   "analyzed_vuln": {
-    "function": "GTiffDataset::ReadStrile",
-    "file": "gdal/gdal/frmts/gtiff/geotiff.cpp",
-    "description": "GTiffDataset::ReadStrile passes nBlockReqSize directly to TIFFReadEncodedTile(). For malformed TIFFs, the requested output size can be larger than the actual raw tile data loaded by TIFFFillTile; in COMPRESSION_NONE path this reaches DumpModeDecode(), which blindly memcpy()s from tif->tif_rawcp after only checking tif->tif_rawcc < cc. Here tif->tif_rawcp points to an invalid/wild mapped source region, causing a wild read in _TIFFmemcpy at tif_dumpmode.c:101.",
-    "conditions": "Fuzzer opens a crafted tiled GTiff (COMPRESSION_NONE / dump mode decode path) with inconsistent tile metadata (tile byte count/offset/content) such that GTiffDataset::LoadBlockBuf computes a block request size and ReadStrile calls TIFFReadEncodedTile with that size, while libtiff raw tile pointer/available bytes do not describe a valid readable source buffer. During raster read (IReadBlock -> ReadStrile -> TIFFReadEncodedTile -> DumpModeDecode), _TIFFmemcpy(buf, tif->tif_rawcp, cc) dereferences an invalid source pointer and crashes."
+    "function": "DumpModeDecode",
+    "file": "gdal/gdal/frmts/gtiff/libtiff/tif_dumpmode.c",
+    "description": "The root cause is an out-of-bounds/wild read in DumpModeDecode(): it copies `cc` bytes from `tif->tif_rawcp` with `_TIFFmemcpy()` after only checking `tif->tif_rawcc < cc`. There is no validation that `tif->tif_rawcp` actually points to a valid mapped/allocated raw buffer region of at least `cc` bytes. With malformed TIFF metadata/state, `tif_rawcp` can become attacker-controlled/invalid while `tif_rawcc` remains large enough, leading to memcpy from an invalid address and ASan SEGV. Crash manifests at `_TIFFmemcpy` called from DumpModeDecode during `TIFFReadEncodedTile`.",
+    "conditions": "Trigger requires a crafted GTiff input that drives the uncompressed dump-mode decode path (`tif->tif_decodetile == DumpModeDecode`) and corrupts/inconsistently sets raw tile/strip state so that `tif_rawcp` is invalid (or not backed by readable memory) but `tif_rawcc >= requested size`. Through GDAL flow (`GTiffDataset::ReadStrile` -> `TIFFReadEncodedTile` -> `TIFFFillTile`/decode), reading a tile causes DumpModeDecode to memcpy from that invalid raw pointer, causing the wild read crash."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 2,
-      "total_cost": 0.029317049999999997,
-      "total_input_tokens": 20623,
-      "total_output_tokens": 409,
-      "total_cached_tokens": 7936,
+      "total_llm_calls": 4,
+      "total_cost": 0.0436912,
+      "total_input_tokens": 33704,
+      "total_output_tokens": 679,
+      "total_cached_tokens": 15744,
       "llm_calls": [
         {
-          "timestamp": 1773367603.0993314,
+          "timestamp": 1774814219.8488262,
           "model": "gpt-5.3-codex",
-          "cost": 0.0117691,
-          "input_tokens": 6738,
-          "output_tokens": 128,
-          "total_tokens": 6866,
-          "cached_tokens": 1152,
+          "cost": 0.014241499999999999,
+          "input_tokens": 6826,
+          "output_tokens": 164,
+          "total_tokens": 6990,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -50,28 +50,78 @@
           "tool_call_count": 3,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_GwaXu4eGluJrUjbGTMKqWKN0"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_sXxcn9GGi5RJwYZ13Vgl9sNu"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_dd67MKqCkGqCMkpqrzqB67Hb"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_i7rCHYdC9NqCgnwdDPVH6hI0"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_FtUWDY3rQYIhwDimhmHve9zJ"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Ngyv0NVdJv5Fq2IRbwnBchXv"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773367620.1239314,
+          "timestamp": 1774814901.1654058,
           "model": "gpt-5.3-codex",
-          "cost": 0.01754795,
-          "input_tokens": 13885,
-          "output_tokens": 281,
-          "total_tokens": 14166,
-          "cached_tokens": 6784,
+          "cost": 0.014643999999999999,
+          "input_tokens": 7128,
+          "output_tokens": 155,
+          "total_tokens": 7283,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Xr7J9iBitja85kFIZhlON5mC"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_yPAX9CgtKyZv0mTvtKHD0EBi"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_AniJhEkR9Hw2Xt2xH6RrWAv2"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774815021.586235,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0043414000000000005,
+          "input_tokens": 8628,
+          "output_tokens": 38,
+          "total_tokens": 8666,
+          "cached_tokens": 7168,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_YDymUAAI7TqTKGzWrn3BsSgZ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774815026.579488,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0104643,
+          "input_tokens": 11122,
+          "output_tokens": 322,
+          "total_tokens": 11444,
+          "cached_tokens": 8576,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +130,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_ed1r4MlUWr7YrRNvgpGn0Qkw"
+              "tool_call_id": "call_A4cP0qHEw9GnLqhdiXNSdl10"
             }
           ],
           "finish_reason": "tool_calls"
@@ -89,18 +139,18 @@
     },
     "patching": {
       "total_llm_calls": 6,
-      "total_cost": 0.0385105,
-      "total_input_tokens": 64238,
-      "total_output_tokens": 697,
-      "total_cached_tokens": 53120,
+      "total_cost": 0.0432831,
+      "total_input_tokens": 58450,
+      "total_output_tokens": 595,
+      "total_cached_tokens": 42752,
       "llm_calls": [
         {
-          "timestamp": 1773367622.4469607,
+          "timestamp": 1774815028.549175,
           "model": "gpt-5.3-codex",
-          "cost": 0.01058645,
-          "input_tokens": 6875,
-          "output_tokens": 84,
-          "total_tokens": 6959,
+          "cost": 0.01270045,
+          "input_tokens": 7979,
+          "output_tokens": 97,
+          "total_tokens": 8076,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -110,23 +160,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_sLHZeqWFLzZPn2GiZ5ZjyhGt"
+              "tool_call_id": "call_OTq71v1VozOXCAKhhYrylsOt"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_7kgAh316MN0NswkVGgAmBgpa"
+              "tool_name": "find_references",
+              "tool_call_id": "call_5nMwdf4MpCqj2nPGaFipRkYI"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368278.2129612,
+          "timestamp": 1774815032.7048542,
           "model": "gpt-5.3-codex",
-          "cost": 0.00292495,
-          "input_tokens": 7073,
-          "output_tokens": 88,
-          "total_tokens": 7161,
-          "cached_tokens": 6784,
+          "cost": 0.01314495,
+          "input_tokens": 8193,
+          "output_tokens": 102,
+          "total_tokens": 8295,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,23 +185,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_mQTvt8dSXHqKdxElTJq2g7Zg"
+              "tool_call_id": "call_ofuuE8MXVy2PDcgrouzIB38Y"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_IDSLI0fiutRlR3DOFH2cFnyr"
+              "tool_name": "find_references",
+              "tool_call_id": "call_kWLDeO2E1JWAgWe2KiG7Vjq8"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368284.8830292,
+          "timestamp": 1774815337.7605774,
           "model": "gpt-5.3-codex",
-          "cost": 0.01629075,
-          "input_tokens": 12109,
-          "output_tokens": 442,
-          "total_tokens": 12551,
-          "cached_tokens": 7040,
+          "cost": 0.00873705,
+          "input_tokens": 10255,
+          "output_tokens": 235,
+          "total_tokens": 10490,
+          "cached_tokens": 7936,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,19 +210,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_oDACbwrwRF8f9UE2rC7wIJZH"
+              "tool_call_id": "call_BSRMR0Ad7rdwgzkoZE2V4jbN"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368286.301358,
+          "timestamp": 1774815339.0666087,
           "model": "gpt-5.3-codex",
-          "cost": 0.00275905,
-          "input_tokens": 12639,
+          "cost": 0.0023778999999999996,
+          "input_tokens": 10578,
           "output_tokens": 14,
-          "total_tokens": 12653,
-          "cached_tokens": 12416,
+          "total_tokens": 10592,
+          "cached_tokens": 10368,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,19 +231,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_CTPeNGINSYsvTHyrYUk8022k"
+              "tool_call_id": "call_KGhiCxIn7tRMSKnQnW1Q61sE"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368887.902233,
+          "timestamp": 1774815986.3590436,
           "model": "gpt-5.3-codex",
-          "cost": 0.00323995,
-          "input_tokens": 12709,
-          "output_tokens": 54,
-          "total_tokens": 12763,
-          "cached_tokens": 12544,
+          "cost": 0.0032088000000000004,
+          "input_tokens": 10648,
+          "output_tokens": 79,
+          "total_tokens": 10727,
+          "cached_tokens": 10496,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -202,28 +252,32 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_B4xCaT7f8AZL7z93OtE8YBzG"
+              "tool_call_id": "call_zV83rMTlCBNQtuuomzJYdAnJ"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773368890.2745574,
+          "timestamp": 1774815988.0455713,
           "model": "gpt-5.3-codex",
-          "cost": 0.0027093499999999997,
-          "input_tokens": 12833,
-          "output_tokens": 15,
-          "total_tokens": 12848,
-          "cached_tokens": 12672,
+          "cost": 0.00311395,
+          "input_tokens": 10797,
+          "output_tokens": 68,
+          "total_tokens": 10865,
+          "cached_tokens": 10624,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 1,
+          "tool_call_count": 2,
           "tool_calls": [
             {
               "tool_name": "undo_last_patch",
-              "tool_call_id": "call_phR4OREUbPQgiZTZ6SBrOleC"
+              "tool_call_id": "call_wp00sVa5Tsd45vYb0krnTl49"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_9R1hGGBJjkxJMmrAA6bseASS"
             }
           ],
           "finish_reason": "tool_calls"
@@ -231,10 +285,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.06782755,
-      "total_input_tokens": 84861,
-      "total_output_tokens": 1106,
-      "total_llm_calls": 8
+      "total_cost": 0.0869743,
+      "total_input_tokens": 92154,
+      "total_output_tokens": 1274,
+      "total_llm_calls": 10
     }
   },
   "patch_result": {
@@ -257,58 +311,72 @@
       {
         "tool_name": "read_source",
         "args": [
-          "gdal/frmts/gtiff/geotiff.cpp",
-          4720
+          "gdal/frmts/gtiff/libtiff/tif_dumpmode.c",
+          101
         ],
         "kwargs": {},
-        "timestamp": 400564.857956371,
+        "timestamp": 1847319.462715901,
         "success": true,
-        "result_summary": "Err(CRSError(path 'gdal/frmts/gtiff/geotiff.cpp' does not exist in directory tree. Similar paths: gdal/gdal/frmts/gtiff/geotiff.cpp, extra=None))"
+        "result_summary": "Err(CRSError(path 'gdal/frmts/gtiff/libtiff/tif_dumpmode.c' does not exist in directory tree. Similar paths: gdal/gdal/frmts/gtiff/libtiff/tif_dumpmode.c, extra=None))"
       },
       {
         "tool_name": "read_source",
         "args": [
-          "gdal/frmts/gtiff/geotiff.cpp",
-          9606
+          "gdal/gdal/frmts/gtiff/libtiff/tif_dumpmode.c",
+          101
         ],
         "kwargs": {},
-        "timestamp": 400564.858114257,
+        "timestamp": 1847321.281065372,
         "success": true,
-        "result_summary": "Err(CRSError(path 'gdal/frmts/gtiff/geotiff.cpp' does not exist in directory tree. Similar paths: gdal/gdal/frmts/gtiff/geotiff.cpp, extra=None))"
+        "result_summary": "Ok({'contents': '  2  * Copyright (c) 1988-1997 Sam Leffler\\n  3  * Copyright (c) 1991-1997 Silicon Graphics, Inc.\\n  4  *\\n  5  * Permission to use, copy, modify, distribute, and sell this software a..."
       },
       {
         "tool_name": "read_source",
         "args": [
-          "gdal/gdal/frmts/gtiff/geotiff.cpp",
-          4720
+          "gdal/gdal/frmts/gtiff/libtiff/tif_read.c",
+          980
         ],
         "kwargs": {},
-        "timestamp": 400567.050237861,
+        "timestamp": 1848282.581383757,
         "success": true,
-        "result_summary": "Ok({'contents': '4621             int nBlockId = nBlockIdBand0;\\n4622             if( m_poGDS->m_nPlanarConfig == PLANARCONFIG_SEPARATE )\\n4623                 nBlockId = nBlockIdBand0 + (nBand - 1) *..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "gdal/gdal/frmts/gtiff/geotiff.cpp",
-          9606
-        ],
-        "kwargs": {},
-        "timestamp": 400567.06077177,
-        "success": true,
-        "result_summary": "Ok({'contents': '9507 /* -------------------------------------------------------------------- */\\n9508 /*      If we have a dirty loaded block, flush it out first.            */\\n9509 /* -------------..."
+        "result_summary": "Ok({'contents': ' 881 \\t\\t\\t * a general purpose working buffer as it normally otherwise is.  So we\\n 882 \\t\\t\\t * keep track of this fact to avoid using it improperly.\\n 883 \\t\\t\\t */\\n 884 \\t\\t\\ttif..."
       }
     ],
-    "find_references": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "DumpModeDecode",
+          "gdal/frmts/gtiff/libtiff/tif_dumpmode.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1847317.930169561,
+        "success": true,
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: gdal/gdal/frmts/gtiff/libtiff/tif_dumpmode.c, extra=None))"
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "tif_rawcp",
+          "gdal/gdal/frmts/gtiff/libtiff/tif_dumpmode.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1847623.353599885,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='gdal/gdal/frmts/gtiff/libtiff/tif_dumpmode.c', refs=[FileReference(line=59, content='\\t\\tif (tif->tif_rawcp != pp)', enclosing_definition='DumpModeEncode'), FileReference..."
+      }
+    ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
-          "gdal/gdal/frmts/gtiff/geotiff.cpp",
-          "@@ -4718,6 +4718,34 @@ bool GTiffDataset::ReadStrile(int nBlockId,\n     if( TIFFIsTiled( m_hTIFF ) )\n     {\n+        tmsize_t nEncodedSize = TIFFGetStrileByteCount( m_hTIFF, nBlockId );\n+        if( nEncodedSize <= 0 )\n+        {\n+            if( !m_bIgnoreReadErrors )\n+            {\n+                CPLError( CE_Failure, CPLE_AppDefined,\n+                          \"Invalid tile byte count.\" );\n+                return false;\n+            }\n+            nEncodedSize = static_cast<tmsize_t>(nBlockReqSize);\n+        }\n+        if( nBlockReqSize > static_cast<GPtrDiff_t>(nEncodedSize) )\n+        {\n+            if( !m_bIgnoreReadErrors )\n+            {\n+                CPLError( CE_Failure, CPLE_AppDefined,\n+                          \"Requested tile read size is larger than tile byte count.\" );\n+                return false;\n+            }\n+            nBlockReqSize = static_cast<GPtrDiff_t>(nEncodedSize);\n+        }\n+        if( nBlockReqSize < 0 )\n+        {\n+            if( !m_bIgnoreReadErrors )\n+            {\n+                CPLError( CE_Failure, CPLE_AppDefined,\n+                          \"Invalid requested tile read size.\" );\n+                return false;\n+            }\n+            nBlockReqSize = 0;\n+        }\n         if( TIFFReadEncodedTile( m_hTIFF, nBlockId, pOutputBuffer,\n                                     nBlockReqSize ) == -1\n             && !m_bIgnoreReadErrors )\n"
+          "gdal/gdal/frmts/gtiff/libtiff/tif_dumpmode.c",
+          "@@ -95,6 +95,14 @@ DumpModeDecode(TIFF* tif, uint8* buf, tmsize_t cc, uint16 s)\n \t}\n \t/*\n \t * Avoid copy if client has setup raw\n \t * data buffer to avoid extra copy.\n \t */\n+\tif (cc > 0 && tif->tif_rawcp == NULL)\n+\t{\n+\t\tTIFFErrorExt(tif->tif_clientdata, module,\n+\t\t             \"Invalid raw data buffer pointer\");\n+\t\treturn (0);\n+\t}\n \tif (tif->tif_rawcp != buf)\n \t\t_TIFFmemcpy(buf, tif->tif_rawcp, cc);\n \ttif->tif_rawcp += cc;\n \ttif->tif_rawcc -= cc;  \n"
         ],
         "kwargs": {},
-        "timestamp": 400573.573351985,
+        "timestamp": 1847626.353275999,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -318,7 +386,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 401174.827785791,
+        "timestamp": 1848272.87730198,
         "success": true,
         "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'gtiff_mmap', 'dedup': '__asan_memcpy--_TIFFmemcpy'}))"
       }
@@ -328,7 +396,7 @@
         "tool_name": "undo_last_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 401178.854457411,
+        "timestamp": 1848276.620249903,
         "success": true,
         "result_summary": "Ok({'total_edits': 0})"
       }

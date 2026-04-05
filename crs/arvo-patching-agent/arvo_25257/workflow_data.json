@@ -1,5 +1,5 @@
 {
-  "vuln_id": 63,
+  "vuln_id": 355,
   "crash_result": {
     "output": "==71554==ERROR: AddressSanitizer: heap-use-after-free on address 0xeb8298ec at pc 0x088c204c bp 0xff8f28d8 sp 0xff8f28d0\nREAD of size 1 at 0xeb8298ec thread T0\nSCARINESS: 40 (1-byte-read-heap-use-after-free)\n    #0 0x88c204b in shutdown_executor /src/php-src/Zend/zend_execute_API.c:285:18\n    #1 0x8902fab in zend_deactivate /src/php-src/Zend/zend.c:1225:2\n    #2 0x878a9ad in php_request_shutdown /src/php-src/main/main.c:1874:2\n    #3 0x8ba384e in fuzzer_request_shutdown /src/php-src/sapi/fuzzer/",
     "stack": "#0 0x88c204b in shutdown_executor php-src/Zend/zend_execute_API.c:285:18\n#1 0x8902fab in zend_deactivate php-src/Zend/zend.c:1225:2\n#2 0x878a9ad in php_request_shutdown php-src/main/main.c:1874:2\n#3 0x8ba384e in fuzzer_request_shutdown php-src/sapi/fuzzer/fuzzer-sapi.c:196:2\n#4 0x8ba3f28 in fuzzer_do_request_from_buffer php-src/sapi/fuzzer/fuzzer-sapi.c:267:2\n#5 0x8ba3454 in LLVMFuzzerTestOneInput php-src/sapi/fuzzer/fuzzer-parser.c:35:2\n#6 0x80c0571 in fuzzer::Fuzzer::ExecuteCallback(unsigned c",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "zend_deactivate",
     "file": "php-src/Zend/zend.c",
-    "description": "Use-after-free due to incorrect shutdown order in zend_deactivate(): it calls shutdown_executor() before shutdown_compiler(). shutdown_executor() iterates EG(function_table) and dereferences zend_op_array fields (e.g., op_array->type/static_variables at zend_execute_API.c:285), but those op_array structures can still point into compiler arena memory that is later freed by shutdown_compiler() (zend_compile.c:431). With this PoV, stale function-table entries reference arena-backed op_array data that has been invalidated, leading to a UAF read in shutdown_executor.",
-    "conditions": "Triggered during request shutdown in php-fuzz-parser after malformed input creates non-persistent user functions/op_arrays that survive into deactivation. Data flow: fuzzer_do_request_from_buffer() -> php_request_shutdown() -> zend_deactivate(). In zend_deactivate, shutdown_executor walks EG(function_table) and reads op_array metadata; the PoV causes at least one entry to reference memory from CG(arena) that has been/falls invalid, so dereference at shutdown_executor line ~285 reads freed heap. No special runtime interaction is needed beyond reaching request shutdown with this crafted parser input."
+    "description": "Use-after-free caused by incorrect shutdown order: zend_deactivate() calls shutdown_executor() before shutdown_compiler(). shutdown_executor() iterates EG(function_table) and dereferences zend_op_array entries (e.g., op_array->type/static_variables), but those op_array structures can still point into compiler arena memory (CG(arena)). shutdown_compiler() then destroys CG(arena), and the observed PoV reaches a state where shutdown_executor reads data that has already been freed from that arena region, producing a heap UAF (crash site in shutdown_executor at zend_execute_API.c:285). Root cause is lifetime/teardown sequencing in zend_deactivate, not just the read instruction itself.",
+    "conditions": "Trigger requires a request that creates user-function op_array/compiler-managed data in CG(arena) (the parser fuzzer input does this via malformed/complex PHP code), then reaches request shutdown. During php_request_shutdown -> zend_deactivate, executor shutdown walks function/class tables and touches op_array fields while compiler arena-backed memory has become invalid for that path, leading to dereference of freed arena memory. No special external state is needed beyond crafted script input that leaves such entries reachable at shutdown."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.0327005,
-      "total_input_tokens": 22646,
-      "total_output_tokens": 369,
-      "total_cached_tokens": 7680,
+      "total_cost": 0.0310485,
+      "total_input_tokens": 22822,
+      "total_output_tokens": 373,
+      "total_cached_tokens": 8960,
       "llm_calls": [
         {
-          "timestamp": 1773376700.1932027,
+          "timestamp": 1774822842.6045702,
           "model": "gpt-5.3-codex",
-          "cost": 0.01500975,
-          "input_tokens": 7761,
+          "cost": 0.01334935,
+          "input_tokens": 7849,
           "output_tokens": 102,
-          "total_tokens": 7863,
-          "cached_tokens": 0,
+          "total_tokens": 7951,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_68BQSeeXQZexpOvyO5iF25wh"
+              "tool_call_id": "call_jpu1loTyB2HlU1JLL6obSLdr"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_LjnJAe7jtN8V1ow2R2aubEvn"
+              "tool_call_id": "call_Rw1fbKqpIVBMf6mRE1oyCHsZ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_QsQzOEsd34iCDW9cyJhmLnTh"
+              "tool_call_id": "call_uMtRM5JcpxbQgI03YHhBI4uq"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773376718.2336462,
+          "timestamp": 1774822848.8855329,
           "model": "gpt-5.3-codex",
-          "cost": 0.017690749999999998,
-          "input_tokens": 14885,
-          "output_tokens": 267,
-          "total_tokens": 15152,
-          "cached_tokens": 7680,
+          "cost": 0.01769915,
+          "input_tokens": 14973,
+          "output_tokens": 271,
+          "total_tokens": 15244,
+          "cached_tokens": 7808,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_8Qf1ngwnHwMYHZTsw2MU4ngy"
+              "tool_call_id": "call_aqiyVdOTZoSlrtTfjXeUSrwe"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,20 +88,20 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.037024049999999996,
-      "total_input_tokens": 50955,
-      "total_output_tokens": 336,
-      "total_cached_tokens": 36096,
+      "total_llm_calls": 5,
+      "total_cost": 0.0375109,
+      "total_input_tokens": 67134,
+      "total_output_tokens": 350,
+      "total_cached_tokens": 53888,
       "llm_calls": [
         {
-          "timestamp": 1773376720.3809423,
+          "timestamp": 1774822850.7132156,
           "model": "gpt-5.3-codex",
-          "cost": 0.014075250000000001,
-          "input_tokens": 7227,
-          "output_tokens": 102,
-          "total_tokens": 7329,
-          "cached_tokens": 0,
+          "cost": 0.01486345,
+          "input_tokens": 9095,
+          "output_tokens": 112,
+          "total_tokens": 9207,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -110,27 +110,48 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_UBdJtsNV2OQJKRFNtndGCoE9"
+              "tool_call_id": "call_Kq5OOEMFFsqfU91e9Q1GOFbp"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_FZUgr8THA7wUk7DQRU3Bc1dp"
+              "tool_call_id": "call_s08lbQWXEGhxw9LI183L2tZH"
             },
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_rMSCRbNy40w1uyDFp6WuIk6B"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Gnv4ctTTGn0JJa9oqz7uGJAQ"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773376724.1187928,
+          "timestamp": 1774823046.0188713,
           "model": "gpt-5.3-codex",
-          "cost": 0.016582649999999997,
-          "input_tokens": 14351,
-          "output_tokens": 197,
-          "total_tokens": 14548,
-          "cached_tokens": 7168,
+          "cost": 0.0109459,
+          "input_tokens": 14106,
+          "output_tokens": 41,
+          "total_tokens": 14147,
+          "cached_tokens": 9088,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_k4o7shEGGRiFdI384zU52c1A"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774823060.8110273,
+          "model": "gpt-5.3-codex",
+          "cost": 0.005341,
+          "input_tokens": 14444,
+          "output_tokens": 160,
+          "total_tokens": 14604,
+          "cached_tokens": 14080,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,18 +160,18 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_hW7bCRUilWwnBqkaIHuo8pPG"
+              "tool_call_id": "call_Q1a4wNSt77IfDHumE1cD2iqS"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773376725.486107,
+          "timestamp": 1774823061.96939,
           "model": "gpt-5.3-codex",
-          "cost": 0.0030282,
-          "input_tokens": 14636,
+          "cost": 0.0031262,
+          "input_tokens": 14692,
           "output_tokens": 14,
-          "total_tokens": 14650,
+          "total_tokens": 14706,
           "cached_tokens": 14464,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -160,19 +181,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_z0Khp3hHNJPYnxr4zZLGigAP"
+              "tool_call_id": "call_pfaKXdnyXwaL7a89iCAkcbyV"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773376845.754507,
+          "timestamp": 1774823217.1468287,
           "model": "gpt-5.3-codex",
-          "cost": 0.00333795,
-          "input_tokens": 14741,
+          "cost": 0.0032343500000000004,
+          "input_tokens": 14797,
           "output_tokens": 23,
-          "total_tokens": 14764,
-          "cached_tokens": 14464,
+          "total_tokens": 14820,
+          "cached_tokens": 14592,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -181,7 +202,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_WpyBTAVEwfqGoR6lx5a3qiEM"
+              "tool_call_id": "call_A5LQlE3reRAx9WvoMY2cO1mK"
             }
           ],
           "finish_reason": "tool_calls"
@@ -189,15 +210,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.06972455,
-      "total_input_tokens": 73601,
-      "total_output_tokens": 705,
-      "total_llm_calls": 6
+      "total_cost": 0.06855939999999999,
+      "total_input_tokens": 89956,
+      "total_output_tokens": 723,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/Zend/zend.c\n+++ b/Zend/zend.c\n@@ -1221,13 +1221,15 @@\n \t\tshutdown_scanner();\n \t} zend_end_try();\n \n-\t/* shutdown_executor() takes care of its own bailout handling */\n-\tshutdown_executor();\n-\n \tzend_try {\n \t\tzend_ini_deactivate();\n \t} zend_end_try();\n \n+\t/* shutdown_executor() may access user function op_arrays allocated in compiler arena.\n+\t * Run it before shutdown_compiler() destroys that arena. */\n+\t/* shutdown_executor() takes care of its own bailout handling */\n+\tshutdown_executor();\n+\n \tzend_try {\n \t\tshutdown_compiler();\n \t} zend_end_try();\n",
+    "patch": "--- a/Zend/zend.c\n+++ b/Zend/zend.c\n@@ -1225,11 +1225,11 @@\n \tshutdown_executor();\n \n \tzend_try {\n-\t\tzend_ini_deactivate();\n+\t\tshutdown_compiler();\n \t} zend_end_try();\n \n \tzend_try {\n-\t\tshutdown_compiler();\n+\t\tzend_ini_deactivate();\n \t} zend_end_try();\n \n \tzend_destroy_rsrc_list(&EG(regular_list));\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -211,7 +232,34 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "shutdown_compiler",
+          "php-src/Zend/zend_compile.c",
+          431,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1855332.664447671,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n423 void shutdown_compiler(void) /* {{{ */, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "shutdown_compiler",
+          "php-src/Zend/zend_compile.c",
+          423,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1855346.820534483,
+        "success": true,
+        "result_summary": "Ok({'contents': '423 void shutdown_compiler(void) /* {{{ */\\n424 {\\n425 \\t/* Reset filename before destroying the arena, as file cache may use arena allocated strings. */\\n426 \\tzend_restore_compiled_..."
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
@@ -220,20 +268,9 @@
           1225
         ],
         "kwargs": {},
-        "timestamp": 409009.29649951,
+        "timestamp": 1855139.289389579,
         "success": true,
         "result_summary": "Ok({'contents': '1126 }\\n1127 /* }}} */\\n1128 \\n1129 /* this should be compatible with the standard zenderror */\\n1130 ZEND_COLD void zenderror(const char *error) /* {{{ */\\n1131 {\\n1132 \\tCG(parse_er..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "php-src/Zend/zend_compile.c",
-          431
-        ],
-        "kwargs": {},
-        "timestamp": 409009.298864574,
-        "success": true,
-        "result_summary": "Ok({'contents': '332 \\t\\tefree(FC(imports_const));\\n333 \\t\\tFC(imports_const) = NULL;\\n334 \\t}\\n335 }\\n336 /* }}} */\\n337 \\n338 static void zend_end_namespace(void) /* {{{ */ {\\n339 \\tFC(in_namespace)..."
       },
       {
         "tool_name": "read_source",
@@ -242,7 +279,7 @@
           285
         ],
         "kwargs": {},
-        "timestamp": 409009.300037686,
+        "timestamp": 1855139.2905265,
         "success": true,
         "result_summary": "Ok({'contents': '186 \\tEG(persistent_classes_count)   = EG(class_table)->nNumUsed;\\n187 \\n188 \\tEG(get_gc_buffer).start = EG(get_gc_buffer).end = EG(get_gc_buffer).cur = NULL;\\n189 \\n190 \\tzend_weakre..."
       }
@@ -253,10 +290,10 @@
         "tool_name": "apply_patch",
         "args": [
           "php-src/Zend/zend.c",
-          "@@ -1221,15 +1221,15 @@\n \t\tshutdown_scanner();\n \t} zend_end_try();\n \n-\t/* shutdown_executor() takes care of its own bailout handling */\n-\tshutdown_executor();\n-\n \tzend_try {\n \t\tzend_ini_deactivate();\n \t} zend_end_try();\n \n+\t/* shutdown_executor() may access user function op_arrays allocated in compiler arena.\n+\t * Run it before shutdown_compiler() destroys that arena. */\n+\t/* shutdown_executor() takes care of its own bailout handling */\n+\tshutdown_executor();\n+\n \tzend_try {\n \t\tshutdown_compiler();\n \t} zend_end_try();\n"
+          "@@ -1224,12 +1224,12 @@\n \t/* shutdown_executor() takes care of its own bailout handling */\n \tshutdown_executor();\n \n+\tzend_try {\n+\t\tshutdown_compiler();\n+\t} zend_end_try();\n+\n \tzend_try {\n \t\tzend_ini_deactivate();\n \t} zend_end_try();\n-\n-\tzend_try {\n-\t\tshutdown_compiler();\n-\t} zend_end_try();\n \n \tzend_destroy_rsrc_list(&EG(regular_list));\n"
         ],
         "kwargs": {},
-        "timestamp": 409012.727690825,
+        "timestamp": 1855349.416957621,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -266,7 +303,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 409132.792204199,
+        "timestamp": 1855504.747990469,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

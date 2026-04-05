@@ -9,20 +9,9 @@
         509
       ],
       "kwargs": {},
-      "timestamp": 469094.581090016,
+      "timestamp": 1903718.316120485,
       "success": true,
       "result_summary": "Err(CRSError(path 'src/decode.c' does not exist in directory tree. Similar paths: libredwg/src/decode.c, extra=None))"
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "src/bits.c",
-        198
-      ],
-      "kwargs": {},
-      "timestamp": 469094.948179665,
-      "success": true,
-      "result_summary": "Err(CRSError(path 'src/bits.c' does not exist in directory tree. Similar paths: libredwg/src/bits.c, extra=None))"
     },
     {
       "tool_name": "read_source",
@@ -31,43 +20,46 @@
         509
       ],
       "kwargs": {},
-      "timestamp": 469097.238864197,
+      "timestamp": 1903725.657029375,
       "success": true,
       "result_summary": "Ok({'contents': '410           size_t old_size = dat->size;\\n411           BITCODE_BL vcount;\\n412           dat->size = end_address;\\n413           // clang-format off\\n414           #include \"auxhea..."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "libredwg/src/bits.c",
-        198
-      ],
-      "kwargs": {},
-      "timestamp": 469097.242535154,
-      "success": true,
-      "result_summary": "Ok({'contents': ' 99 bit_set_position (Bit_Chain *dat, size_t bitpos)\\n100 {\\n101   dat->byte = bitpos >> 3;\\n102   dat->bit = bitpos & 7;\\n103   if (dat->byte > dat->size || (dat->byte == dat->size &..."
     }
   ],
-  "find_references": [],
+  "find_references": [
+    {
+      "tool_name": "find_references",
+      "args": [
+        "dwg_decode_header_variables",
+        "src/decode.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1903723.82144011,
+      "success": true,
+      "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: libredwg/src/decode.h, libredwg/src/decode.c, libredwg/src/decode_r2007.c, extra=None))"
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "header_vars.size",
+        "libredwg/src/decode.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1903729.193296174,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/libredwg/src/decode.c', refs=[FileReference(line=498, content='  dwg->header_vars.size = bit_read_RL (dat);', enclosing_definition='N/A'), FileReference(line=499, co..."
+    }
+  ],
   "apply_patch": [
     {
       "tool_name": "apply_patch",
       "args": [
-        "libredwg/src/bits.c",
-        "@@ -136,8 +136,8 @@\n #  define CHK_OVERFLOW(func, retval)                                          \\\n-    if (dat->byte > dat->size                                                 \\\n-        || ((dat->byte * 8) + dat->bit > dat->size * 8))                      \\\n+    if (dat->byte >= dat->size                                                \\\n+        || ((dat->byte * 8) + dat->bit >= dat->size * 8))                     \\\n       {                                                                       \\\n         loglevel = dat->opts & DWG_OPTS_LOGLEVEL;                             \\\n         LOG_ERROR (\"%s buffer overflow at %\" PRIuSIZE \".%u > %\" PRIuSIZE,     \\\n@@ -124,8 +124,8 @@\n #  define CHK_OVERFLOW(func, retval)                                          \\\n-    if (dat->byte > dat->size                                                 \\\n-        || ((dat->byte * 8) + dat->bit > dat->size * 8))                      \\\n+    if (dat->byte >= dat->size                                                \\\n+        || ((dat->byte * 8) + dat->bit >= dat->size * 8))                     \\\n       {                                                                       \\\n         loglevel = dat->opts & DWG_OPTS_LOGLEVEL;                             \\\n         LOG_ERROR (\"%s buffer overflow at %\" PRIuSIZE \".%u > %\" PRIuSIZE,     \\\n"
+        "libredwg/src/decode.c",
+        "@@ -497,14 +497,36 @@\n #define MAX_HEADER_SIZE 2048\n   dwg->header_vars.size = bit_read_RL (dat);\n   LOG_TRACE (\"         Length: \" FORMAT_RL \" [RL]\\n\", dwg->header_vars.size)\n+  {\n+    const size_t section_end\n+        = dwg->header.section[SECTION_HEADER_R13].address\n+          + dwg->header.section[SECTION_HEADER_R13].size;\n+    const size_t header_payload_max = section_end > pvz + 4 ? section_end - (pvz + 4) : 0;\n+    if ((size_t)dwg->header_vars.size > header_payload_max)\n+      {\n+        LOG_WARN (\"Fixup illegal Header Length beyond section bounds\");\n+        dwg->header_vars.size = (BITCODE_RL)header_payload_max;\n+      }\n+  }\n   if (dwg->header_vars.size > MAX_HEADER_SIZE)\n     {\n       LOG_WARN (\"Fixup illegal Header Length\");\n       dwg->header_vars.size = dwg->header.section[SECTION_HEADER_R13].size;\n       if (dwg->header_vars.size > 20)\n         dwg->header_vars.size -= 16 + 4;\n+      {\n+        const size_t section_end\n+            = dwg->header.section[SECTION_HEADER_R13].address\n+              + dwg->header.section[SECTION_HEADER_R13].size;\n+        const size_t header_payload_max = section_end > pvz + 4 ? section_end - (pvz + 4) : 0;\n+        if ((size_t)dwg->header_vars.size > header_payload_max)\n+          dwg->header_vars.size = (BITCODE_RL)header_payload_max;\n+      }\n     }\n   dat->bit = 0;\n-\n-  error |= dwg_decode_header_variables (dat, dat, dat, dwg);\n+  {\n+    const size_t old_size = dat->size;\n+    const size_t header_end = pvz + dwg->header_vars.size + 4;\n+    if (header_end < old_size)\n+      dat->size = header_end;\n+    error |= dwg_decode_header_variables (dat, dat, dat, dwg);\n+    dat->size = old_size;\n+  }\n \n   // LOG_HANDLE (\"@ 0x\" FORMAT_RLLx \".%\" PRIuSIZE \"\\n\", bit_position (dat)/8,\n   // bit_position (dat)%8); check slack Check CRC, hardcoded to 2 before end\n"
       ],
       "kwargs": {},
-      "timestamp": 469103.875117312,
-      "success": true,
-      "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 0 (line 136): sw_align failed: Context lines did not match OR matched multiple locations. Please double-check the correctness of the ..."
-    },
-    {
-      "tool_name": "apply_patch",
-      "args": [
-        "libredwg/src/bits.c",
-        "@@ -124,8 +124,8 @@\n #  define CHK_OVERFLOW(func, retval)                                          \\\n-    if (dat->byte > dat->size                                                 \\\n-        || ((dat->byte * 8) + dat->bit > dat->size * 8))                      \\\n+    if (dat->byte >= dat->size                                                \\\n+        || ((dat->byte * 8) + dat->bit >= dat->size * 8))                     \\\n       {                                                                       \\\n         loglevel = dat->opts & DWG_OPTS_LOGLEVEL;                             \\\n         LOG_ERROR (\"%s buffer overflow at %\" PRIuSIZE \".%u > %\" PRIuSIZE,     \\\n@@ -136,8 +136,8 @@\n #  define CHK_OVERFLOW(func, retval)                                          \\\n-    if (dat->byte > dat->size                                                 \\\n-        || ((dat->byte * 8) + dat->bit > dat->size * 8))                      \\\n+    if (dat->byte >= dat->size                                                \\\n+        || ((dat->byte * 8) + dat->bit >= dat->size * 8))                     \\\n       {                                                                       \\\n         loglevel = dat->opts & DWG_OPTS_LOGLEVEL;                             \\\n         LOG_ERROR (\"%s buffer overflow at %\" PRIuSIZE \".%u > %\" PRIuSIZE,     \\\n"
-      ],
-      "kwargs": {},
-      "timestamp": 469112.757733657,
+      "timestamp": 1903736.761491214,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
@@ -77,7 +69,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 469803.997982778,
+      "timestamp": 1904611.49514094,
       "success": true,
       "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
     }

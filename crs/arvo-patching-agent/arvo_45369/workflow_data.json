@@ -1,5 +1,5 @@
 {
-  "vuln_id": 128,
+  "vuln_id": 440,
   "crash_result": {
     "output": "==67213==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x726470fe6810 at pc 0x00000112bd61 bp 0x7ffe87ccc310 sp 0x7ffe87ccc308\nREAD of size 1 at 0x726470fe6810 thread T0\nSCARINESS: 22 (1-byte-read-heap-buffer-overflow-far-from-bounds)\n    #0 0x112bd60 in zval_get_type /src/php-src/Zend/zend_types.h:523:18\n    #1 0x112bd60 in gc_mark_grey /src/php-src/Zend/zend_gc.c:891:8\n    #2 0x112bd60 in gc_mark_roots /src/php-src/Zend/zend_gc.c:986:5\n    #3 0x112bd60 in zend_gc_collect_cycles /src",
     "stack": "#0 0x112bd60 in zval_get_type php-src/Zend/zend_types.h:523:18\n#1 0x112bd60 in gc_mark_grey php-src/Zend/zend_gc.c:891:8\n#2 0x112bd60 in gc_mark_roots php-src/Zend/zend_gc.c:986:5\n#3 0x112bd60 in zend_gc_collect_cycles php-src/Zend/zend_gc.c:1497:3\n#4 0x12f340b in fuzzer_request_shutdown php-src/sapi/fuzzer/fuzzer-sapi.c:202:3\n#5 0x12f3b21 in fuzzer_do_request_from_buffer php-src/sapi/fuzzer/fuzzer-sapi.c:288:2\n#6 0x12f29cc in LLVMFuzzerTestOneInput php-src/sapi/fuzzer/fuzzer-execute.c:27:2\n#7 0",
@@ -24,54 +24,58 @@
   "analyzed_vuln": {
     "function": "spl_fixedarray_object_get_properties",
     "file": "php-src/ext/spl/spl_fixedarray.c",
-    "description": "Heap OOB read during GC is caused by integer truncation in SplFixedArray GC metadata. spl_fixedarray_object_get_gc() stores intern->array.size into an int (*n = (int)intern->array.size). For very large SplFixedArray sizes (e.g. 010001000 octal => 2^24), this can overflow to a negative len. gc_mark_grey() then uses uint32_t n = len, turning that negative value into a huge unsigned count and iterating far past the valid zval table, triggering zval_get_type() OOB reads. The crashing site is zend_gc.c:gc_mark_grey/zend_types.h:zval_get_type, but root cause is the bad size contract from SplFixedArray handlers.",
-    "conditions": "PoV creates a very large SplFixedArray and calls var_dump(), which invokes object property/debug traversal and later GC at request shutdown. Data flow: script -> SplFixedArray(size) in ext/spl -> get_gc() returns table pointer + truncated int len -> zend_gc_collect_cycles()->gc_mark_grey() trusts len and scans zvals with unsigned loop bound. Trigger requires size large enough that (int)size becomes negative (or otherwise invalid), causing massive out-of-bounds traversal."
+    "description": "Root cause is stale HashTable pointer use after duplicating properties table. In spl_fixedarray_object_get_properties(), when GC_REFCOUNT(ht) > 1 it does `intern->std.properties = zend_array_dup(ht); GC_TRY_DELREF(ht);` but continues to use the old local `ht` variable for subsequent `zend_hash_index_update()`/deletions/conversion. The updates are applied to the old table while `intern->std.properties` points to a different duplicated table, leaving inconsistent object property state. During later GC root marking, GC walks corrupted/inconsistent zvals and zval_get_type reads out of bounds (heap-buffer-overflow).",
+    "conditions": "Trigger requires calling SplFixedArray property materialization (e.g., via var_dump/debug info path) on a large SplFixedArray so get_properties rebuilds entries, while the std properties HashTable has refcount > 1 (as happens during these internal inspection/GC interactions). PoC `new SplFixedArray(010001000); ... var_dump($c);` causes huge index updates in spl_fixedarray_object_get_properties, enters the refcount>1 duplication branch, then uses stale `ht`; shutdown GC (`zend_gc_collect_cycles`) later traverses resulting invalid state and crashes in `gc_mark_grey`/`zval_get_type`."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.02501765,
-      "total_input_tokens": 15835,
-      "total_output_tokens": 398,
-      "total_cached_tokens": 5248,
+      "total_cost": 0.020780550000000002,
+      "total_input_tokens": 12977,
+      "total_output_tokens": 467,
+      "total_cached_tokens": 5376,
       "llm_calls": [
         {
-          "timestamp": 1773417908.4150534,
+          "timestamp": 1774856558.448404,
           "model": "gpt-5.3-codex",
-          "cost": 0.006746599999999999,
-          "input_tokens": 4068,
-          "output_tokens": 103,
-          "total_tokens": 4171,
+          "cost": 0.0076706,
+          "input_tokens": 4156,
+          "output_tokens": 158,
+          "total_tokens": 4314,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 4,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_RYAd8FpnERhvKWHKwxMzQEkG"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_7xFBisLN9OUgIXK6sI2NFNEl"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_nArXuI36cmpgAJKVEGQaogrB"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_qSDYu2FpvBDtL6SV1cxYa4P4"
+              "tool_call_id": "call_bqc2RVR3EB4OVBydkNW2y8p6"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_DWthS6e8LHv2EXAiEI77T6x6"
+              "tool_call_id": "call_LX2dotxbgTDumlgvpn3s0DoD"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773417923.2960427,
+          "timestamp": 1774856843.8709593,
           "model": "gpt-5.3-codex",
-          "cost": 0.01827105,
-          "input_tokens": 11767,
-          "output_tokens": 295,
-          "total_tokens": 12062,
-          "cached_tokens": 4096,
+          "cost": 0.01310995,
+          "input_tokens": 8821,
+          "output_tokens": 309,
+          "total_tokens": 9130,
+          "cached_tokens": 4224,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,7 +84,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_XUHYnwATdn0dwqCCwDGwBxaH"
+              "tool_call_id": "call_USIZFIlOghHt6mtMQmrcgT3h"
             }
           ],
           "finish_reason": "tool_calls"
@@ -89,44 +93,40 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.0162673,
-      "total_input_tokens": 24086,
-      "total_output_tokens": 340,
-      "total_cached_tokens": 19456,
+      "total_cost": 0.018326,
+      "total_input_tokens": 29024,
+      "total_output_tokens": 273,
+      "total_cached_tokens": 23040,
       "llm_calls": [
         {
-          "timestamp": 1773417926.1478834,
+          "timestamp": 1774856845.5043128,
           "model": "gpt-5.3-codex",
-          "cost": 0.0045542,
-          "input_tokens": 4060,
-          "output_tokens": 77,
-          "total_tokens": 4137,
+          "cost": 0.0062657,
+          "input_tokens": 5390,
+          "output_tokens": 33,
+          "total_tokens": 5423,
           "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
+          "tool_call_count": 1,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_QM3aF48SMoJ1FnWX7ffTTPWk"
-            },
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_FaPIfdEdqvaxjv6IqaQye9kO"
+              "tool_call_id": "call_m5vRU1gY7SqQAHKokVWKs5Vr"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773418105.36374,
+          "timestamp": 1774856848.9051244,
           "model": "gpt-5.3-codex",
-          "cost": 0.00816865,
-          "input_tokens": 6431,
-          "output_tokens": 226,
-          "total_tokens": 6657,
-          "cached_tokens": 3968,
+          "cost": 0.00796215,
+          "input_tokens": 7649,
+          "output_tokens": 203,
+          "total_tokens": 7852,
+          "cached_tokens": 5248,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,19 +135,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_jB7YtKruQCWUrKY4ASVZG3Um"
+              "tool_call_id": "call_SrBt4Sm2SD4vY86hMK3zQmXo"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773418106.8946104,
+          "timestamp": 1774856850.2630816,
           "model": "gpt-5.3-codex",
-          "cost": 0.0017181499999999999,
-          "input_tokens": 6745,
+          "cost": 0.001995,
+          "input_tokens": 7940,
           "output_tokens": 14,
-          "total_tokens": 6759,
-          "cached_tokens": 6528,
+          "total_tokens": 7954,
+          "cached_tokens": 7680,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -156,19 +156,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_n528cr1HU2VM4e00pU3uHMtY"
+              "tool_call_id": "call_gC7w99Z3034PfKxwLKzWnI1R"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773418256.7143219,
+          "timestamp": 1774857132.205985,
           "model": "gpt-5.3-codex",
-          "cost": 0.0018262999999999999,
-          "input_tokens": 6850,
+          "cost": 0.00210315,
+          "input_tokens": 8045,
           "output_tokens": 23,
-          "total_tokens": 6873,
-          "cached_tokens": 6656,
+          "total_tokens": 8068,
+          "cached_tokens": 7808,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -177,7 +177,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_2DNKGxHlpynNKU46X66LG2zn"
+              "tool_call_id": "call_T6GizzgA1zIxBVudaSdVuzJG"
             }
           ],
           "finish_reason": "tool_calls"
@@ -185,15 +185,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.04128495,
-      "total_input_tokens": 39921,
-      "total_output_tokens": 738,
+      "total_cost": 0.039106550000000004,
+      "total_input_tokens": 42001,
+      "total_output_tokens": 740,
       "total_llm_calls": 6
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/ext/spl/spl_fixedarray.c\n+++ b/ext/spl/spl_fixedarray.c\n@@ -211,7 +211,16 @@\n \tHashTable *ht = zend_std_get_properties(obj);\n \n \t*table = intern->array.elements;\n-\t*n = (int)intern->array.size;\n+\tif (UNEXPECTED(intern->array.size > INT_MAX)) {\n+\t\t/*\n+\t\t * get_gc() reports the element count via int*. Prevent truncation of very\n+\t\t * large SplFixedArray sizes, which could become negative and later be\n+\t\t * interpreted as a huge unsigned count by GC.\n+\t\t */\n+\t\t*n = 0;\n+\t} else {\n+\t\t*n = (int) intern->array.size;\n+\t}\n \n \treturn ht;\n }\n",
+    "patch": "--- a/ext/spl/spl_fixedarray.c\n+++ b/ext/spl/spl_fixedarray.c\n@@ -243,6 +243,7 @@\n \t\tif (GC_REFCOUNT(ht) > 1) {\n \t\t\tintern->std.properties = zend_array_dup(ht);\n \t\t\tGC_TRY_DELREF(ht);\n+\t\t\tht = intern->std.properties;\n \t\t}\n \t\tfor (zend_long i = 0; i < intern->array.size; i++) {\n \t\t\tzend_hash_index_update(ht, i, &intern->array.elements[i]);\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -216,34 +216,21 @@
           220
         ],
         "kwargs": {},
-        "timestamp": 450215.038692163,
+        "timestamp": 1889134.080861001,
         "success": true,
         "result_summary": "Ok({'contents': '121 \\t\\tspl_fixedarray_init_non_empty_struct(array, size);\\n122 \\t\\tspl_fixedarray_init_elems(array, 0, size);\\n123 \\t} else {\\n124 \\t\\tspl_fixedarray_default_ctor(array);\\n125 \\t}\\n1..."
       }
     ],
-    "find_references": [
-      {
-        "tool_name": "find_references",
-        "args": [
-          "spl_fixedarray_object_get_gc",
-          "",
-          false
-        ],
-        "kwargs": {},
-        "timestamp": 450389.701708333,
-        "success": true,
-        "result_summary": "Ok([FileReferences(file_name='php-src/ext/spl/spl_fixedarray.c', refs=[FileReference(line=982, content='\\tspl_handler_SplFixedArray.get_gc          = spl_fixedarray_object_get_gc;', enclosing_definiti..."
-      }
-    ],
+    "find_references": [],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "php-src/ext/spl/spl_fixedarray.c",
-          "@@ -211,7 +211,14 @@ static HashTable* spl_fixedarray_object_get_gc(zend_object *obj, zval **table,\n \tHashTable *ht = zend_std_get_properties(obj);\n \n \t*table = intern->array.elements;\n-\t*n = (int)intern->array.size;\n+\tif (UNEXPECTED(intern->array.size > INT_MAX)) {\n+\t\t/*\n+\t\t * get_gc() reports the element count via int*. Prevent truncation of very\n+\t\t * large SplFixedArray sizes, which could become negative and later be\n+\t\t * interpreted as a huge unsigned count by GC.\n+\t\t */\n+\t\t*n = 0;\n+\t} else {\n+\t\t*n = (int) intern->array.size;\n+\t}\n \n \treturn ht;\n }\n"
+          "@@ -240,10 +240,11 @@ static HashTable* spl_fixedarray_object_get_properties(zend_object *obj)\n \n \t\tzend_long j = zend_hash_num_elements(ht);\n \n \t\tif (GC_REFCOUNT(ht) > 1) {\n \t\t\tintern->std.properties = zend_array_dup(ht);\n \t\t\tGC_TRY_DELREF(ht);\n+\t\t\tht = intern->std.properties;\n \t\t}\n \t\tfor (zend_long i = 0; i < intern->array.size; i++) {\n \t\t\tzend_hash_index_update(ht, i, &intern->array.elements[i]);\n \t\t\tZ_TRY_ADDREF(intern->array.elements[i]);\n \t\t}\n"
         ],
         "kwargs": {},
-        "timestamp": 450393.974927291,
+        "timestamp": 1889137.666878477,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -253,7 +240,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 450541.908677461,
+        "timestamp": 1889419.21054945,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

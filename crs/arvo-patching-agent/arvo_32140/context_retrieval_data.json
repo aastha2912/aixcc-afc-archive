@@ -1,77 +1,67 @@
 {
   "source_questions": [],
-  "read_definition": [],
+  "read_definition": [
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "get_coffset",
+        "c-blosc2/blosc/frame.c",
+        1711,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1875566.478672998,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1701 int get_coffset(blosc2_frame_s* frame, int32_t header_len, int64_t cbytes, int32_t nchunk, int64_t *off..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "get_coffset",
+        "c-blosc2/blosc/frame.c",
+        1701,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1875572.569763879,
+      "success": true,
+      "result_summary": "Ok({'contents': '1701 int get_coffset(blosc2_frame_s* frame, int32_t header_len, int64_t cbytes, int32_t nchunk, int64_t *offset) {\\n1702   int32_t off_cbytes;\\n1703   // Get the offset to nchunk\\n170..."
+    }
+  ],
   "read_source": [
     {
       "tool_name": "read_source",
       "args": [
         "c-blosc2/blosc/frame.c",
-        1711
+        2814
       ],
       "kwargs": {},
-      "timestamp": 426422.279368332,
+      "timestamp": 1875516.638903407,
       "success": true,
-      "result_summary": "Ok({'contents': '1612         }\\n1613         free(offsets);\\n1614         blosc2_schunk_free(schunk);\\n1615         return NULL;\\n1616       }\\n1617       rc = blosc2_cbuffer_sizes(data_chunk, NULL, ..."
+      "result_summary": "Ok({'contents': '2715     free(offsets);\\n2716     BLOSC_TRACE_ERROR(\"Cannot decompress the offsets chunk.\");\\n2717     return prev_nbytes;\\n2718   }\\n2719 \\n2720   // Make a copy of the chunk offsets..."
     },
     {
       "tool_name": "read_source",
       "args": [
-        "c-blosc2/blosc/blosc2.c",
-        3199
-      ],
-      "kwargs": {},
-      "timestamp": 426454.105956912,
-      "success": true,
-      "result_summary": "Ok({'contents': '3100 #if defined(HAVE_ZSTD)\\n3101   strcat(ret, \",\");\\n3102   strcat(ret, BLOSC_ZSTD_COMPNAME);\\n3103 #endif /* HAVE_ZSTD */\\n3104   compressors_list_done = 1;\\n3105   return ret;\\n31..."
-    }
-  ],
-  "find_references": [
-    {
-      "tool_name": "find_references",
-      "args": [
-        "get_coffset",
         "c-blosc2/blosc/frame.c",
-        false
+        1912
       ],
       "kwargs": {},
-      "timestamp": 426435.853113913,
+      "timestamp": 1875516.642064729,
       "success": true,
-      "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/frame.c', refs=[FileReference(line=1811, content='  rc = get_coffset(frame, header_len, cbytes, nchunk, &offset);', enclosing_definition='frame_get_chunk')..."
-    },
-    {
-      "tool_name": "find_references",
-      "args": [
-        "blosc2_cbuffer_validate",
-        "c-blosc2/blosc",
-        false
-      ],
-      "kwargs": {},
-      "timestamp": 426445.436973667,
-      "success": true,
-      "result_summary": "Err(CRSError(no results found, extra=None))"
-    },
-    {
-      "tool_name": "find_references",
-      "args": [
-        "cbuffer_validate",
-        "c-blosc2/blosc",
-        false
-      ],
-      "kwargs": {},
-      "timestamp": 426450.356278983,
-      "success": true,
-      "result_summary": "Ok([FileReferences(file_name='/src/c-blosc2/blosc/blosc2.h', refs=[FileReference(line=610, content='BLOSC_EXPORT int blosc_cbuffer_validate(const void* cbuffer, size_t cbytes,', enclosing_definition='..."
+      "result_summary": "Ok({'contents': '1813     BLOSC_TRACE_ERROR(\"Unable to get offset to chunk %d.\", nchunk);\\n1814     return rc;\\n1815   }\\n1816 \\n1817   if (offset < 0) {\\n1818     // Special value\\n1819     chunk_cby..."
     }
   ],
+  "find_references": [],
   "apply_patch": [
     {
       "tool_name": "apply_patch",
       "args": [
         "c-blosc2/blosc/frame.c",
-        "@@ -1708,6 +1708,14 @@ int get_coffset(blosc2_frame_s* frame, int32_t header_len, int64_t cbytes, int3\n   }\n \n   // Get the 64-bit offset\n+  size_t offsets_nbytes;\n+  rc = blosc_cbuffer_validate(coffsets, (size_t)off_cbytes, &offsets_nbytes);\n+  if (rc < 0) {\n+    BLOSC_TRACE_ERROR(\"Invalid offsets chunk in frame.\");\n+    return rc;\n+  }\n+\n+  int64_t expected_nbytes = (int64_t)(nchunk + 1) * (int64_t)sizeof(int64_t);\n+  if ((int64_t)offsets_nbytes < expected_nbytes) {\n+    BLOSC_TRACE_ERROR(\"Offsets chunk is too small for chunk index %d.\", nchunk);\n+    return BLOSC2_ERROR_DATA;\n+  }\n   int rc = blosc2_getitem(coffsets, off_cbytes, nchunk, 1, offset, (int32_t)sizeof(int64_t));\n   if (rc < 0) {\n     BLOSC_TRACE_ERROR(\"Problems retrieving a chunk offset.\");\n"
+        "@@ -1708,11 +1708,15 @@ int get_coffset(blosc2_frame_s* frame, int32_t header_len, int64_t cbytes, int3\n \n   // Get the 64-bit offset\n   int rc = blosc2_getitem(coffsets, off_cbytes, nchunk, 1, offset, (int32_t)sizeof(int64_t));\n-  if (rc < 0) {\n+  if (rc < 0) {\n     BLOSC_TRACE_ERROR(\"Problems retrieving a chunk offset.\");\n+  } else if (rc != (int)sizeof(int64_t)) {\n+    BLOSC_TRACE_ERROR(\"Invalid size retrieving a chunk offset (%d bytes).\", rc);\n+    rc = BLOSC2_ERROR_DATA;\n   } else if (*offset > frame->len) {\n     BLOSC_TRACE_ERROR(\"Cannot read chunk %d outside of frame boundary.\", nchunk);\n     rc = BLOSC2_ERROR_READ_BUFFER;\n+  } else if (*offset < 0 && *offset < -9) {\n+    rc = BLOSC2_ERROR_DATA;\n   }\n \n   return rc;\n"
       ],
       "kwargs": {},
-      "timestamp": 426459.062050387,
+      "timestamp": 1875576.541644469,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
@@ -81,7 +71,7 @@
       "tool_name": "test_patch",
       "args": [],
       "kwargs": {},
-      "timestamp": 426498.635615999,
+      "timestamp": 1875650.654491942,
       "success": true,
       "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
     }

@@ -1,5 +1,5 @@
 {
-  "vuln_id": 250,
+  "vuln_id": 417,
   "crash_result": {
     "output": "AddressSanitizer:DEADLYSIGNAL\n=================================================================\n==72696==ERROR: AddressSanitizer: SEGV on unknown address 0x7de49c725b30 (pc 0x000000a38b07 bp 0x7fff38dd4a70 sp 0x7fff38dd49a0 T0)\n==72696==The signal is caused by a READ memory access.\nSCARINESS: 20 (wild-addr-read)\n    #0 0xa38b07 in sp_256_proj_point_add_5 /src/wolfssl-sp-math/wolfcrypt/src/sp_c64.c\n    #1 0xa3c2e9 in sp_ecc_proj_add_point_256 /src/wolfssl-sp-math/wolfcrypt/src/sp_c64.c:18930:13\n ",
     "stack": "#0 0xa38b07 in sp_256_proj_point_add_5 wolfssl-sp-math/wolfcrypt/src/sp_c64.c\n#1 0xa3c2e9 in sp_ecc_proj_add_point_256 wolfssl-sp-math/wolfcrypt/src/sp_c64.c:18930:13\n#2 0x9be9aa in ecc_projective_add_point wolfssl-sp-math/wolfcrypt/src/ecc.c:1943:16\n#3 0x91f925 in cryptofuzz::module::wolfCrypt_detail::OpECC_Point_Add(cryptofuzz::operation::ECC_Point_Add&) cryptofuzz-sp-math/modules/wolfcrypt/ecdsa_generic.cpp:810:21\n#4 0x8e635b in cryptofuzz::module::wolfCrypt::OpECC_Point_Add(cryptofuzz::opera",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "sp_ecc_proj_add_point_256",
     "file": "wolfssl-sp-math/wolfcrypt/src/sp_c64.c",
-    "description": "The crash is caused by calling the low-level SP ECC add routine with overlapping input/output point storage: `sp_ecc_proj_add_point_256` invokes `sp_256_proj_point_add_5(p, p, q, tmp)` (same `p` used as both destination and first source). `sp_256_proj_point_add_5` does not safely support this aliasing pattern and performs reads from corrupted/intermediate state, leading to a wild read/SEGV.",
-    "conditions": "From the cryptofuzz harness, `OpECC_Point_Add` calls `ecc_projective_add_point` in the non-safe path (`safe == false`). With SP math enabled and 256-bit modulus, this dispatches into `sp_ecc_proj_add_point_256`, which always uses in-place aliasing (`r == p`). A crafted input that reaches this path (as in the provided PoV) triggers invalid memory access inside `sp_256_proj_point_add_5` during projective point addition."
+    "description": "In the SP-math public ECC add wrapper, `sp_ecc_proj_add_point_256` unconditionally calls `sp_256_proj_point_add_5(p, p, q, tmp)` after converting `mp_int` inputs, but does not validate that the imported projective points are well-formed/finite before entering the low-level routine. With attacker-controlled `mp_int` values (from fuzzed ECC point add inputs), this allows invalid internal state to reach `sp_256_proj_point_add_5`, which performs reads based on those assumptions and crashes with a wild read (ASan SEGV).",
+    "conditions": "Trigger path: cryptofuzz ECC_Point_Add -> `ecc_projective_add_point` (SP_MATH 256-bit path) -> `sp_ecc_proj_add_point_256` -> `sp_256_proj_point_add_5`. Input must select a 256-bit curve and provide malformed/unchecked point coordinates (and/or projective Z state) that pass harness setup but are not sanitized before SP add. The vulnerable condition is using non-safe projective add on untrusted points without pre-validation in `sp_ecc_proj_add_point_256`."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 4,
-      "total_cost": 0.03368295,
-      "total_input_tokens": 35465,
-      "total_output_tokens": 464,
-      "total_cached_tokens": 22144,
+      "total_llm_calls": 2,
+      "total_cost": 0.026852699999999997,
+      "total_input_tokens": 14202,
+      "total_output_tokens": 402,
+      "total_cached_tokens": 2304,
       "llm_calls": [
         {
-          "timestamp": 1773626939.6685157,
+          "timestamp": 1774844432.5858421,
           "model": "gpt-5.3-codex",
-          "cost": 0.00599235,
-          "input_tokens": 3509,
+          "cost": 0.006146349999999999,
+          "input_tokens": 3597,
           "output_tokens": 119,
-          "total_tokens": 3628,
+          "total_tokens": 3716,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,69 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_t76Jk1PRwMGDwsU7NFOFMF09"
+              "tool_call_id": "call_pp3xAXpgwRwmkZgb60f9WZti"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_az12KjJ9ZDefF62oDy1aJIoH"
+              "tool_call_id": "call_M4cmHfgGvH0S3PLjyVNllelD"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_wxTmxVr45PAzMyeSDNF2cPSB"
+              "tool_call_id": "call_RtNhp19ePduYkwYY6eSZapIe"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773627668.0072818,
+          "timestamp": 1774845332.4876332,
           "model": "gpt-5.3-codex",
-          "cost": 0.01911875,
-          "input_tokens": 10517,
-          "output_tokens": 51,
-          "total_tokens": 10568,
-          "cached_tokens": 0,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_f3M7nv8kgTqTNGcigXDBtMta"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773627709.5153167,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00271005,
-          "input_tokens": 10611,
-          "output_tokens": 48,
-          "total_tokens": 10659,
-          "cached_tokens": 10496,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_dWsFhc7QKKyJq4vpZLqewgFO"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773627743.9084976,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0058618,
-          "input_tokens": 10828,
-          "output_tokens": 246,
-          "total_tokens": 11074,
-          "cached_tokens": 10496,
+          "cost": 0.02070635,
+          "input_tokens": 10605,
+          "output_tokens": 283,
+          "total_tokens": 10888,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -122,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_yhendZ2kikKrmxK3LqdOH6my"
+              "tool_call_id": "call_pEAGzOHXk4xvizIDfgx6VTP2"
             }
           ],
           "finish_reason": "tool_calls"
@@ -130,175 +88,95 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 9,
-      "total_cost": 0.0459284,
-      "total_input_tokens": 53856,
-      "total_output_tokens": 739,
-      "total_cached_tokens": 37248,
+      "total_llm_calls": 5,
+      "total_cost": 0.06413084999999999,
+      "total_input_tokens": 49667,
+      "total_output_tokens": 662,
+      "total_cached_tokens": 20352,
       "llm_calls": [
         {
-          "timestamp": 1773627746.0145826,
+          "timestamp": 1774845334.2246141,
           "model": "gpt-5.3-codex",
-          "cost": 0.008099,
-          "input_tokens": 3708,
-          "output_tokens": 115,
-          "total_tokens": 3823,
+          "cost": 0.0068782,
+          "input_tokens": 4700,
+          "output_tokens": 91,
+          "total_tokens": 4791,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_6TLIvoOZ2QQO3KVguaysDY4E"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_7pOcWYMBTDvhgItfK1M51Kyh"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774845358.4254005,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0075806499999999995,
+          "input_tokens": 7399,
+          "output_tokens": 135,
+          "total_tokens": 7534,
+          "cached_tokens": 4608,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_jtJlOwA5SP7DW7SFV2UvtK1F"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_VLvD62DUH5lkqNjw2zVDDRpU"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_s7k810f407CFxibtAGPLFcAy"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774870135.8778045,
+          "model": "gpt-5.3-codex",
+          "cost": 0.02687125,
+          "input_tokens": 12163,
+          "output_tokens": 399,
+          "total_tokens": 12562,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_wTy29xWBro84Vg6IdhdvJwgq"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_Vb8tak68kKzkwbHraNjW3K7W"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773627808.0337892,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00259385,
-          "input_tokens": 3959,
-          "output_tokens": 108,
-          "total_tokens": 4067,
-          "cached_tokens": 3712,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_ynqWSVNSBku9mGOPxl8TK5eu"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_rM9RblclzXYXpq5AG4JeBsBU"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773627870.3197875,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00242165,
-          "input_tokens": 4403,
-          "output_tokens": 69,
-          "total_tokens": 4472,
-          "cached_tokens": 3968,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_ejhjuBhPq6ioREYzen9QM5Di"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773627901.2939584,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00161385,
-          "input_tokens": 4567,
-          "output_tokens": 34,
-          "total_tokens": 4601,
-          "cached_tokens": 4352,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_QktMK2QLRS3h34mr2B8OmJon"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773628053.7600164,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0026127499999999996,
-          "input_tokens": 5093,
-          "output_tokens": 54,
-          "total_tokens": 5147,
-          "cached_tokens": 4480,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_pXjYWrlpukI7GU5ChZh57R58"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773628066.0800464,
-          "model": "gpt-5.3-codex",
-          "cost": 0.008010100000000001,
-          "input_tokens": 7702,
-          "output_tokens": 171,
-          "total_tokens": 7873,
-          "cached_tokens": 4992,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
           "tool_call_count": 1,
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_Y0uWs519au8Ow2pvKAcofpK5"
+              "tool_call_id": "call_3TwBq4YQnpwp7nvqCJfiZfue"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773628070.608447,
+          "timestamp": 1774870143.580344,
           "model": "gpt-5.3-codex",
-          "cost": 0.0037236500000000002,
-          "input_tokens": 7947,
-          "output_tokens": 151,
-          "total_tokens": 8098,
-          "cached_tokens": 7808,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_h7PxFsEe0zAmpkNuAjmoBsbF"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773628072.1865308,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0020223,
-          "input_tokens": 8186,
+          "cost": 0.0027783,
+          "input_tokens": 12650,
           "output_tokens": 14,
-          "total_tokens": 8200,
-          "cached_tokens": 7936,
+          "total_tokens": 12664,
+          "cached_tokens": 12416,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -307,19 +185,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_JyUm50CudgOLL6lLJVWbmvFw"
+              "tool_call_id": "call_X8ceevSN2PbKSSCjkW6dBqts"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773628770.206877,
+          "timestamp": 1774871029.1294923,
           "model": "gpt-5.3-codex",
-          "cost": 0.014831249999999999,
-          "input_tokens": 8291,
+          "cost": 0.020022449999999997,
+          "input_tokens": 12755,
           "output_tokens": 23,
-          "total_tokens": 8314,
-          "cached_tokens": 0,
+          "total_tokens": 12778,
+          "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -328,7 +206,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_X6OuM82QZmsAZyDH5x1twDG2"
+              "tool_call_id": "call_cwpeFEIyOV9Kkrvth1HAUq6r"
             }
           ],
           "finish_reason": "tool_calls"
@@ -336,15 +214,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.07961135,
-      "total_input_tokens": 89321,
-      "total_output_tokens": 1203,
-      "total_llm_calls": 13
+      "total_cost": 0.09098354999999998,
+      "total_input_tokens": 63869,
+      "total_output_tokens": 1064,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/wolfcrypt/src/sp_c64.c\n+++ b/wolfcrypt/src/sp_c64.c\n@@ -18927,7 +18927,7 @@\n         sp_256_from_mp(q->y, 5, qY);\n         sp_256_from_mp(q->z, 5, qZ);\n \n-            sp_256_proj_point_add_5(p, p, q, tmp);\n+            sp_256_proj_point_add_5(p, q, p, tmp);\n     }\n \n     if (err == MP_OKAY) {\n",
+    "patch": "--- a/wolfcrypt/src/sp_c64.c\n+++ b/wolfcrypt/src/sp_c64.c\n@@ -18927,6 +18927,22 @@\n         sp_256_from_mp(q->y, 5, qY);\n         sp_256_from_mp(q->z, 5, qZ);\n \n+        if ((sp_256_cmp_5(p->x, p256_mod) >= 0) ||\n+            (sp_256_cmp_5(p->y, p256_mod) >= 0) ||\n+            (sp_256_cmp_5(p->z, p256_mod) >= 0) ||\n+            (sp_256_cmp_5(q->x, p256_mod) >= 0) ||\n+            (sp_256_cmp_5(q->y, p256_mod) >= 0) ||\n+            (sp_256_cmp_5(q->z, p256_mod) >= 0)) {\n+            err = ECC_OUT_OF_RANGE_E;\n+        }\n+\n+        if ((err == MP_OKAY) &&\n+            ((sp_256_iszero_5(p->z) != 0) || (sp_256_iszero_5(q->z) != 0))) {\n+            /* Infinity points are not supported by this low-level add routine. */\n+            err = ECC_INF_E;\n+        }\n+\n+        if (err == MP_OKAY)\n             sp_256_proj_point_add_5(p, p, q, tmp);\n     }\n \n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -358,82 +236,16 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "sp_256_proj_point_add_5",
-          "wolfssl-sp-math/wolfcrypt/src/sp_c64.c",
-          0,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 660064.894905795,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: wolfssl/wolfcrypt/src/sp_c64.c, extra=None))"
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "sp_ecc_proj_add_point_256",
-          "wolfssl-sp-math/wolfcrypt/src/sp_c64.c",
-          18930,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 660094.410370951,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: wolfssl/wolfcrypt/src/sp_x86_64.c, wolfssl/wolfcrypt/src/sp_arm64.c, wolfssl/wolfcrypt/src/sp_arm32.c, wolfssl/wo..."
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "sp_ecc_proj_add_point_256",
-          "wolfssl/wolfcrypt/src/sp_c64.c",
-          0,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 660126.924137336,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n18890 ERROR reading contents: path 'wolfssl/wolfcrypt/src/sp_c64.c' does not exist in directory tree. Simila..."
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "sp_256_proj_point_add_5",
-          "wolfssl/wolfcrypt/src/sp_c64.c",
-          0,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 660156.914354393,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n14060 ERROR reading contents: path 'wolfssl/wolfcrypt/src/sp_c64.c' does not exist in directory tree. Simila..."
-      },
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "sp_ecc_proj_add_point_256",
-          "wolf-ssl-ssh-fuzzers/oss-fuzz/projects/wolf-ssl-ssh/wolfssl/wolfcrypt/src/sp_c64.c",
-          18890,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 660188.496589187,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: wolfssl/wolfcrypt/src/sp_x86_64.c, wolfssl/wolfcrypt/src/sp_arm64.c, wolfssl/wolfcrypt/src/sp_arm32.c, wolfssl/wo..."
-      }
-    ],
+    "read_definition": [],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
-          "wolf-ssl-ssh-fuzzers/oss-fuzz/projects/wolf-ssl-ssh/wolfssl/wolfcrypt/src/sp_c64.c",
+          "wolfssl/wolfcrypt/src/sp_c64.c",
           18930
         ],
         "kwargs": {},
-        "timestamp": 660348.454080628,
+        "timestamp": 1877623.048887872,
         "success": true,
         "result_summary": "Ok({'contents': \"18831     if ((err == MP_OKAY) &&\\n18832             ((sp_256_cmp_5(pub->x, p256_mod) >= 0) ||\\n18833              (sp_256_cmp_5(pub->y, p256_mod) >= 0))) {\\n18834         err = ECC_O..."
       }
@@ -443,35 +255,60 @@
         "tool_name": "find_references",
         "args": [
           "sp_ecc_proj_add_point_256",
-          "",
+          "wolfssl/wolfcrypt/src/sp_c64.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 660340.743179755,
+        "timestamp": 1877644.827854613,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='wolfssl/wolfcrypt/src/ecc.c', refs=[FileReference(line=1943, content=\"ERROR reading contents: path 'wolfssl/wolfcrypt/src/ecc.c' does not exist in directory tree. Similar..."
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: wolfssl/wolfcrypt/src/ecc.c, wolfssl/wolfssl/wolfcrypt/sp.h, extra=None))"
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "sp_256_iszero_5",
+          "wolfssl/wolfcrypt/src/sp_c64.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1880134.21364584,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='wolfssl/wolfcrypt/src/sp_c64.c', refs=[FileReference(line=17274, content=\"ERROR reading contents: path 'wolfssl/wolfcrypt/src/sp_c64.c' does not exist in directory tree. ..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "sp_256_cmp_5",
+          "wolfssl/wolfcrypt/src/sp_c64.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1881154.45232318,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='wolfssl/wolfcrypt/src/sp_c64.c', refs=[FileReference(line=13492, content=\"ERROR reading contents: path 'wolfssl/wolfcrypt/src/sp_c64.c' does not exist in directory tree. ..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "p256_mod",
+          "wolfssl/wolfcrypt/src/sp_c64.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1902417.234999611,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='wolfssl/wolfcrypt/src/sp_c64.c', refs=[FileReference(line=12662, content=\"ERROR reading contents: path 'wolfssl/wolfcrypt/src/sp_c64.c' does not exist in directory tree. ..."
       }
     ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
-          "wolf-ssl-ssh-fuzzers/oss-fuzz/projects/wolf-ssl-ssh/wolfssl/wolfcrypt/src/sp_c64.c",
-          "@@ -18926,8 +18926,8 @@\n         sp_256_from_mp(q->x, 5, qX);\n         sp_256_from_mp(q->y, 5, qY);\n         sp_256_from_mp(q->z, 5, qZ);\n \n-            sp_256_proj_point_add_5(p, p, q, tmp);\n+            sp_256_proj_point_add_5(p, q, p, tmp);\n     }\n \n     if (err == MP_OKAY) {\n"
-        ],
-        "kwargs": {},
-        "timestamp": 660354.86309984,
-        "success": true,
-        "result_summary": "Err(CRSError(patch did NOT apply successfully: path 'sp_c64.c' does not exist in directory tree. Similar paths: wolfssl/wolfcrypt/src/sp_c64.c, extra={'note': 'this patch was not applied and does not ..."
-      },
-      {
-        "tool_name": "apply_patch",
-        "args": [
           "wolfssl/wolfcrypt/src/sp_c64.c",
-          "@@ -18926,8 +18926,8 @@\n         sp_256_from_mp(q->x, 5, qX);\n         sp_256_from_mp(q->y, 5, qY);\n         sp_256_from_mp(q->z, 5, qZ);\n \n-            sp_256_proj_point_add_5(p, p, q, tmp);\n+            sp_256_proj_point_add_5(p, q, p, tmp);\n     }\n \n     if (err == MP_OKAY) {\n"
+          "@@ -18920,6 +18920,22 @@ int sp_ecc_proj_add_point_256(mp_int* pX, mp_int* pY, mp_int* pZ,\n         sp_256_from_mp(q->x, 5, qX);\n         sp_256_from_mp(q->y, 5, qY);\n         sp_256_from_mp(q->z, 5, qZ);\n+\n+        if ((sp_256_cmp_5(p->x, p256_mod) >= 0) ||\n+            (sp_256_cmp_5(p->y, p256_mod) >= 0) ||\n+            (sp_256_cmp_5(p->z, p256_mod) >= 0) ||\n+            (sp_256_cmp_5(q->x, p256_mod) >= 0) ||\n+            (sp_256_cmp_5(q->y, p256_mod) >= 0) ||\n+            (sp_256_cmp_5(q->z, p256_mod) >= 0)) {\n+            err = ECC_OUT_OF_RANGE_E;\n+        }\n+\n+        if ((err == MP_OKAY) &&\n+            ((sp_256_iszero_5(p->z) != 0) || (sp_256_iszero_5(q->z) != 0))) {\n+            /* Infinity points are not supported by this low-level add routine. */\n+            err = ECC_INF_E;\n+        }\n \n+        if (err == MP_OKAY)\n             sp_256_proj_point_add_5(p, p, q, tmp);\n     }\n"
         ],
         "kwargs": {},
-        "timestamp": 660359.347923942,
+        "timestamp": 1902424.79206489,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -481,7 +318,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 661057.278259602,
+        "timestamp": 1903314.665838852,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

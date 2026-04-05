@@ -1,5 +1,5 @@
 {
-  "vuln_id": 89,
+  "vuln_id": 394,
   "crash_result": {
     "output": "==77342==ERROR: AddressSanitizer: heap-use-after-free on address 0x6060000115b0 at pc 0x0000009cba52 bp 0x7ffd2fbbffb0 sp 0x7ffd2fbbffa8\nREAD of size 8 at 0x6060000115b0 thread T0\nSCARINESS: 51 (8-byte-read-heap-use-after-free)\n    #0 0x9cba51 in php_var_dump /src/php-src/ext/standard/var.c:149:27\n    #1 0x9cbc67 in php_array_element_dump /src/php-src/ext/standard/var.c:48:2\n    #2 0x9cb61a in php_var_dump /src/php-src/ext/standard/var.c:137:5\n    #3 0x9cc2bf in php_object_property_dump /src/php",
     "stack": "#0 0x9cba51 in php_var_dump php-src/ext/standard/var.c:149:27\n#1 0x9cbc67 in php_array_element_dump php-src/ext/standard/var.c:48:2\n#2 0x9cb61a in php_var_dump php-src/ext/standard/var.c:137:5\n#3 0x9cc2bf in php_object_property_dump php-src/ext/standard/var.c:83:3\n#4 0x9cb1a8 in php_var_dump php-src/ext/standard/var.c:183:7\n#5 0x9cc2bf in php_object_property_dump php-src/ext/standard/var.c:83:3\n#6 0x9cb1a8 in php_var_dump php-src/ext/standard/var.c:183:7\n#7 0x9cc5fc in zif_var_dump php-src/ext/s",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "php_var_dump",
     "file": "php-src/ext/standard/var.c",
-    "description": "`php_var_dump()` iterates an object\u2019s debug properties hash table (`myht`) and recursively dumps each property value. During this iteration, userland `__destruct()` re-enters `var_dump($this)` and then executes `unset($this->children)`, which destroys array elements and can free referenced child objects that are still being traversed by the outer `php_var_dump` call. The outer traversal then dereferences a stale/freed zval/object pointer (seen at `var.c:149` via `Z_OBJCE_P(struc)`), causing a heap-use-after-free.",
-    "conditions": "PoV creates cyclic object references via dynamic property assignment (`$node->\\xff = $this`) and stores children in `$this->children[]`. On shutdown, destructors run; inside `Node::__destruct`, calling `var_dump($this)` causes recursive property traversal, and `unset($this->children)` mutates/frees the same object graph during traversal. This re-entrancy + mutation of properties being dumped leads to UAF in `php_var_dump` when it continues recursion on freed child objects."
+    "description": "Use-after-free due to re-entrant destruction during object dumping. In php_var_dump(IS_OBJECT case), it obtains the object class entry and iterates properties from zend_get_properties_for(), then recursively dumps nested values. During this recursion, userland destructors can run (here via nested objects and unset in __destruct), freeing an object that is still being traversed. php_var_dump then continues using stale zval/object data (e.g., Z_OBJCE_P(struc) / property values) without pinning the dumped object/properties with a stable refcount across the whole dump, leading to UAF.",
+    "conditions": "Trigger requires var_dump() on an object graph where recursive dumping invokes userland code that mutates/frees related objects during shutdown/destructor reentrancy. In the PoC, Node::__destruct calls var_dump($this) and then unset($this->children); children contain other Node objects with back-references, so unsetting/dtor cascade frees an object while php_var_dump is still iterating/dereferencing it. The harness executes attacker-controlled PHP script, so crafted objects + __destruct side effects are sufficient."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 2,
-      "total_cost": 0.0313922,
-      "total_input_tokens": 22284,
-      "total_output_tokens": 364,
-      "total_cached_tokens": 8064,
+      "total_cost": 0.0316386,
+      "total_input_tokens": 21356,
+      "total_output_tokens": 368,
+      "total_cached_tokens": 6912,
       "llm_calls": [
         {
-          "timestamp": 1773389828.4412591,
+          "timestamp": 1774841532.3934693,
           "model": "gpt-5.3-codex",
-          "cost": 0.01164835,
-          "input_tokens": 6885,
-          "output_tokens": 101,
-          "total_tokens": 6986,
-          "cached_tokens": 1152,
+          "cost": 0.01363075,
+          "input_tokens": 6973,
+          "output_tokens": 102,
+          "total_tokens": 7075,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -51,26 +51,26 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_fTUolyFXU84YBUaEDqQn1cUq"
+              "tool_call_id": "call_qeUFBeRqWr6amiZmtQ2rEMXK"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Wug5NJ47JA4b2HCRCuKi4RQ4"
+              "tool_call_id": "call_llecOX1XrB7V91btvGTiAHYn"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Mll6tYEFfKTAuUpZDseyrmpW"
+              "tool_call_id": "call_yfEea0KEWMoRmMTMFqi6RpDl"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773389841.388419,
+          "timestamp": 1774841538.9165075,
           "model": "gpt-5.3-codex",
-          "cost": 0.01974385,
-          "input_tokens": 15399,
-          "output_tokens": 263,
-          "total_tokens": 15662,
+          "cost": 0.01800785,
+          "input_tokens": 14383,
+          "output_tokens": 266,
+          "total_tokens": 14649,
           "cached_tokens": 6912,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -80,7 +80,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Np0TbxQaj6eAeRJOsgnKtazb"
+              "tool_call_id": "call_mbzZpjfYU65tkCiH00QYydtd"
             }
           ],
           "finish_reason": "tool_calls"
@@ -88,19 +88,19 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 5,
-      "total_cost": 0.0371413,
-      "total_input_tokens": 56542,
-      "total_output_tokens": 510,
-      "total_cached_tokens": 43776,
+      "total_llm_calls": 3,
+      "total_cost": 0.033275200000000005,
+      "total_input_tokens": 36424,
+      "total_output_tokens": 531,
+      "total_cached_tokens": 24064,
       "llm_calls": [
         {
-          "timestamp": 1773389843.0195093,
+          "timestamp": 1774841540.6365209,
           "model": "gpt-5.3-codex",
-          "cost": 0.0081172,
-          "input_tokens": 5544,
+          "cost": 0.012989200000000001,
+          "input_tokens": 8328,
           "output_tokens": 74,
-          "total_tokens": 5618,
+          "total_tokens": 8402,
           "cached_tokens": 1664,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -110,23 +110,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_rHsSBOrS6PovPEq0gg8cIsUx"
+              "tool_call_id": "call_tpAv19tshQRRg7ivxZXDzNCX"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_bgBBahHJ8g8z03npDR1tWZmK"
+              "tool_call_id": "call_3mqNDiP8l1hNyi4v7L7vbX4r"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773389847.4574864,
+          "timestamp": 1774841545.779036,
           "model": "gpt-5.3-codex",
-          "cost": 0.0150822,
-          "input_tokens": 11044,
-          "output_tokens": 316,
-          "total_tokens": 11360,
-          "cached_tokens": 5504,
+          "cost": 0.016667,
+          "input_tokens": 13828,
+          "output_tokens": 398,
+          "total_tokens": 14226,
+          "cached_tokens": 8320,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -135,55 +135,18 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_JIKT2ik2uIHUgMRUNIwn9qe0"
+              "tool_call_id": "call_z7Kw49LB3FOTWhuIvd2taEiR"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773389852.6583893,
+          "timestamp": 1774841547.3126276,
           "model": "gpt-5.3-codex",
-          "cost": 0.0026466999999999997,
-          "input_tokens": 11402,
-          "output_tokens": 31,
-          "total_tokens": 11433,
-          "cached_tokens": 11264,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_oF8217QKeEZlncmWCz5SKS7v"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773389853.9669607,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00727895,
-          "input_tokens": 14265,
-          "output_tokens": 4,
-          "total_tokens": 14269,
-          "cached_tokens": 11264,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": false,
-          "tool_call_count": 0,
-          "tool_calls": null,
-          "finish_reason": "stop"
-        },
-        {
-          "timestamp": 1773389856.338279,
-          "model": "gpt-5.3-codex",
-          "cost": 0.004016250000000001,
-          "input_tokens": 14287,
-          "output_tokens": 85,
-          "total_tokens": 14372,
+          "cost": 0.003619,
+          "input_tokens": 14268,
+          "output_tokens": 59,
+          "total_tokens": 14327,
           "cached_tokens": 14080,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -193,7 +156,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_nD9m6Q3TE3izG6wJ11yxDZJF"
+              "tool_call_id": "call_xapaNdW0X4bfEOdx7Kp4aOyi"
             }
           ],
           "finish_reason": "tool_calls"
@@ -201,10 +164,10 @@
       ]
     },
     "total": {
-      "total_cost": 0.0685335,
-      "total_input_tokens": 78826,
-      "total_output_tokens": 874,
-      "total_llm_calls": 7
+      "total_cost": 0.06491380000000001,
+      "total_input_tokens": 57780,
+      "total_output_tokens": 899,
+      "total_llm_calls": 5
     }
   },
   "patch_result": {
@@ -222,7 +185,7 @@
           149
         ],
         "kwargs": {},
-        "timestamp": 422131.887966651,
+        "timestamp": 1873829.212750453,
         "success": true,
         "result_summary": "Ok({'contents': ' 50 /* }}} */\\n 51 \\n 52 static void php_object_property_dump(zend_property_info *prop_info, zval *zv, zend_ulong index, zend_string *key, int level) /* {{{ */\\n 53 {\\n 54 \\tconst cha..."
       },
@@ -233,20 +196,9 @@
           183
         ],
         "kwargs": {},
-        "timestamp": 422131.890074574,
+        "timestamp": 1873829.21378358,
         "success": true,
         "result_summary": "Ok({'contents': ' 84 \\t}\\n 85 }\\n 86 /* }}} */\\n 87 \\n 88 PHPAPI void php_var_dump(zval *struc, int level) /* {{{ */\\n 89 {\\n 90 \\tHashTable *myht;\\n 91 \\tzend_string *class_name;\\n 92 \\tint is_ref = ..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "php-src/ext/standard/var.c",
-          1
-        ],
-        "kwargs": {},
-        "timestamp": 422141.234067491,
-        "success": true,
-        "result_summary": "Ok({'contents': '  1 /*\\n  2    +----------------------------------------------------------------------+\\n  3    | Copyright (c) The PHP Group                                          |\\n  4    +-----..."
       }
     ],
     "find_references": [],

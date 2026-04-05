@@ -1,5 +1,5 @@
 {
-  "vuln_id": 218,
+  "vuln_id": 308,
   "crash_result": {
     "output": "UndefinedBehaviorSanitizer:DEADLYSIGNAL\n==705==ERROR: UndefinedBehaviorSanitizer: SEGV on unknown address 0x000008bfe8e0 (pc 0x000008bfe8e0 bp 0x7fff6b385260 sp 0x7fff6b385228 T705)\n==705==The signal is caused by a READ memory access.\n==705==Hint: PC is at a non-executable region. Maybe a wild jump?\nLLVMSymbolizer: error reading file: No such file or directory\n    #0 0x8bfe8df  ([heap]+0x348df)\n\nUndefinedBehaviorSanitizer can not provide additional info.\nSUMMARY: UndefinedBehaviorSanitizer: SEGV",
     "stack": "#0 0x8bfe8df  ([heap]+0x348df)",
@@ -22,266 +22,27 @@
     "dedup": "5a3718e27d6ac427731e3198a8f50ae1273c5e4e9d4ddce3bb2ba19088796c7e"
   },
   "analyzed_vuln": {
-    "function": "createDummyConnection",
-    "file": "open62541/tests/testing-plugins/testing_networklayers.c",
-    "description": "The crash is caused by returning a partially initialized UA_Connection from createDummyConnection: the struct field `free` is never set. The PoV drives error handling in UA_Server_processBinaryMessage (open62541/src/server/ua_server_binary.c), which closes the connection and later cleanup calls UA_Connection_deleteMembers(&c). That cleanup path invokes connection->free, resulting in an indirect call through an uninitialized/wild function pointer and a jump to heap data (matching the wild PC crash).",
-    "conditions": "Data flow: fuzz_binary_message.cc creates a dummy connection via createDummyConnection, feeds attacker-controlled binary chunks to UA_Server_processBinaryMessage, then always performs teardown (c.close and UA_Connection_deleteMembers). For this PoV, malformed message sequence triggers failure/close path and then teardown reaches UA_Connection_deleteMembers on the dummy connection. Because createDummyConnection did not initialize `c.free`, teardown performs a wild function-pointer call. Trigger requires using this test dummy connection plus any input that reaches the teardown path (the provided PoV does)."
+    "function": "UA_Connection_processChunks",
+    "file": "open62541/src/ua_connection.c",
+    "description": "Root cause is missing empty-input validation before pointer arithmetic and dereference in chunk parsing. UA_Connection_processChunks sets `end = &packet->data[packet->length]` and then calls processChunk with `pos = packet->data`. For a zero-length packet where `packet->data` is NULL (as produced by the fuzz harness for input_length=0), this computes an invalid pointer and enters undefined behavior; subsequent parsing can lead to a wild control flow / SEGV in heap memory. The crash may surface away from this frame, but the bug is the unsafe handling of empty/NULL ByteString input in this function/path.",
+    "conditions": "Triggered by fuzz_binary_message when the input size is 0. Data flow: LLVMFuzzerTestOneInput allocates a UA_ByteString of size 0 and calls UA_Server_processBinaryMessage -> UA_Connection_processChunks. Because no guard rejects `packet==NULL`, `packet->data==NULL`, or `packet->length==0` before `&packet->data[packet->length]` and chunk processing, the malformed empty packet reaches unsafe pointer operations and causes UBSan deadly signal (wild jump/SEGV)."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 10,
-      "total_cost": 0.07339745,
-      "total_input_tokens": 88231,
-      "total_output_tokens": 809,
-      "total_cached_tokens": 58624,
+      "total_llm_calls": 9,
+      "total_cost": 0.03631145,
+      "total_input_tokens": 63047,
+      "total_output_tokens": 804,
+      "total_cached_tokens": 54144,
       "llm_calls": [
         {
-          "timestamp": 1773531392.4556139,
+          "timestamp": 1774812212.062481,
           "model": "gpt-5.3-codex",
-          "cost": 0.0104685,
-          "input_tokens": 5326,
-          "output_tokens": 82,
-          "total_tokens": 5408,
-          "cached_tokens": 0,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_f5HU1wlsp2bUorHc2Vwcs9gH"
-            },
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_zgKreQamBGLA30Xk0okivr7O"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773531433.7291262,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0090356,
-          "input_tokens": 5480,
-          "output_tokens": 90,
-          "total_tokens": 5570,
-          "cached_tokens": 1152,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_FSAcz77WvJfJzJ92ctBt3DKC"
-            },
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_tbCnFJE6VKUuvucPqZUiTl5D"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773531439.0588686,
-          "model": "gpt-5.3-codex",
-          "cost": 0.012113500000000001,
-          "input_tokens": 6218,
-          "output_tokens": 88,
-          "total_tokens": 6306,
-          "cached_tokens": 0,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_8C3Dq4SoRyoh8WFpgR3jYysy"
-            },
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_tneiSrbq2sbihaBhy9OvP0Lc"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773531452.035129,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0036221499999999998,
-          "input_tokens": 6529,
-          "output_tokens": 33,
-          "total_tokens": 6562,
-          "cached_tokens": 5248,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_LYgmfZI7XkOttC0J4hNnOygY"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773531453.6810956,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0058562,
-          "input_tokens": 8204,
-          "output_tokens": 84,
-          "total_tokens": 8288,
-          "cached_tokens": 6144,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_X2OjvJMzyhyXl9M3n65IcRcR"
-            },
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_K7aWLR6pUfy1VnRcfhDc0rBv"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773531471.9104376,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00322035,
-          "input_tokens": 8597,
-          "output_tokens": 77,
-          "total_tokens": 8674,
-          "cached_tokens": 8192,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 2,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_1vILYzxeILCd7c0k6YN6JEFh"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_bETWc903myC5SA6t80x1qrGJ"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773531476.3157375,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0071008,
-          "input_tokens": 11480,
-          "output_tokens": 37,
-          "total_tokens": 11517,
-          "cached_tokens": 8576,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_DBr8v90NmdNQtt6exLLMYek4"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773531477.4760985,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0027916,
-          "input_tokens": 11584,
-          "output_tokens": 33,
-          "total_tokens": 11617,
-          "cached_tokens": 11392,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_o4rGasVXzISKoUIqS2FdG8cm"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773531482.4008472,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0032007499999999996,
-          "input_tokens": 11925,
-          "output_tokens": 34,
-          "total_tokens": 11959,
-          "cached_tokens": 11520,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_Smb15DLuvSi7X6fCFEZgqeLA"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773531488.0234852,
-          "model": "gpt-5.3-codex",
-          "cost": 0.015988,
-          "input_tokens": 12888,
-          "output_tokens": 251,
-          "total_tokens": 13139,
-          "cached_tokens": 6400,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "terminate",
-              "tool_call_id": "call_EHxxCtgBEK5JoTvgPGbC5itZ"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        }
-      ]
-    },
-    "patching": {
-      "total_llm_calls": 5,
-      "total_cost": 0.0286622,
-      "total_input_tokens": 44364,
-      "total_output_tokens": 289,
-      "total_cached_tokens": 33664,
-      "llm_calls": [
-        {
-          "timestamp": 1773531490.1343577,
-          "model": "gpt-5.3-codex",
-          "cost": 0.01244425,
-          "input_tokens": 6199,
-          "output_tokens": 114,
-          "total_tokens": 6313,
-          "cached_tokens": 0,
+          "cost": 0.0084133,
+          "input_tokens": 5414,
+          "output_tokens": 97,
+          "total_tokens": 5511,
+          "cached_tokens": 1536,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -290,27 +51,81 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_Kb9Ebt06K4AqKsaLsaNXm17a"
+              "tool_call_id": "call_t62mA9jVNVaZb3YtRXfaoW6c"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_xUKRXtC2VBHqpndrTGkiEWOS"
+              "tool_call_id": "call_CUzuR0EQcCAc4lHwrgxC7Aqq"
             },
             {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_s7GMakTC4n9sv6gw4DmhOhKH"
+              "tool_name": "find_references",
+              "tool_call_id": "call_MNugfgB2NRTDZn8qVlJjZZZq"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773531502.869547,
+          "timestamp": 1774812261.519822,
           "model": "gpt-5.3-codex",
-          "cost": 0.0039644500000000004,
-          "input_tokens": 7547,
-          "output_tokens": 31,
-          "total_tokens": 7578,
-          "cached_tokens": 6144,
+          "cost": 0.0027538,
+          "input_tokens": 5604,
+          "output_tokens": 101,
+          "total_tokens": 5705,
+          "cached_tokens": 5376,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_9I6wtgQWR1zKQ76lh1mLpK6K"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_PUwcJLwDvylKJNcnnLkVGcIr"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_KGBoPIQfeL7MKmBrg8OJpDAy"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774812277.670503,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0033883499999999996,
+          "input_tokens": 6357,
+          "output_tokens": 81,
+          "total_tokens": 6438,
+          "cached_tokens": 5632,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_Vw3t1b3v83aQsUA09IsKpGwd"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_PG3IERaNLYbhh4F5Ki6WO7yb"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774812304.8698516,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0023891,
+          "input_tokens": 6650,
+          "output_tokens": 45,
+          "total_tokens": 6695,
+          "cached_tokens": 6272,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -318,19 +133,86 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_X28Bfjbivvrd0AKp7Xa3ROkt"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Js1TAtUzBvkEiY7vdrOTjrWx"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773531504.764498,
+          "timestamp": 1774812308.6743584,
           "model": "gpt-5.3-codex",
-          "cost": 0.007376949999999999,
-          "input_tokens": 10041,
-          "output_tokens": 107,
-          "total_tokens": 10148,
+          "cost": 0.00215915,
+          "input_tokens": 6749,
+          "output_tokens": 45,
+          "total_tokens": 6794,
+          "cached_tokens": 6528,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_OGNMdxPfzXYpTC5Iw1ktmIv3"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774812312.3974156,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0032928000000000002,
+          "input_tokens": 7184,
+          "output_tokens": 86,
+          "total_tokens": 7270,
+          "cached_tokens": 6656,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_xiK68jwfbHTTGjoRx7vwzRkP"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_yvy9HWuJtVN0EPN2Wbe2gasN"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774812323.7257237,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00246365,
+          "input_tokens": 7515,
+          "output_tokens": 43,
+          "total_tokens": 7558,
+          "cached_tokens": 7168,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_CAPFsQ80btzW8tCQrKwbLLxI"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774812328.0676012,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00206045,
+          "input_tokens": 7611,
+          "output_tokens": 31,
+          "total_tokens": 7642,
           "cached_tokens": 7424,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -339,41 +221,20 @@
           "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "apply_patch",
-              "tool_call_id": "call_znQ3wAPCTmtALzV6DnfyVvGY"
+              "tool_name": "read_source",
+              "tool_call_id": "call_h9aevhlRiL5TXb5xV2cijXng"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773531507.9118443,
+          "timestamp": 1774812333.283461,
           "model": "gpt-5.3-codex",
-          "cost": 0.0023842,
-          "input_tokens": 10236,
-          "output_tokens": 14,
-          "total_tokens": 10250,
-          "cached_tokens": 9984,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "test_patch",
-              "tool_call_id": "call_2Ipgb2Ykeu1LncMkqkXNXjxU"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773531543.7262714,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00249235,
-          "input_tokens": 10341,
-          "output_tokens": 23,
-          "total_tokens": 10364,
-          "cached_tokens": 10112,
+          "cost": 0.00939085,
+          "input_tokens": 9963,
+          "output_tokens": 275,
+          "total_tokens": 10238,
+          "cached_tokens": 7552,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -382,7 +243,125 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_Yl1AcJgAnMUfRIypsECoQaOR"
+              "tool_call_id": "call_JTguzkunWoGqyaHha2AQa8Ub"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 5,
+      "total_cost": 0.02398935,
+      "total_input_tokens": 41121,
+      "total_output_tokens": 375,
+      "total_cached_tokens": 33792,
+      "llm_calls": [
+        {
+          "timestamp": 1774812335.1403391,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0090272,
+          "input_tokens": 6472,
+          "output_tokens": 95,
+          "total_tokens": 6567,
+          "cached_tokens": 2304,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_nzXJvYTA0EZv4nEcvZ3odYeM"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_bX4bbQTOSxOkFEi7EfrjYmzQ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774812343.0319648,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0021175,
+          "input_tokens": 6722,
+          "output_tokens": 31,
+          "total_tokens": 6753,
+          "cached_tokens": 6400,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_K5sH0gPgQOqmKq9GgpNCq89e"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774812345.9534218,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0083643,
+          "input_tokens": 9074,
+          "output_tokens": 212,
+          "total_tokens": 9286,
+          "cached_tokens": 6656,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_PfveFElpGMNw46WwLdoj7Scq"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774812348.5341878,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0020853,
+          "input_tokens": 9374,
+          "output_tokens": 14,
+          "total_tokens": 9388,
+          "cached_tokens": 9216,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_j0NDXh2JhbidE9znCuQ0HaKx"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774812388.5133343,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00239505,
+          "input_tokens": 9479,
+          "output_tokens": 23,
+          "total_tokens": 9502,
+          "cached_tokens": 9216,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_DEM34uQM2BjZ2dDx52h0OPLg"
             }
           ],
           "finish_reason": "tool_calls"
@@ -390,15 +369,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.10205965,
-      "total_input_tokens": 132595,
-      "total_output_tokens": 1098,
-      "total_llm_calls": 15
+      "total_cost": 0.0603008,
+      "total_input_tokens": 104168,
+      "total_output_tokens": 1179,
+      "total_llm_calls": 14
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/tests/testing-plugins/testing_networklayers.c\n+++ b/tests/testing-plugins/testing_networklayers.c\n@@ -54,7 +54,7 @@\n     vBuffer = verificationBuffer;\n     UA_ByteString_allocBuffer(&sendBuffer, sendBufferSize);\n \n-    UA_Connection c;\n+    UA_Connection c = (UA_Connection){0};\n     c.state = UA_CONNECTION_ESTABLISHED;\n     c.config = UA_ConnectionConfig_default;\n     c.channel = NULL;\n",
+    "patch": "--- a/src/ua_connection.c\n+++ b/src/ua_connection.c\n@@ -163,6 +163,13 @@\n     /* The connection has already prepended any incomplete chunk during recv */\n     UA_assert(connection->incompleteChunk.length == 0);\n \n+    /* Reject invalid/empty input before pointer arithmetic on packet->data.\n+     * For zero-length packets there is nothing to process. */\n+    if(!packet)\n+        return UA_STATUSCODE_BADINTERNALERROR;\n+    if(packet->length == 0)\n+        return UA_STATUSCODE_GOOD;\n+\n     /* Loop over the received chunks. pos is increased with each chunk. */\n     const UA_Byte *pos = packet->data;\n     const UA_Byte *end = &packet->data[packet->length];\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -416,64 +395,53 @@
       {
         "tool_name": "read_definition",
         "args": [
-          "UA_Connection_deleteMembers",
+          "UA_Connection_processChunks",
           "open62541/src/ua_connection.c",
           1,
           true
         ],
         "kwargs": {},
-        "timestamp": 563780.060598496,
+        "timestamp": 1844630.416977703,
         "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n21 void UA_Connection_deleteMembers(UA_Connection *connection) {, extra=None))"
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n160 UA_Connection_processChunks(UA_Connection *connection, void *application,, extra=None))"
       }
     ],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
-          "open62541/tests/testing-plugins/testing_networklayers.c",
-          1
-        ],
-        "kwargs": {},
-        "timestamp": 563778.847491705,
-        "success": true,
-        "result_summary": "Ok({'contents': ' 1 /* This Source Code Form is subject to the terms of the Mozilla Public\\n 2  * License, v. 2.0. If a copy of the MPL was not distributed with this\\n 3  * file, You can obtain one at..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
           "open62541/src/ua_connection.c",
-          21
+          160
         ],
         "kwargs": {},
-        "timestamp": 563791.445114479,
+        "timestamp": 1844631.608228056,
         "success": true,
-        "result_summary": "Ok({'contents': '  1 /* This Source Code Form is subject to the terms of the Mozilla Public\\n  2  * License, v. 2.0. If a copy of the MPL was not distributed with this\\n  3  * file, You can obtain one..."
+        "result_summary": "Ok({'contents': \" 61     case UA_STATUSCODE_BADCERTIFICATEUNTRUSTED:\\n 62         error->error = UA_STATUSCODE_BADSECURITYCHECKSFAILED;\\n 63         error->reason = UA_STRING_NULL;\\n 64         break;..."
       }
     ],
     "find_references": [
       {
         "tool_name": "find_references",
         "args": [
-          "createDummyConnection",
-          "",
+          "UA_Connection_processChunks",
+          "open62541/src/ua_connection.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 563787.634370006,
+        "timestamp": 1844623.834262831,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='open62541/tests/fuzz/fuzz_binary_message.cc', refs=[FileReference(line=17, content='    UA_Connection c = createDummyConnection(65535, NULL);', enclosing_definition='LLVM..."
+        "result_summary": "Ok([FileReferences(file_name='open62541/src/ua_connection.c', refs=[FileReference(line=222, content='        retval = UA_Connection_processChunks(connection, &data,', enclosing_definition='UA_Connecti..."
       }
     ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
-          "open62541/tests/testing-plugins/testing_networklayers.c",
-          "@@ -57,7 +57,7 @@ UA_Connection createDummyConnection(size_t sendBufferSize,\n-    UA_Connection c;\n+    UA_Connection c = (UA_Connection){0};\n     c.state = UA_CONNECTION_ESTABLISHED;\n     c.config = UA_ConnectionConfig_default;\n     c.channel = NULL;\n"
+          "open62541/src/ua_connection.c",
+          "@@ -163,6 +163,13 @@ UA_Connection_processChunks(UA_Connection *connection, void *application,\n     /* The connection has already prepended any incomplete chunk during recv */\n     UA_assert(connection->incompleteChunk.length == 0);\n \n+    /* Reject invalid/empty input before pointer arithmetic on packet->data.\n+     * For zero-length packets there is nothing to process. */\n+    if(!packet)\n+        return UA_STATUSCODE_BADINTERNALERROR;\n+    if(packet->length == 0)\n+        return UA_STATUSCODE_GOOD;\n+\n     /* Loop over the received chunks. pos is increased with each chunk. */\n     const UA_Byte *pos = packet->data;\n     const UA_Byte *end = &packet->data[packet->length];\n"
         ],
         "kwargs": {},
-        "timestamp": 563793.36313721,
+        "timestamp": 1844634.547084846,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -483,7 +451,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 563831.257470309,
+        "timestamp": 1844675.927521629,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

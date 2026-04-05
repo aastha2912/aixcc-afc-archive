@@ -1,5 +1,5 @@
 {
-  "vuln_id": 73,
+  "vuln_id": 369,
   "crash_result": {
     "output": "==6674==ERROR: AddressSanitizer: use-after-poison on address 0x631000014bb0 at pc 0x000000755a45 bp 0x7fff46230b60 sp 0x7fff46230b58\nREAD of size 4 at 0x631000014bb0 thread T0\nSCARINESS: 27 (4-byte-read-use-after-poison)\n    #0 0x755a44 in SkSL::Type::columns() const /src/skia/out/Fuzz/../../src/sksl/ir/SkSLType.h:311:16\n    #1 0x8b1a83 in SkSL::Compiler::simplifyExpression(SkTHashMap<SkSL::Variable const*, std::__1::unique_ptr<SkSL::Expression, std::__1::default_delete<SkSL::Expression> >*, SkG",
     "stack": "#0 0x755a44 in SkSL::Type::columns() const skia/out/Fuzz/../../src/sksl/ir/SkSLType.h:311:16\n#1 0x8b1a83 in SkSL::Compiler::simplifyExpression(SkTHashMap<SkSL::Variable const*, std::__1::unique_ptr<SkSL::Expression, std::__1::default_delete<SkSL::Expression> >*, SkGoodHash>&, SkSL::BasicBlock&, std::__1::__wrap_iter<SkSL::BasicBlock::Node*>*, SkSL::Compiler::OptimizationContext*) skia/out/Fuzz/../../src/sksl/SkSLCompiler.cpp:1061:26\n#2 0x8b9e3e in SkSL::Compiler::scanCFG(SkSL::FunctionDefinition",
@@ -24,24 +24,24 @@
   "analyzed_vuln": {
     "function": "simplifyExpression",
     "file": "skia/src/sksl/SkSLCompiler.cpp",
-    "description": "In `Compiler::simplifyExpression`, constructor-flattening uses a 32-bit `int argsToOptimize` bitmask and shifts `currBit <<= 1` once per constructor argument. For constructors with many arguments, `currBit` overflows/UB and tracked bits become invalid, so the second pass may treat non-constructor arguments as if they were constructors (`arg->as<Constructor>()`) and build malformed IR. This leaves expressions/types referencing poisoned pool memory, later crashing as a use-after-poison in `Type::columns()` when optimizer revisits the corrupted expression tree.",
-    "conditions": "Via `FuzzSkRuntimeEffect` input, supply SkSL that produces a constructor expression (`float[]()` pattern in the PoC) with enough arguments/nesting to drive the flattening path in `simplifyExpression` (`c.type().columns() > 1`) and overflow the bitmask bookkeeping. During `scanCFG` optimization, the corrupted constructor-argument handling causes invalid expression/type references; a later `c.type().columns()` read hits poisoned memory and ASan reports UAP."
+    "description": "In Compiler::simplifyExpression, constructor-flattening logic keeps references to `Constructor& c = expr->as<Constructor>()` and repeatedly uses `c.type()` / `c.arguments()` after invoking helper rewrites (e.g. `delete_left`, `delete_right`, `vectorize_*`, `try_replace_expression`) elsewhere in the same optimization pass that can replace or destroy IR nodes in the current block. This allows stale expression/type pointers from the pool-backed IR to be read after they have been poisoned by ASan, surfacing as a UAF read in Type::columns(). The crash occurs at `c.type().columns()` but the root bug is unsafe lifetime/use of IR node references during in-place CFG expression simplification.",
+    "conditions": "Triggered via SkRuntimeEffect::Make on attacker-controlled SkSL source. The input must produce IR that enters scanCFG -> simplifyExpression constructor optimization and causes in-place expression rewrites in the same pass/rescan cycle, so a constructor/type reference becomes stale before `columns()` is read. The provided PoC with malformed constructor syntax (`... an(),float[](); ...` plus trailing bytes) drives this optimizer path during convertProgram/optimize, leading to read of poisoned memory from the compiler pool."
   },
   "cost_analysis": {
     "triage": {
-      "total_llm_calls": 4,
-      "total_cost": 0.03162005,
-      "total_input_tokens": 35443,
-      "total_output_tokens": 521,
-      "total_cached_tokens": 23936,
+      "total_llm_calls": 3,
+      "total_cost": 0.0353689,
+      "total_input_tokens": 23158,
+      "total_output_tokens": 510,
+      "total_cached_tokens": 7808,
       "llm_calls": [
         {
-          "timestamp": 1773381607.738564,
+          "timestamp": 1774834641.7373128,
           "model": "gpt-5.3-codex",
-          "cost": 0.00867335,
-          "input_tokens": 5129,
+          "cost": 0.00882735,
+          "input_tokens": 5217,
           "output_tokens": 108,
-          "total_tokens": 5237,
+          "total_tokens": 5325,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -51,27 +51,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_eu2v9yg5BY7LnlUSRi1mUnIo"
+              "tool_call_id": "call_5FKPdgiiL2cB4gwP1YYPlOxJ"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_aOaX3Qr1iRy5xvMCmDxVl0DC"
+              "tool_call_id": "call_SKmHwxGseRnAa58FqLw7zyRd"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_1c4FEZK0Ht92VYGxzLeTOY5q"
+              "tool_call_id": "call_edds9gb6T9ECahaCdVMaMy35"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773381639.9402173,
+          "timestamp": 1774834644.7157457,
           "model": "gpt-5.3-codex",
-          "cost": 0.00296975,
-          "input_tokens": 5393,
+          "cost": 0.009373349999999999,
+          "input_tokens": 5481,
           "output_tokens": 114,
-          "total_tokens": 5507,
-          "cached_tokens": 5120,
+          "total_tokens": 5595,
+          "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -80,48 +80,27 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_qVRiXSULEyMqNLotatMPMlOR"
+              "tool_call_id": "call_hVOOkvuK9NBx59tDUPAxGPnk"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_v7HSeN0s6CMTvdmIQx6uSPV1"
+              "tool_call_id": "call_qR70uBVKdnMD3CuXlnPtWEQ1"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_5fnPEXHynZcjPoBFgCZo6Qrs"
+              "tool_call_id": "call_ZdvO1R0u60JrZW2UnTmuHMii"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773381642.1196034,
+          "timestamp": 1774834649.9256313,
           "model": "gpt-5.3-codex",
-          "cost": 0.0137578,
-          "input_tokens": 12372,
-          "output_tokens": 41,
-          "total_tokens": 12413,
-          "cached_tokens": 5376,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "find_references",
-              "tool_call_id": "call_UtaJmx7GM4r20DDjklocxEAQ"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773381694.0410988,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00621915,
-          "input_tokens": 12549,
-          "output_tokens": 258,
-          "total_tokens": 12807,
-          "cached_tokens": 12288,
+          "cost": 0.0171682,
+          "input_tokens": 12460,
+          "output_tokens": 288,
+          "total_tokens": 12748,
+          "cached_tokens": 5504,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -130,7 +109,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_2upF1yemTW94GWfzg4fS9GmW"
+              "tool_call_id": "call_cb2s5PAHdHheO8COUknSbgbt"
             }
           ],
           "finish_reason": "tool_calls"
@@ -138,20 +117,20 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 4,
-      "total_cost": 0.0391503,
-      "total_input_tokens": 28178,
-      "total_output_tokens": 671,
-      "total_cached_tokens": 12416,
+      "total_llm_calls": 5,
+      "total_cost": 0.0452095,
+      "total_input_tokens": 63594,
+      "total_output_tokens": 896,
+      "total_cached_tokens": 49920,
       "llm_calls": [
         {
-          "timestamp": 1773381695.9950945,
+          "timestamp": 1774834652.3537872,
           "model": "gpt-5.3-codex",
-          "cost": 0.0092645,
-          "input_tokens": 4590,
-          "output_tokens": 88,
-          "total_tokens": 4678,
-          "cached_tokens": 0,
+          "cost": 0.00900095,
+          "input_tokens": 6481,
+          "output_tokens": 92,
+          "total_tokens": 6573,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -160,23 +139,44 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_qAMbOIbYhmGhWckpMAviEEJI"
+              "tool_call_id": "call_Nw3FY3xaxa6b3cT6yDZgmBo8"
             },
             {
-              "tool_name": "find_references",
-              "tool_call_id": "call_e1eyy66LC10OuyGSNp2mG0zZ"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_5ZBFcA7oGgP7hOdlb1KDbo1R"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773381702.9696436,
+          "timestamp": 1774834694.4316306,
           "model": "gpt-5.3-codex",
-          "cost": 0.01334515,
-          "input_tokens": 7405,
-          "output_tokens": 546,
-          "total_tokens": 7951,
-          "cached_tokens": 4608,
+          "cost": 0.00665875,
+          "input_tokens": 9213,
+          "output_tokens": 44,
+          "total_tokens": 9257,
+          "cached_tokens": 6400,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_jSYuldf4YMjW3n4OaPJOjt5d"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1774834701.8192446,
+          "model": "gpt-5.3-codex",
+          "cost": 0.02274265,
+          "input_tokens": 15391,
+          "output_tokens": 723,
+          "total_tokens": 16114,
+          "cached_tokens": 9088,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -185,19 +185,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_x8tnTYLxoQt29xloXd730HYO"
+              "tool_call_id": "call_2H5MGLerZdVSNvGeUyLeYG9g"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773381704.8607926,
+          "timestamp": 1774834703.0765352,
           "model": "gpt-5.3-codex",
-          "cost": 0.00196665,
-          "input_tokens": 8039,
+          "cost": 0.0033495,
+          "input_tokens": 16202,
           "output_tokens": 14,
-          "total_tokens": 8053,
-          "cached_tokens": 7808,
+          "total_tokens": 16216,
+          "cached_tokens": 16000,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -206,19 +206,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_hLdnmyOGKaFP6OR27YLr2Z86"
+              "tool_call_id": "call_H1zyMnXNL9FSeH7BF9zCzrjE"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773382324.3498476,
+          "timestamp": 1774835468.4687371,
           "model": "gpt-5.3-codex",
-          "cost": 0.014573999999999998,
-          "input_tokens": 8144,
+          "cost": 0.0034576500000000005,
+          "input_tokens": 16307,
           "output_tokens": 23,
-          "total_tokens": 8167,
-          "cached_tokens": 0,
+          "total_tokens": 16330,
+          "cached_tokens": 16128,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -227,7 +227,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_rm34IUtrllOevv4HstH7OWUm"
+              "tool_call_id": "call_fbzCfcQFd94Ms2HjMj6A3TzD"
             }
           ],
           "finish_reason": "tool_calls"
@@ -235,15 +235,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.07077035,
-      "total_input_tokens": 63621,
-      "total_output_tokens": 1192,
+      "total_cost": 0.0805784,
+      "total_input_tokens": 86752,
+      "total_output_tokens": 1406,
       "total_llm_calls": 8
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/sksl/SkSLCompiler.cpp\n+++ b/src/sksl/SkSLCompiler.cpp\n@@ -1061,26 +1061,27 @@\n             if (c.type().columns() > 1) {\n                 // Inspect each constructor argument to see if it's a candidate for flattening.\n                 // Remember matched arguments in a bitfield, \"argsToOptimize\".\n-                int argsToOptimize = 0;\n-                int currBit = 1;\n+                std::vector<bool> argsToOptimize;\n+                argsToOptimize.reserve(c.arguments().size());\n                 for (const std::unique_ptr<Expression>& arg : c.arguments()) {\n+                    bool optimizeArg = false;\n                     if (arg->is<Constructor>()) {\n                         Constructor& inner = arg->as<Constructor>();\n                         if (inner.arguments().size() > 1 &&\n                             inner.type().componentType() == c.type().componentType()) {\n-                            argsToOptimize |= currBit;\n+                            optimizeArg = true;\n                         }\n                     }\n-                    currBit <<= 1;\n+                    argsToOptimize.push_back(optimizeArg);\n                 }\n-                if (argsToOptimize) {\n+                if (std::any_of(argsToOptimize.begin(), argsToOptimize.end(), [](bool b) { return b; })) {\n                     // We found at least one argument that could be flattened out. Re-walk the\n                     // constructor args and flatten the candidates we found during our initial pass.\n                     ExpressionArray flattened;\n                     flattened.reserve_back(c.type().columns());\n                     currBit = 1;\n                     for (const std::unique_ptr<Expression>& arg : c.arguments()) {\n-                        if (argsToOptimize & currBit) {\n+                        if (argsToOptimize[flattened.size()]) {\n                             Constructor& inner = arg->as<Constructor>();\n                             for (const std::unique_ptr<Expression>& innerArg : inner.arguments()) {\n                                 flattened.push_back(innerArg->clone());\n@@ -1088,7 +1089,6 @@\n                         } else {\n                             flattened.push_back(arg->clone());\n                         }\n-                        currBit <<= 1;\n                     }\n                     auto optimized = std::unique_ptr<Expression>(\n                             new Constructor(c.fOffset, &c.type(), std::move(flattened)));\n",
+    "patch": "--- a/src/sksl/SkSLCompiler.cpp\n+++ b/src/sksl/SkSLCompiler.cpp\n@@ -1057,29 +1057,32 @@\n             //   -  float4(float2(1, 2), 3, 4)                -->  float4(1, 2, 3, 4)\n             //   -  float4(w, float3(sin(x), cos(y), tan(z))) -->  float4(w, sin(x), cos(y), tan(z))\n             // Leave single-argument constructors alone, though. These might be casts or splats.\n-            Constructor& c = expr->as<Constructor>();\n-            if (c.type().columns() > 1) {\n+            const Constructor& c = expr->as<Constructor>();\n+            const Type& constructorType = c.type();\n+            if (constructorType.columns() > 1) {\n                 // Inspect each constructor argument to see if it's a candidate for flattening.\n                 // Remember matched arguments in a bitfield, \"argsToOptimize\".\n                 int argsToOptimize = 0;\n                 int currBit = 1;\n-                for (const std::unique_ptr<Expression>& arg : c.arguments()) {\n+                const ExpressionArray& constructorArgs = c.arguments();\n+                for (const std::unique_ptr<Expression>& arg : constructorArgs) {\n                     if (arg->is<Constructor>()) {\n                         Constructor& inner = arg->as<Constructor>();\n                         if (inner.arguments().size() > 1 &&\n-                            inner.type().componentType() == c.type().componentType()) {\n+                            inner.type().componentType() == constructorType.componentType()) {\n                             argsToOptimize |= currBit;\n                         }\n                     }\n                     currBit <<= 1;\n                 }\n+\n                 if (argsToOptimize) {\n                     // We found at least one argument that could be flattened out. Re-walk the\n                     // constructor args and flatten the candidates we found during our initial pass.\n                     ExpressionArray flattened;\n-                    flattened.reserve_back(c.type().columns());\n+                    flattened.reserve_back(constructorType.columns());\n                     currBit = 1;\n-                    for (const std::unique_ptr<Expression>& arg : c.arguments()) {\n+                    for (const std::unique_ptr<Expression>& arg : constructorArgs) {\n                         if (argsToOptimize & currBit) {\n                             Constructor& inner = arg->as<Constructor>();\n                             for (const std::unique_ptr<Expression>& innerArg : inner.arguments()) {\n@@ -1091,7 +1094,7 @@\n                         currBit <<= 1;\n                     }\n                     auto optimized = std::unique_ptr<Expression>(\n-                            new Constructor(c.fOffset, &c.type(), std::move(flattened)));\n+                            new Constructor(c.fOffset, &constructorType, std::move(flattened)));\n                     // No fUsage change; no references have been added or removed anywhere.\n                     optimizationContext->fUpdated = true;\n                     if (!try_replace_expression(&b, iter, &optimized)) {\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -257,7 +257,34 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "simplifyExpression",
+          "skia/src/sksl/SkSLCompiler.cpp",
+          1000,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1866981.584501972,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n844 void Compiler::simplifyExpression(DefinitionMap& definitions,, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "simplifyExpression",
+          "skia/src/sksl/SkSLCompiler.cpp",
+          844,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1866983.179226322,
+        "success": true,
+        "result_summary": "Ok({'contents': ' 844 void Compiler::simplifyExpression(DefinitionMap& definitions,\\n 845                                   BasicBlock& b,\\n 846                                   std::vector<BasicBloc..."
+      }
+    ],
     "read_source": [
       {
         "tool_name": "read_source",
@@ -266,34 +293,21 @@
           1061
         ],
         "kwargs": {},
-        "timestamp": 413984.588836896,
+        "timestamp": 1866940.93168644,
         "success": true,
         "result_summary": "Ok({'contents': ' 962                     }\\n 963                     break;\\n 964                 case Token::Kind::TK_PLUS:\\n 965                     if (is_constant(left, 0)) {\\n 966               ..."
       }
     ],
-    "find_references": [
-      {
-        "tool_name": "find_references",
-        "args": [
-          "argsToOptimize",
-          "skia/src/sksl/SkSLCompiler.cpp",
-          false
-        ],
-        "kwargs": {},
-        "timestamp": 413984.585640983,
-        "success": true,
-        "result_summary": "Ok([FileReferences(file_name='skia/src/sksl/SkSLCompiler.cpp', refs=[FileReference(line=1064, content='                int argsToOptimize = 0;', enclosing_definition='simplifyExpression'), FileReferen..."
-      }
-    ],
+    "find_references": [],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
           "skia/src/sksl/SkSLCompiler.cpp",
-          "@@ -1061,18 +1061,19 @@\n             if (c.type().columns() > 1) {\n                 // Inspect each constructor argument to see if it's a candidate for flattening.\n                 // Remember matched arguments in a bitfield, \"argsToOptimize\".\n-                int argsToOptimize = 0;\n-                int currBit = 1;\n-                for (const std::unique_ptr<Expression>& arg : c.arguments()) {\n+                std::vector<bool> argsToOptimize;\n+                argsToOptimize.reserve(c.arguments().size());\n+                for (const std::unique_ptr<Expression>& arg : c.arguments()) {\n+                    bool optimizeArg = false;\n                     if (arg->is<Constructor>()) {\n                         Constructor& inner = arg->as<Constructor>();\n                         if (inner.arguments().size() > 1 &&\n                             inner.type().componentType() == c.type().componentType()) {\n-                            argsToOptimize |= currBit;\n+                            optimizeArg = true;\n                         }\n                     }\n-                    currBit <<= 1;\n+                    argsToOptimize.push_back(optimizeArg);\n                 }\n-                if (argsToOptimize) {\n+                if (std::any_of(argsToOptimize.begin(), argsToOptimize.end(), [](bool b) { return b; })) {\n                     // We found at least one argument that could be flattened out. Re-walk the\n                     // constructor args and flatten the candidates we found during our initial pass.\n                     ExpressionArray flattened;\n@@ -1080,15 +1081,15 @@\n                     currBit = 1;\n                     for (const std::unique_ptr<Expression>& arg : c.arguments()) {\n-                        if (argsToOptimize & currBit) {\n+                        if (argsToOptimize[flattened.size()]) {\n                             Constructor& inner = arg->as<Constructor>();\n                             for (const std::unique_ptr<Expression>& innerArg : inner.arguments()) {\n                                 flattened.push_back(innerArg->clone());\n                             }\n                         } else {\n                             flattened.push_back(arg->clone());\n                         }\n-                        currBit <<= 1;\n                     }\n                     auto optimized = std::unique_ptr<Expression>(\n                             new Constructor(c.fOffset, &c.type(), std::move(flattened)));\n"
+          "@@ -1057,41 +1057,43 @@\n             //   -  float4(float2(1, 2), 3, 4)                -->  float4(1, 2, 3, 4)\n             //   -  float4(w, float3(sin(x), cos(y), tan(z))) -->  float4(w, sin(x), cos(y), tan(z))\n             // Leave single-argument constructors alone, though. These might be casts or splats.\n-            Constructor& c = expr->as<Constructor>();\n-            if (c.type().columns() > 1) {\n+            const Constructor& c = expr->as<Constructor>();\n+            const Type& constructorType = c.type();\n+            if (constructorType.columns() > 1) {\n                 // Inspect each constructor argument to see if it's a candidate for flattening.\n                 // Remember matched arguments in a bitfield, \"argsToOptimize\".\n                 int argsToOptimize = 0;\n                 int currBit = 1;\n-                for (const std::unique_ptr<Expression>& arg : c.arguments()) {\n+                const ExpressionArray& constructorArgs = c.arguments();\n+                for (const std::unique_ptr<Expression>& arg : constructorArgs) {\n                     if (arg->is<Constructor>()) {\n                         Constructor& inner = arg->as<Constructor>();\n                         if (inner.arguments().size() > 1 &&\n-                            inner.type().componentType() == c.type().componentType()) {\n+                            inner.type().componentType() == constructorType.componentType()) {\n                             argsToOptimize |= currBit;\n                         }\n                     }\n                     currBit <<= 1;\n                 }\n+\n                 if (argsToOptimize) {\n                     // We found at least one argument that could be flattened out. Re-walk the\n                     // constructor args and flatten the candidates we found during our initial pass.\n                     ExpressionArray flattened;\n-                    flattened.reserve_back(c.type().columns());\n+                    flattened.reserve_back(constructorType.columns());\n                     currBit = 1;\n-                    for (const std::unique_ptr<Expression>& arg : c.arguments()) {\n+                    for (const std::unique_ptr<Expression>& arg : constructorArgs) {\n                         if (argsToOptimize & currBit) {\n                             Constructor& inner = arg->as<Constructor>();\n                             for (const std::unique_ptr<Expression>& innerArg : inner.arguments()) {\n                                 flattened.push_back(innerArg->clone());\n                             }\n                         } else {\n                             flattened.push_back(arg->clone());\n                         }\n                         currBit <<= 1;\n                     }\n                     auto optimized = std::unique_ptr<Expression>(\n-                            new Constructor(c.fOffset, &c.type(), std::move(flattened)));\n+                            new Constructor(c.fOffset, &constructorType, std::move(flattened)));\n                     // No fUsage change; no references have been added or removed anywhere.\n                     optimizationContext->fUpdated = true;\n                     if (!try_replace_expression(&b, iter, &optimized)) {\n"
         ],
         "kwargs": {},
-        "timestamp": 413991.596737995,
+        "timestamp": 1866990.486562678,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -303,7 +317,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 414610.997309242,
+        "timestamp": 1867755.670199201,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

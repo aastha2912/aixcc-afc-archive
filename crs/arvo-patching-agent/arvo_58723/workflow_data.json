@@ -1,5 +1,5 @@
 {
-  "vuln_id": 175,
+  "vuln_id": 495,
   "crash_result": {
     "output": "==1044==ERROR: AddressSanitizer: heap-use-after-free on address 0x604000004850 at pc 0x0000005bcf13 bp 0x7ffc12544ff0 sp 0x7ffc12544fe8\nREAD of size 1 at 0x604000004850 thread T0\nSCARINESS: 40 (1-byte-read-heap-use-after-free)\n    #0 0x5bcf12 in mrb_byte_hash_step /src/mruby/src/string.c:1681:23\n    #1 0x5bcf12 in mrb_byte_hash /src/mruby/src/string.c:1691:10\n    #2 0x5bcf12 in mrb_str_hash /src/mruby/src/string.c:1698:10\n    #3 0x5bcf12 in mrb_str_hash_m /src/mruby/src/string.c:1711:17\n    #4 0",
     "stack": "#0 0x5bcf12 in mrb_byte_hash_step mruby/src/string.c:1681:23\n#1 0x5bcf12 in mrb_byte_hash mruby/src/string.c:1691:10\n#2 0x5bcf12 in mrb_str_hash mruby/src/string.c:1698:10\n#3 0x5bcf12 in mrb_str_hash_m mruby/src/string.c:1711:17\n#4 0x672f2f in mrb_funcall_with_block mruby/src/vm.c:697:13\n#5 0x671832 in mrb_funcall_argv mruby/src/vm.c:713:10\n#6 0x65b6dc in obj_hash_code mruby/src/hash.c:345:5\n#7 0x65b6dc in ib_it_init mruby/src/hash.c:645:31\n#8 0x656d6e in ib_init mruby/src/hash.c:772:3\n#9 0x656d",
@@ -24,25 +24,25 @@
   "analyzed_vuln": {
     "function": "class_subclasses",
     "file": "mruby/mrbgems/mruby-class-ext/src/class.c",
-    "description": "Use-after-free caused by `class_subclasses` calling `mrb_objspace_each_objects` with a callback (`add_subclasses`) that pushes matching class objects into an array via `mrb_ary_push` without protecting the iterated object from GC. During enumeration, `mrb_ary_push`/hashing can invoke Ruby code and trigger full GC (`mrb_full_gc` inside `mrb_objspace_each_objects`), freeing a string object that is then later hashed (`mrb_str_hash` -> `mrb_byte_hash_step`) from stale memory. Root issue is unsafe object-space iteration/reentrancy in `class_subclasses` (not in `mrb_byte_hash_step`, which is just the crash site).",
-    "conditions": "PoV executes Ruby that reaches `Module/Class#subclasses` (mruby-class-ext). `class_subclasses` iterates all objects and in callback appends subclass objects to an array. While iterating, operations performed during push/hash can run Ruby methods and trigger GC. Because iteration does not pin/protect transiently accessed objects against collection during this reentrant GC, an object (string used later as hash key/hash receiver) is freed and subsequently read during hash computation, producing heap-use-after-free."
+    "description": "`class_subclasses` iterates all objects via `mrb_objspace_each_objects` without protecting temporary/live objects created or referenced during iteration from GC. During this traversal, `mrb_full_gc` runs and sweeps a String object later used as a Hash key; the Hash insertion path (`obj_hash_code` -> `mrb_str_hash`) then dereferences the freed string buffer (`RSTR_PTR`), causing heap-use-after-free. Root cause is unsafe GC interaction/object lifetime handling in `class_subclasses` object-space iteration, not the hash function itself.",
+    "conditions": "Trigger requires Ruby code (from `mruby_fuzzer` input passed to `mrb_load_string`) that invokes `Module.subclasses`/`class_subclasses` while also creating/using objects (notably String keys in Hash operations) that remain reachable only through transient VM state during the iteration. `mrb_objspace_each_objects` in `class_subclasses` causes a full GC/sweep, freeing a string buffer; subsequent hash key hashing (`Hash#[]=` path in `hash.c`) reads that freed buffer, producing UAF."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.04540655,
-      "total_input_tokens": 47513,
-      "total_output_tokens": 501,
-      "total_cached_tokens": 28416,
+      "total_cost": 0.0442421,
+      "total_input_tokens": 50574,
+      "total_output_tokens": 424,
+      "total_cached_tokens": 31872,
       "llm_calls": [
         {
-          "timestamp": 1773468039.674894,
+          "timestamp": 1774877307.9264417,
           "model": "gpt-5.3-codex",
-          "cost": 0.023408349999999998,
-          "input_tokens": 13557,
-          "output_tokens": 107,
-          "total_tokens": 13664,
-          "cached_tokens": 1152,
+          "cost": 0.02543275,
+          "input_tokens": 13645,
+          "output_tokens": 111,
+          "total_tokens": 13756,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -50,57 +50,49 @@
           "tool_call_count": 3,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_YyaXC94fReV8JfkoZP5aon2a"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_PO9JrmDiSvMK80YS46w7bbrD"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_o6VTFPJ0Ef79y8VMTwIWouGJ"
+              "tool_call_id": "call_4UDnqlkhn0w9TcnE1sJ68vdg"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_jZOQqu5ZYIDqF48HlIrqCiMw"
+              "tool_call_id": "call_sjzFnebOLdFpAuu02yhin3c5"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773468045.347283,
+          "timestamp": 1774877321.766856,
           "model": "gpt-5.3-codex",
-          "cost": 0.00440475,
-          "input_tokens": 13805,
-          "output_tokens": 101,
-          "total_tokens": 13906,
-          "cached_tokens": 13440,
+          "cost": 0.0113869,
+          "input_tokens": 18350,
+          "output_tokens": 46,
+          "total_tokens": 18396,
+          "cached_tokens": 13568,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 3,
+          "tool_call_count": 1,
           "tool_calls": [
             {
-              "tool_name": "read_source",
-              "tool_call_id": "call_jJu9hDPdYJvKcun6PJyEmUM8"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_kfUN7rOjUKWmucsbEkKViDFy"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_SC8kbsCJSbKSl518yBOJfKGi"
+              "tool_name": "read_definition",
+              "tool_call_id": "call_5PChYxZio26u03aBcKeQ9W8V"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773468051.1434045,
+          "timestamp": 1774877332.58422,
           "model": "gpt-5.3-codex",
-          "cost": 0.01759345,
-          "input_tokens": 20151,
-          "output_tokens": 293,
-          "total_tokens": 20444,
-          "cached_tokens": 13824,
+          "cost": 0.00742245,
+          "input_tokens": 18579,
+          "output_tokens": 267,
+          "total_tokens": 18846,
+          "cached_tokens": 18304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -109,7 +101,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_yPL6Iet3clXGAjuURTtCNRBu"
+              "tool_call_id": "call_xqvAbaTxgPCZt2HGXowRpLqA"
             }
           ],
           "finish_reason": "tool_calls"
@@ -118,19 +110,19 @@
     },
     "patching": {
       "total_llm_calls": 4,
-      "total_cost": 0.056067549999999994,
-      "total_input_tokens": 55125,
-      "total_output_tokens": 455,
-      "total_cached_tokens": 29696,
+      "total_cost": 0.04364325,
+      "total_input_tokens": 66899,
+      "total_output_tokens": 299,
+      "total_cached_tokens": 49280,
       "llm_calls": [
         {
-          "timestamp": 1773468053.066301,
+          "timestamp": 1774877335.3992321,
           "model": "gpt-5.3-codex",
-          "cost": 0.01991745,
-          "input_tokens": 12151,
-          "output_tokens": 91,
-          "total_tokens": 12242,
-          "cached_tokens": 1664,
+          "cost": 0.02728425,
+          "input_tokens": 14951,
+          "output_tokens": 80,
+          "total_tokens": 15031,
+          "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -139,23 +131,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_HXnpnnhI0tCUt0GJBT4T3Mxv"
+              "tool_call_id": "call_4i08DZuRxSFoUEY9XQ2iE2sx"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_oG02ftNjRJg3X55HNno1TmPB"
+              "tool_call_id": "call_f1JsGaHJRG4aLDVpGgrADoWD"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773468065.3710802,
+          "timestamp": 1774877449.9686892,
           "model": "gpt-5.3-codex",
-          "cost": 0.00994875,
-          "input_tokens": 14013,
-          "output_tokens": 327,
-          "total_tokens": 14340,
-          "cached_tokens": 12160,
+          "cost": 0.00908915,
+          "input_tokens": 17101,
+          "output_tokens": 182,
+          "total_tokens": 17283,
+          "cached_tokens": 14848,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -164,19 +156,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_PLr70pikLD8VatCB1TACGpB1"
+              "tool_call_id": "call_QkU9WsZAT7sdRMevHtrZIkgM"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773468066.4663193,
+          "timestamp": 1774877451.0264504,
           "model": "gpt-5.3-codex",
-          "cost": 0.0030673999999999996,
-          "input_tokens": 14428,
+          "cost": 0.0035808499999999996,
+          "input_tokens": 17371,
           "output_tokens": 14,
-          "total_tokens": 14442,
-          "cached_tokens": 14208,
+          "total_tokens": 17385,
+          "cached_tokens": 17152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -185,19 +177,19 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_KsTEgSHACXdrRIvLHEHvs3HN"
+              "tool_call_id": "call_508LgkYPwo2xZWVqdag50x7s"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773468097.5928962,
+          "timestamp": 1774877620.4355145,
           "model": "gpt-5.3-codex",
-          "cost": 0.023133949999999997,
-          "input_tokens": 14533,
+          "cost": 0.0036889999999999996,
+          "input_tokens": 17476,
           "output_tokens": 23,
-          "total_tokens": 14556,
-          "cached_tokens": 1664,
+          "total_tokens": 17499,
+          "cached_tokens": 17280,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -206,7 +198,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_PausKtIPyUchXbpm1jWKlziD"
+              "tool_call_id": "call_0mpChjtHwJ2yjqf4DfOSx4Lg"
             }
           ],
           "finish_reason": "tool_calls"
@@ -214,15 +206,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.10147409999999998,
-      "total_input_tokens": 102638,
-      "total_output_tokens": 956,
+      "total_cost": 0.08788535,
+      "total_input_tokens": 117473,
+      "total_output_tokens": 723,
       "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/mruby/mrbgems/mruby-class-ext/src/class.c\n+++ b/mruby/mrbgems/mruby-class-ext/src/class.c\n@@ -71,7 +71,7 @@\n   if (obj->tt == MRB_TT_CLASS) {\n     struct RClass *c = (struct RClass*)obj;\n     if (mrb_class_real(c->super) == args->c) {\n-      mrb_ary_push(mrb, args->ary, mrb_obj_value(obj));\n+      mrb_ary_push(mrb, args->ary, mrb_obj_value(c));\n     }\n   }\n   return MRB_EACH_OBJ_OK;\n@@ -105,7 +105,9 @@\n \n   if (c->flags & MRB_FL_CLASS_IS_INHERITED) {\n     struct subclass_args arg = {c, ary};\n+    mrb_gc_arena_save(mrb);\n     mrb_objspace_each_objects(mrb, add_subclasses, &arg);\n+    mrb_gc_arena_restore(mrb, 0);\n   }\n   return ary;\n }\n",
+    "patch": "--- a/mruby/mrbgems/mruby-class-ext/src/class.c\n+++ b/mruby/mrbgems/mruby-class-ext/src/class.c\n@@ -105,7 +105,10 @@\n \n   if (c->flags & MRB_FL_CLASS_IS_INHERITED) {\n     struct subclass_args arg = {c, ary};\n+    mrb_gc_arena_save(mrb);\n+    mrb_gc_protect(mrb, ary);\n     mrb_objspace_each_objects(mrb, add_subclasses, &arg);\n+    mrb_gc_arena_restore(mrb, 0);\n   }\n   return ary;\n }\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -245,7 +237,7 @@
           108
         ],
         "kwargs": {},
-        "timestamp": 500341.643789633,
+        "timestamp": 1909623.986158442,
         "success": true,
         "result_summary": "Ok({'contents': '  9 static mrb_value\\n 10 mod_name(mrb_state *mrb, mrb_value self)\\n 11 {\\n 12   mrb_value name =  mrb_class_path(mrb, mrb_class_ptr(self));\\n 13   if (mrb_string_p(name)) {\\n 14     ..."
       }
@@ -254,14 +246,14 @@
       {
         "tool_name": "find_references",
         "args": [
-          "add_subclasses",
-          "mruby/mrbgems/mruby-class-ext/src/class.c",
+          "mrb_objspace_each_objects",
+          "",
           false
         ],
         "kwargs": {},
-        "timestamp": 500349.919923099,
+        "timestamp": 1909735.798315574,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='mruby/mrbgems/mruby-class-ext/src/class.c', refs=[FileReference(line=108, content='    mrb_objspace_each_objects(mrb, add_subclasses, &arg);', enclosing_definition='class..."
+        "result_summary": "Ok([FileReferences(file_name='mruby/src/class.c', refs=[FileReference(line=1488, content='    mrb_objspace_each_objects(mrb, fix_include_module, data);', enclosing_definition='mrb_include_module'), Fi..."
       }
     ],
     "apply_patch": [
@@ -269,10 +261,10 @@
         "tool_name": "apply_patch",
         "args": [
           "mruby/mrbgems/mruby-class-ext/src/class.c",
-          "@@ -67,15 +67,20 @@\n static int\n add_subclasses(mrb_state *mrb, struct RBasic *obj, void *data)\n {\n   struct subclass_args *args = (struct subclass_args*)data;\n   if (obj->tt == MRB_TT_CLASS) {\n     struct RClass *c = (struct RClass*)obj;\n     if (mrb_class_real(c->super) == args->c) {\n-      mrb_ary_push(mrb, args->ary, mrb_obj_value(obj));\n+      mrb_ary_push(mrb, args->ary, mrb_obj_value(c));\n     }\n   }\n   return MRB_EACH_OBJ_OK;\n }\n@@ -101,10 +106,13 @@\n   mrb_value ary;\n \n   c = mrb_class_ptr(self);\n   ary = mrb_ary_new(mrb);\n \n   if (c->flags & MRB_FL_CLASS_IS_INHERITED) {\n     struct subclass_args arg = {c, ary};\n+    mrb_gc_arena_save(mrb);\n     mrb_objspace_each_objects(mrb, add_subclasses, &arg);\n+    mrb_gc_arena_restore(mrb, 0);\n   }\n   return ary;\n }\n"
+          "@@ -103,10 +103,13 @@ class_subclasses(mrb_state *mrb, mrb_value self)\n   c = mrb_class_ptr(self);\n   ary = mrb_ary_new(mrb);\n \n   if (c->flags & MRB_FL_CLASS_IS_INHERITED) {\n     struct subclass_args arg = {c, ary};\n+    mrb_gc_arena_save(mrb);\n+    mrb_gc_protect(mrb, ary);\n     mrb_objspace_each_objects(mrb, add_subclasses, &arg);\n+    mrb_gc_arena_restore(mrb, 0);\n   }\n   return ary;\n }\n"
         ],
         "kwargs": {},
-        "timestamp": 500353.963708441,
+        "timestamp": 1909738.569412111,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -282,7 +274,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 500384.919813943,
+        "timestamp": 1909906.102673132,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }

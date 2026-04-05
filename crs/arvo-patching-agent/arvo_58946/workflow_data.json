@@ -1,5 +1,5 @@
 {
-  "vuln_id": 176,
+  "vuln_id": 514,
   "crash_result": {
     "output": "==86068==ERROR: AddressSanitizer: heap-buffer-overflow on address 0xe3f03bd0 at pc 0x08138eed bp 0xffef7558 sp 0xffef7138\nREAD of size 160 at 0xe3f03bd0 thread T0\nSCARINESS: 26 (multi-byte-read-heap-buffer-overflow)\n    #0 0x8138eec in __interceptor_fwrite /src/llvm-project/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc:1157:16\n    #1 0x81e3b18 in memory_test /src/wolf-ssl-ssh-fuzzers/oss-fuzz/projects/wolf-ssl-ssh/fuzzers/include/fuzzers/shared.h:239:5\n    #2 0x81e3b",
     "stack": "#0 0x8138eec in __interceptor_fwrite llvm-project/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc:1157:16\n#1 0x81e3b18 in memory_test wolf-ssl-ssh-fuzzers/oss-fuzz/projects/wolf-ssl-ssh/fuzzers/include/fuzzers/shared.h:239:5\n#2 0x81e3b18 in fuzzer_send wolf-ssl-ssh-fuzzers/oss-fuzz/projects/wolf-ssl-ssh/fuzzers/include/fuzzers/shared.h:257:13\n#3 0x85177f0 in SendBuffered wolf-ssl-ssh-fuzzers/oss-fuzz/projects/wolf-ssl-ssh/fuzzers/wolfssl/wolfssl/src/internal.c:10013:20",
@@ -22,93 +22,85 @@
     "dedup": "__interceptor_fwrite--memory_test--fuzzer_send"
   },
   "analyzed_vuln": {
-    "function": "Dtls13RtxSendBuffered",
-    "file": "wolfssl/src/dtls13.c",
-    "description": "Heap OOB read is caused by passing an inflated send length to the I/O callback. In Dtls13RtxSendBuffered(), sendSz is computed as r->length + headerLength (+ MAX_MSG_EXTRA for encrypted epochs) and then passed to Dtls13SendFragment(). This can leave ssl->buffers.outputBuffer.length larger than the actual bytes copied into the buffer (only header+record payload are materialized), so SendBuffered() calls CBIOSend/fuzzer_send with sz=outputBuffer.length that exceeds valid initialized allocation tail. The fuzzer's memory_test/fwrite then reads past the 400-byte heap allocation (READ of 160 at end of chunk). Crash manifests in fwrite, but root cause is incorrect DTLS13 retransmit size/accounting in Dtls13RtxSendBuffered.",
-    "conditions": "Using the wolfssl client randomize harness with DTLS1.3 path, an input that drives timeout/retransmission (Dtls13RtxTimeout -> Dtls13RtxSendBuffered) and buffered handshake records can trigger it. The retransmit record has non-zero epoch so MAX_MSG_EXTRA is added; buffer growth/check uses this larger size, then send path exposes that oversized length via outputBuffer.length to SendBuffered()->fuzzer_send(). With empty/short fuzz input and randomized I/O/allocation behavior, this path is reachable and causes deterministic OOB read in memory_test."
+    "function": "SendBuffered",
+    "file": "wolfssl/src/internal.c",
+    "description": "`SendBuffered` passes `outputBuffer.length` as the send size while the data pointer is offset by `outputBuffer.idx`. If `idx` is non-zero, this asks the IO callback to read more bytes than remain in the buffer tail (`length` bytes from `buffer+idx` instead of `length-idx`), causing an out-of-bounds read. The fuzzer\u2019s `fuzzer_send`/`memory_test` detects this via `fwrite`.",
+    "conditions": "In the DTLS client-randomize harness, crafted input drives DTLS 1.3 retransmission/output buffering so that `ssl->buffers.outputBuffer.idx` becomes non-zero while `length` is still positive (e.g., partial writes / buffered retransmit path through `Dtls13RtxSendBuffered` -> `CheckAvailableSize` -> `SendBuffered`). Then `SendBuffered` invokes `CBIOSend` with pointer `buffer + idx` and size `length`, leading to read past the allocated output buffer end (observed 400-byte allocation, 160-byte over-read starting exactly at end)."
   },
   "cost_analysis": {
     "triage": {
       "total_llm_calls": 3,
-      "total_cost": 0.05187805,
-      "total_input_tokens": 31811,
-      "total_output_tokens": 550,
-      "total_cached_tokens": 7296,
+      "total_cost": 0.03432065,
+      "total_input_tokens": 29391,
+      "total_output_tokens": 520,
+      "total_cached_tokens": 15488,
       "llm_calls": [
         {
-          "timestamp": 1773468289.4113588,
+          "timestamp": 1774881474.167612,
           "model": "gpt-5.3-codex",
-          "cost": 0.0118076,
-          "input_tokens": 6008,
-          "output_tokens": 222,
-          "total_tokens": 6230,
+          "cost": 0.0112196,
+          "input_tokens": 6096,
+          "output_tokens": 169,
+          "total_tokens": 6265,
           "cached_tokens": 1152,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_CJI5IjnV601n9QuA3NRL3XR0"
+              "tool_call_id": "call_dXip5wKbigbl8z92XXwZGW5e"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_ZiKaG3oBJKzxZP3aJJzB53y8"
+              "tool_call_id": "call_bdfBbKWHLjdQFZdeMea5xDuw"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_oANC368Lz8FAXpbEAM5XLLG3"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_NYiKcdHCarC9GvFfJHAvl53R"
+              "tool_call_id": "call_lyNj8O4Q7TWgPiL8L7mORvdU"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773468301.891819,
+          "timestamp": 1774881493.745813,
           "model": "gpt-5.3-codex",
-          "cost": 0.0064126999999999995,
-          "input_tokens": 8202,
-          "output_tokens": 124,
-          "total_tokens": 8326,
+          "cost": 0.00597345,
+          "input_tokens": 8167,
+          "output_tokens": 97,
+          "total_tokens": 8264,
           "cached_tokens": 6144,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
           "has_tool_calls": true,
-          "tool_call_count": 4,
+          "tool_call_count": 3,
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_M34PFPuiTrLjSx56ff0QVu1f"
+              "tool_call_id": "call_gzJ5EFBXAzqP4XGoSARmMdz1"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_oAL4XbfQdYU3XHJqiFZQYfxX"
+              "tool_call_id": "call_PTn3vBNW6NTW1gkulUpgLaNU"
             },
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_im8SqdzQm4JGByXH7Nrcu0AD"
-            },
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_c8Aln4rsxJWb6XeeMtnzVF1w"
+              "tool_call_id": "call_YxGCPbI5obdwpTUdW1eMmKOH"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773468308.7654257,
+          "timestamp": 1774881498.5900009,
           "model": "gpt-5.3-codex",
-          "cost": 0.03365775,
-          "input_tokens": 17601,
-          "output_tokens": 204,
-          "total_tokens": 17805,
-          "cached_tokens": 0,
+          "cost": 0.0171276,
+          "input_tokens": 15128,
+          "output_tokens": 254,
+          "total_tokens": 15382,
+          "cached_tokens": 8192,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -117,7 +109,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_vOaHQo4NmbFHCXmjgAUGkbad"
+              "tool_call_id": "call_hOgWnb5i0OZNRR7iqdU0nG2d"
             }
           ],
           "finish_reason": "tool_calls"
@@ -125,20 +117,20 @@
       ]
     },
     "patching": {
-      "total_llm_calls": 7,
-      "total_cost": 0.05337045,
-      "total_input_tokens": 68875,
-      "total_output_tokens": 358,
-      "total_cached_tokens": 45824,
+      "total_llm_calls": 4,
+      "total_cost": 0.0407596,
+      "total_input_tokens": 38360,
+      "total_output_tokens": 334,
+      "total_cached_tokens": 19712,
       "llm_calls": [
         {
-          "timestamp": 1773468310.397083,
+          "timestamp": 1774881500.8501315,
           "model": "gpt-5.3-codex",
-          "cost": 0.0074662,
-          "input_tokens": 5108,
-          "output_tokens": 82,
-          "total_tokens": 5190,
-          "cached_tokens": 1664,
+          "cost": 0.0101682,
+          "input_tokens": 7284,
+          "output_tokens": 75,
+          "total_tokens": 7359,
+          "cached_tokens": 2304,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -147,86 +139,23 @@
           "tool_calls": [
             {
               "tool_name": "read_source",
-              "tool_call_id": "call_eK1OM9Pa0BjmCFo9R8544vjB"
+              "tool_call_id": "call_RWIMbRwQPPkxPH8XJaDLUjEO"
             },
             {
               "tool_name": "find_references",
-              "tool_call_id": "call_vpOu3qPQTU8tjTBYBEphKvFN"
+              "tool_call_id": "call_xOjsgVeVVudDTzaVVTdVrhPJ"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773468335.25051,
+          "timestamp": 1774882384.1437988,
           "model": "gpt-5.3-codex",
-          "cost": 0.0056700000000000006,
-          "input_tokens": 7608,
-          "output_tokens": 30,
-          "total_tokens": 7638,
-          "cached_tokens": 5120,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_TbH4D3qzzB4dqPBS3ZlGdr02"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773468336.9337683,
-          "model": "gpt-5.3-codex",
-          "cost": 0.00587685,
-          "input_tokens": 9819,
-          "output_tokens": 42,
-          "total_tokens": 9861,
-          "cached_tokens": 7552,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_definition",
-              "tool_call_id": "call_8lsrZhc3FYrMQKxSAjoBkkxf"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773468341.9024322,
-          "model": "gpt-5.3-codex",
-          "cost": 0.0024584000000000003,
-          "input_tokens": 9920,
-          "output_tokens": 30,
-          "total_tokens": 9950,
-          "cached_tokens": 9728,
-          "input_cost_per_token": 1.75e-06,
-          "output_cost_per_token": 1.4e-05,
-          "cache_cost_per_token": 1.75e-07,
-          "has_tool_calls": true,
-          "tool_call_count": 1,
-          "tool_calls": [
-            {
-              "tool_name": "read_source",
-              "tool_call_id": "call_1xQxUgU5wELxWFZ7CSi9L1QH"
-            }
-          ],
-          "finish_reason": "tool_calls"
-        },
-        {
-          "timestamp": 1773468343.986882,
-          "model": "gpt-5.3-codex",
-          "cost": 0.007316049999999999,
-          "input_tokens": 11955,
-          "output_tokens": 137,
-          "total_tokens": 12092,
-          "cached_tokens": 9856,
+          "cost": 0.00952315,
+          "input_tokens": 10117,
+          "output_tokens": 222,
+          "total_tokens": 10339,
+          "cached_tokens": 7168,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -235,19 +164,19 @@
           "tool_calls": [
             {
               "tool_name": "apply_patch",
-              "tool_call_id": "call_o9EMg9aFt8tkcux2qujSFjGd"
+              "tool_call_id": "call_APthsJDgWgxoQEOPQhmmv2Qy"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773468345.0306756,
+          "timestamp": 1774882385.6021698,
           "model": "gpt-5.3-codex",
-          "cost": 0.0027622,
-          "input_tokens": 12180,
+          "cost": 0.00231525,
+          "input_tokens": 10427,
           "output_tokens": 14,
-          "total_tokens": 12194,
-          "cached_tokens": 11904,
+          "total_tokens": 10441,
+          "cached_tokens": 10240,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
           "cache_cost_per_token": 1.75e-07,
@@ -256,18 +185,18 @@
           "tool_calls": [
             {
               "tool_name": "test_patch",
-              "tool_call_id": "call_xhmQQ2z9u1VMaLTmvlB0Uw7I"
+              "tool_call_id": "call_V7j2Pcao6nYlwUUwkPKC90Rz"
             }
           ],
           "finish_reason": "tool_calls"
         },
         {
-          "timestamp": 1773469747.6651154,
+          "timestamp": 1774883895.3064203,
           "model": "gpt-5.3-codex",
-          "cost": 0.02182075,
-          "input_tokens": 12285,
+          "cost": 0.018753,
+          "input_tokens": 10532,
           "output_tokens": 23,
-          "total_tokens": 12308,
+          "total_tokens": 10555,
           "cached_tokens": 0,
           "input_cost_per_token": 1.75e-06,
           "output_cost_per_token": 1.4e-05,
@@ -277,7 +206,7 @@
           "tool_calls": [
             {
               "tool_name": "terminate",
-              "tool_call_id": "call_eFFSjxUddOUpw4nHY4Bdunyj"
+              "tool_call_id": "call_v5zhNJ7odE9h8HfMOsb6wvPo"
             }
           ],
           "finish_reason": "tool_calls"
@@ -285,15 +214,15 @@
       ]
     },
     "total": {
-      "total_cost": 0.1052485,
-      "total_input_tokens": 100686,
-      "total_output_tokens": 908,
-      "total_llm_calls": 10
+      "total_cost": 0.07508025,
+      "total_input_tokens": 67751,
+      "total_output_tokens": 854,
+      "total_llm_calls": 7
     }
   },
   "patch_result": {
     "success": true,
-    "patch": "--- a/src/dtls13.c\n+++ b/src/dtls13.c\n@@ -1502,9 +1502,6 @@\n \n         sendSz = r->length + headerLength;\n \n-        if (!w64IsZero(r->epoch))\n-            sendSz += MAX_MSG_EXTRA;\n-\n         ret = CheckAvailableSize(ssl, sendSz);\n         if (ret != 0)\n             return ret;\n",
+    "patch": "--- a/src/internal.c\n+++ b/src/internal.c\n@@ -10010,10 +10010,19 @@\n #endif\n \n     while (ssl->buffers.outputBuffer.length > 0) {\n+        word32 sendSz;\n+\n+        if (ssl->buffers.outputBuffer.idx > ssl->buffers.outputBuffer.length) {\n+            WOLFSSL_MSG(\"SendBuffered() output buffer idx out of range\");\n+            return BUFFER_ERROR;\n+        }\n+\n+        sendSz = ssl->buffers.outputBuffer.length - ssl->buffers.outputBuffer.idx;\n+\n         int sent = ssl->CBIOSend(ssl,\n                                       (char*)ssl->buffers.outputBuffer.buffer +\n                                       ssl->buffers.outputBuffer.idx,\n-                                      (int)ssl->buffers.outputBuffer.length,\n+                                      (int)sendSz,\n                                       ssl->IOCB_WriteCtx);\n         if (sent < 0) {\n             switch (sent) {\n",
     "build_artifacts_count": 3,
     "tested_povs_count": 1,
     "last_validation": {
@@ -307,79 +236,43 @@
   },
   "context_retrieval": {
     "source_questions": [],
-    "read_definition": [
-      {
-        "tool_name": "read_definition",
-        "args": [
-          "Dtls13SendFragment",
-          "wolfssl/src/dtls13.c",
-          0,
-          true
-        ],
-        "kwargs": {},
-        "timestamp": 500627.134227353,
-        "success": true,
-        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n500 static int Dtls13SendFragment(WOLFSSL* ssl, byte* output, word16 output_size,, extra=None))"
-      }
-    ],
+    "read_definition": [],
     "read_source": [
       {
         "tool_name": "read_source",
         "args": [
-          "wolfssl/src/dtls13.c",
-          1508
+          "wolfssl/src/internal.c",
+          10013
         ],
         "kwargs": {},
-        "timestamp": 500599.606522527,
+        "timestamp": 1913789.436414469,
         "success": true,
-        "result_summary": "Ok({'contents': '1409         ato16(input + idx, &hdrInfo->recordLength);\\n1410         idx += DTLS13_LEN_SIZE;\\n1411     }\\n1412     else {\\n1413         /* length not present. The size of the record..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "wolfssl/src/dtls13.c",
-          840
-        ],
-        "kwargs": {},
-        "timestamp": 500623.82550597,
-        "success": true,
-        "result_summary": "Ok({'contents': '741     else {\\n742         /* ssl->dtls_rx_msg_list is NULL and fragOffset != 0 so this is not in\\n743          * order */\\n744         return 1;\\n745     }\\n746 \\n747     return 0;\\..."
-      },
-      {
-        "tool_name": "read_source",
-        "args": [
-          "wolfssl/src/dtls13.c",
-          500
-        ],
-        "kwargs": {},
-        "timestamp": 500630.477402745,
-        "success": true,
-        "result_summary": "Ok({'contents': '401 \\n402 static WC_INLINE int FragIsInOutputBuffer(WOLFSSL* ssl, const byte* frag)\\n403 {\\n404     const byte* OutputBuffer = ssl->buffers.outputBuffer.buffer;\\n405     word32 Output..."
+        "result_summary": "Ok({'contents': ' 9914                     /* TODO: support WANT_WRITE here */\\n 9915                     if (Dtls13RtxTimeout(ssl) < 0) {\\n 9916                         WOLFSSL_MSG(\\n 9917           ..."
       }
     ],
     "find_references": [
       {
         "tool_name": "find_references",
         "args": [
-          "Dtls13SendFragment",
-          "wolfssl/src/dtls13.c",
+          "SendBuffered",
+          "wolfssl/src/internal.c",
           false
         ],
         "kwargs": {},
-        "timestamp": 500621.805562501,
+        "timestamp": 1914669.244663441,
         "success": true,
-        "result_summary": "Ok([FileReferences(file_name='wolfssl/src/dtls13.c', refs=[FileReference(line=882, content='    ret = Dtls13SendFragment(ssl, message, outputSize, (word16)length,', enclosing_definition='Dtls13SendOne..."
+        "result_summary": "Ok([FileReferences(file_name='wolfssl/src/internal.c', refs=[FileReference(line=9035, content='                ret = SendBuffered(ssl);', enclosing_definition='DtlsMsgPoolSend'), FileReference(line=90..."
       }
     ],
     "apply_patch": [
       {
         "tool_name": "apply_patch",
         "args": [
-          "wolfssl/src/dtls13.c",
-          "@@ -1500,10 +1500,7 @@\n         headerLength = Dtls13GetRlHeaderLength(ssl, !w64IsZero(r->epoch));\n \n         sendSz = r->length + headerLength;\n-\n-        if (!w64IsZero(r->epoch))\n-            sendSz += MAX_MSG_EXTRA;\n-\n+\n         ret = CheckAvailableSize(ssl, sendSz);\n         if (ret != 0)\n             return ret;\n"
+          "wolfssl/src/internal.c",
+          "@@ -10012,11 +10012,20 @@\n     while (ssl->buffers.outputBuffer.length > 0) {\n+        word32 sendSz;\n+\n+        if (ssl->buffers.outputBuffer.idx > ssl->buffers.outputBuffer.length) {\n+            WOLFSSL_MSG(\"SendBuffered() output buffer idx out of range\");\n+            return BUFFER_ERROR;\n+        }\n+\n+        sendSz = ssl->buffers.outputBuffer.length - ssl->buffers.outputBuffer.idx;\n+\n         int sent = ssl->CBIOSend(ssl,\n                                       (char*)ssl->buffers.outputBuffer.buffer +\n                                       ssl->buffers.outputBuffer.idx,\n-                                      (int)ssl->buffers.outputBuffer.length,\n+                                      (int)sendSz,\n                                       ssl->IOCB_WriteCtx);\n         if (sent < 0) {\n             switch (sent) {\n"
         ],
         "kwargs": {},
-        "timestamp": 500632.588311251,
+        "timestamp": 1914672.910642914,
         "success": true,
         "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
       }
@@ -389,7 +282,7 @@
         "tool_name": "test_patch",
         "args": [],
         "kwargs": {},
-        "timestamp": 502034.693338449,
+        "timestamp": 1916182.255907036,
         "success": true,
         "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
       }
