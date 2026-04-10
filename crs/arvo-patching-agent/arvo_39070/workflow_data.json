@@ -1,0 +1,342 @@
+{
+  "vuln_id": 543,
+  "crash_result": {
+    "output": "AddressSanitizer:DEADLYSIGNAL\n=================================================================\n==9773==ERROR: AddressSanitizer: SEGV on unknown address 0x000097b34018 (pc 0x0000005714db bp 0x7ffefe488d30 sp 0x7ffefe488d30 T0)\n==9773==The signal is caused by a READ memory access.\nSCARINESS: 20 (wild-addr-read)\n    #0 0x5714db in MqttProps_Free /src/wolfmqtt/src/mqtt_packet.c:1838:20\n    #1 0x56d648 in MqttClient_PropsFree /src/wolfmqtt/src/mqtt_client.c:2160:12\n    #2 0x56d648 in MqttClient_Unsu",
+    "stack": "#0 0x5714db in MqttProps_Free wolfmqtt/src/mqtt_packet.c:1838:20\n#1 0x56d648 in MqttClient_PropsFree wolfmqtt/src/mqtt_client.c:2160:12\n#2 0x56d648 in MqttClient_Unsubscribe wolfmqtt/src/mqtt_client.c:1905:9\n#3 0x562e93 in wolfMQTTFuzzer::unsubscribe() wolfmqtt-fuzzers/fuzzer.cpp:284:9\n#4 0x5662ca in wolfMQTTFuzzer::Run() wolfmqtt-fuzzers/fuzzer.cpp:480:21\n#5 0x566fe5 in LLVMFuzzerTestOneInput wolfmqtt-fuzzers/fuzzer.cpp:541:12\n#6 0x456bf3 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*,",
+    "dedup": "MqttProps_Free--MqttClient_PropsFree--MqttClient_Unsubscribe"
+  },
+  "pov_run_data": {
+    "task_uuid": "4235055a-30ec-53ad-8a05-0026ba8fef80",
+    "project_name": "wolfmqtt",
+    "harness": "wolfmqtt-fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "MqttProps_Free--MqttClient_PropsFree--MqttClient_Unsubscribe"
+  },
+  "decoded_pov": {
+    "project_name": "wolfmqtt",
+    "harness": "wolfmqtt-fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'@\\x01\\x00#\\xef/\\x00\\x00,\\x10\\xfe\\xfe\\xff\\xf7\\x00\\x03\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\n\\x02\\x00\\x00\\x00\\x01\\x00\\x00~\\x00\\x00\\xb9\\x00\\x00\\x00\\xff\\x00\\x00-\\x00\\xfe\\\\c\\xbeB\\x01\\x00\\x04\\x02\\x00\\xff\\x00\\xeb\\x87\\r\\x00\\x00\\x00\\x00\\x05*\\x04\\x04\\x04\\x04\\x04\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\x9e\\x08\\x02\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\xbd\\x00\\x01\\x00\\x00X\\x00\\x00\\n\\x02\\x00\\x00\\x00\\x01\\x00\\x00~\\x00\\x00\\xb9\\x00\\x00\\x00\\xff\\x00\\x00-\\x00\\xfe\\\\c\\xbeB\\x01\\x00\\x04\\x02\\x00\\xff\\x00\\xeb\\x87\\r\\x00\\x00\\x00\\x00\\x05*\\x04\\x04\\x04\\x04\\x04\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\x9e\\x08\\x02\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\x9e\\xbd\\x00\\x00\\x08\\xe4\\x02\\x00\\x00\\x00B\\x01\\x01\\x00\\x00\\x00\\x00'\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "MqttProps_Free--MqttClient_PropsFree--MqttClient_Unsubscribe"
+  },
+  "analyzed_vuln": {
+    "function": "MqttClient_Unsubscribe",
+    "file": "wolfmqtt/src/mqtt_client.c",
+    "description": "`MqttClient_Unsubscribe` unconditionally frees `unsubscribe->ack.props` after waiting for an UNSUBACK, but it never initializes/clears `unsubscribe->ack.props` at function entry and does not verify that a valid v5 UNSUBACK property list was actually decoded. As a result, `ack.props` can contain attacker-influenced stale/garbage pointer data, which is passed to `MqttClient_PropsFree` -> `MqttProps_Free`, causing traversal of an invalid linked list pointer and a wild read/SEGV at `head->type`/`head->next`. Crash occurs in `MqttProps_Free`, but root cause is unsafe state handling in `MqttClient_Unsubscribe` before calling free.",
+    "conditions": "Trigger requires reaching `MqttClient_Unsubscribe` (fuzzer `unsubscribe()` path) with MQTT v5 property handling enabled, and causing `unsubscribe->ack.props` to be non-NULL but invalid (e.g., uninitialized/stale due to missing reset or malformed/partial UNSUBACK decode path). After `MqttClient_WaitType` returns, the code checks only `ack.props != NULL` and calls `MqttClient_PropsFree` on it, leading to invalid pointer dereference during property-list walk."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 2,
+      "total_cost": 0.020127100000000002,
+      "total_input_tokens": 12226,
+      "total_output_tokens": 399,
+      "total_cached_tokens": 4352,
+      "llm_calls": [
+        {
+          "timestamp": 1775795173.2265604,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0053046,
+          "input_tokens": 3260,
+          "output_tokens": 101,
+          "total_tokens": 3361,
+          "cached_tokens": 1152,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_KHx6OumShn0ufd5LylLu1EEy"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Qb51I8Iw657oD74mHU4YyKF5"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_JYpWlTlthsiPYEluukxqCU1q"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775795184.042087,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0148225,
+          "input_tokens": 8966,
+          "output_tokens": 298,
+          "total_tokens": 9264,
+          "cached_tokens": 3200,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_wsLdjaTBBwByT8DXNswPOeHZ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 5,
+      "total_cost": 0.030470999999999998,
+      "total_input_tokens": 37172,
+      "total_output_tokens": 482,
+      "total_cached_tokens": 26240,
+      "llm_calls": [
+        {
+          "timestamp": 1775795185.788791,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0064792,
+          "input_tokens": 4376,
+          "output_tokens": 103,
+          "total_tokens": 4479,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_VjxdzAAnCYfBkLbbfNO9dDo8"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_DoWByPoF0LmkSMmLtxik0kXV"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_JzcKzKGIseDSCYZqa9vAqmCh"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775795293.2021449,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0027881,
+          "input_tokens": 4662,
+          "output_tokens": 106,
+          "total_tokens": 4768,
+          "cached_tokens": 4352,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_ABABCucU4v5bfkM6zyQ8JfJg"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_5kpQLDWcwDQCPCY6MV7UKTFo"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_9xQ68V4HbXw6pdOPjD5rbnqP"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775795328.8702126,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01665545,
+          "input_tokens": 9127,
+          "output_tokens": 236,
+          "total_tokens": 9363,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_2RxuyQf6UHSjxRWz2z0qSUXg"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775795330.0948298,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00222005,
+          "input_tokens": 9451,
+          "output_tokens": 14,
+          "total_tokens": 9465,
+          "cached_tokens": 9216,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_EGtuvatBxShdP4mbCYlUPA8J"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775795472.4004238,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0023282,
+          "input_tokens": 9556,
+          "output_tokens": 23,
+          "total_tokens": 9579,
+          "cached_tokens": 9344,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_miNE76s9HcSMKeCQqhTXtBNi"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.0505981,
+      "total_input_tokens": 49398,
+      "total_output_tokens": 881,
+      "total_llm_calls": 7
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/wolfmqtt/src/mqtt_client.c\n+++ b/wolfmqtt/src/mqtt_client.c\n@@ -1823,6 +1823,12 @@\n #ifdef WOLFMQTT_V5\n     /* Use specified protocol version if set */\n     unsubscribe->protocol_level = client->protocol_level;\n+\n+    /* Ensure ack properties are in a known state for this transaction.\n+     * This avoids freeing stale/uninitialized pointers on error or malformed\n+     * UNSUBACK decode paths.\n+     */\n+    unsubscribe->ack.props = NULL;\n #endif\n \n     if (unsubscribe->stat == MQTT_MSG_BEGIN) {\n@@ -1903,6 +1909,7 @@\n     if (unsubscribe->ack.props != NULL) {\n         /* Release the allocated properties */\n         MqttClient_PropsFree(unsubscribe->ack.props);\n+        unsubscribe->ack.props = NULL;\n     }\n #endif\n \n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [],
+    "read_definition": [],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "src/mqtt_client.c",
+          1860
+        ],
+        "kwargs": {},
+        "timestamp": 486002.041658935,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'src/mqtt_client.c' does not exist in directory tree. Similar paths: wolfmqtt/src/mqtt_client.c, extra=None))"
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "src/mqtt_client.c",
+          2145
+        ],
+        "kwargs": {},
+        "timestamp": 486002.041878666,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'src/mqtt_client.c' does not exist in directory tree. Similar paths: wolfmqtt/src/mqtt_client.c, extra=None))"
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "wolfmqtt/src/mqtt_client.c",
+          1905
+        ],
+        "kwargs": {},
+        "timestamp": 486004.327598607,
+        "success": true,
+        "result_summary": "Ok({'contents': '1806     }\\n1807 \\n1808     /* reset state */\\n1809     subscribe->stat = MQTT_MSG_BEGIN;\\n1810 \\n1811     return rc;\\n1812 }\\n1813 \\n1814 int MqttClient_Unsubscribe(MqttClient *clien..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "wolfmqtt/src/mqtt_client.c",
+          2160
+        ],
+        "kwargs": {},
+        "timestamp": 486004.331644513,
+        "success": true,
+        "result_summary": "Ok({'contents': '2061     /* No response for MQTT disconnect packet */\\n2062 \\n2063     return MQTT_CODE_SUCCESS;\\n2064 }\\n2065 \\n2066 #ifdef WOLFMQTT_V5\\n2067 int MqttClient_Auth(MqttClient *client, ..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "MqttClient_Unsubscribe",
+          "src/mqtt_client.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 486002.061318343,
+        "success": true,
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: wolfmqtt-fuzzers/fuzzer.cpp, wolfmqtt/wolfmqtt/mqtt_client.h, wolfmqtt/examples/multithread/multithread.c, wolfmq..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "ack.props",
+          "wolfmqtt/src/mqtt_client.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 486035.805155063,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='/src/wolfmqtt/src/mqtt_client.c', refs=[FileReference(line=1903, content='    if (unsubscribe->ack.props != NULL) {', enclosing_definition='N/A'), FileReference(line=1905..."
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "wolfmqtt/src/mqtt_client.c",
+          "@@ -1823,6 +1823,11 @@ int MqttClient_Unsubscribe(MqttClient *client, MqttUnsubscribe *unsubscribe)\n #ifdef WOLFMQTT_V5\n     /* Use specified protocol version if set */\n     unsubscribe->protocol_level = client->protocol_level;\n+\n+    /* Ensure ack properties are in a known state for this transaction.\n+     * This avoids freeing stale/uninitialized pointers on error or malformed\n+     * UNSUBACK decode paths.\n+     */\n+    unsubscribe->ack.props = NULL;\n #endif\n@@ -1903,7 +1908,8 @@ int MqttClient_Unsubscribe(MqttClient *client, MqttUnsubscribe *unsubscribe)\n     if (unsubscribe->ack.props != NULL) {\n         /* Release the allocated properties */\n         MqttClient_PropsFree(unsubscribe->ack.props);\n+        unsubscribe->ack.props = NULL;\n     }\n #endif\n"
+        ],
+        "kwargs": {},
+        "timestamp": 486040.03158572,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 486182.220566048,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

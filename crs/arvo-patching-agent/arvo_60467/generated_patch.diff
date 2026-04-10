@@ -1,21 +1,23 @@
 --- a/src/hb-ot-cmap-table.hh
 +++ b/src/hb-ot-cmap-table.hh
-@@ -677,7 +677,17 @@
-   bool sanitize (hb_sanitize_context_t *c) const
+@@ -654,7 +654,10 @@
    {
-     TRACE_SANITIZE (this);
--    return_trace (c->check_struct (this) && glyphIdArray.sanitize (c));
-+    if (unlikely (!c->check_struct (this)))
-+      return_trace (false);
-+
-+    if (unlikely (!c->check_range (this, length)))
-+    {
-+      UINT new_length = (UINT) (uintptr_t) (c->end - (char *) this);
-+      if (!c->try_set (&length, new_length))
-+        return_trace (false);
-+    }
-+
-+    return_trace (glyphIdArray.sanitize (c));
+     hb_codepoint_t start = startCharCode;
+     unsigned int count = glyphIdArray.len;
+-    for (unsigned int i = 0; i < count; i++)
++    /* Be robust against malformed subtables where declared array length does
++     * not match sanitized backing bytes. */
++    unsigned int safe_count = hb_min (count, glyphIdArray.get_size () / HBGlyphID16::static_size);
++    for (unsigned int i = 0; i < safe_count; i++)
+       if (glyphIdArray[i])
+ 	out->add (start + i);
    }
- 
-   protected:
+@@ -663,7 +666,7 @@
+ 			hb_map_t *mapping /* OUT */) const
+   {
+     hb_codepoint_t start_cp = startCharCode;
+-    unsigned count = glyphIdArray.len;
++    unsigned count = hb_min ((unsigned) glyphIdArray.len, (unsigned) (glyphIdArray.get_size () / HBGlyphID16::static_size));
+     for (unsigned i = 0; i < count; i++)
+       if (glyphIdArray[i])
+       {

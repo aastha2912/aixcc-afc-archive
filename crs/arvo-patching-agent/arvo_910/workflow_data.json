@@ -1,0 +1,340 @@
+{
+  "vuln_id": 520,
+  "crash_result": {
+    "output": "==4315==ERROR: AddressSanitizer: heap-use-after-free on address 0x608000000424 at pc 0x0000005f92da bp 0x7fffe614fac0 sp 0x7fffe614fab8\nREAD of size 4 at 0x608000000424 thread T0\nSCARINESS: 45 (4-byte-read-heap-use-after-free)\n    #0 0x5f92d9 in TetrahedralInterpFloat /src/lcms/src/cmsintrp.c:673:38\n    #1 0x608a93 in _LUTevalFloat /src/lcms/src/cmslut.c:1356:15\n    #2 0x5d9bdf in XFormSampler16 /src/lcms/src/cmsopt.c:423:5\n    #3 0x605bce in cmsStageSampleCLut16bit /src/lcms/src/cmslut.c:797:14",
+    "stack": "#0 0x5f92d9 in TetrahedralInterpFloat lcms/src/cmsintrp.c:673:38\n#1 0x608a93 in _LUTevalFloat lcms/src/cmslut.c:1356:15\n#2 0x5d9bdf in XFormSampler16 lcms/src/cmsopt.c:423:5\n#3 0x605bce in cmsStageSampleCLut16bit lcms/src/cmslut.c:797:14\n#4 0x5d8372 in OptimizeByResampling lcms/src/cmsopt.c:734:10\n#5 0x5d7a7f in _cmsOptimizePipeline lcms/src/cmsopt.c:1942:17\n#6 0x5aacbf in AllocEmptyTransform lcms/src/cmsxform.c:819:15\n#7 0x5aa1be in cmsCreateExtendedTransform lcms/src/cmsxform.c:1075:13\n#8 0x5a",
+    "dedup": "TetrahedralInterpFloat--_LUTevalFloat--XFormSampler16"
+  },
+  "pov_run_data": {
+    "task_uuid": "4c9b4879-3f2a-56ff-941e-13f7fba17b4d",
+    "project_name": "lcms",
+    "harness": "cms_transform_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "TetrahedralInterpFloat--_LUTevalFloat--XFormSampler16"
+  },
+  "decoded_pov": {
+    "project_name": "lcms",
+    "harness": "cms_transform_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x0cL\\x10l,\\x00inkLab Lab \\xff\\x00dd\\x98\\x00\\x00MTO\\x01\\x00acsp\\x90mpet\\x04\\xff\\xfb\\xd3\\x00\\x08\\x00\\t\\x00\\x00\\x00\\x01\\x00\\x00\\x00*Lab \\x00\\x00\\x00*\\x00\\x00\\x00\\x00\\xff\\xff\\xff\\xff\\x00\\x00\\x00\\x06*\\x00aca2P16bf35b88ff190130bd2d=pseq\\x02\\x00\\x05\\x00\\xff\\xff\\xff\\xff\\x00\\x00\\x08)\\x80\\x00\\x00\\x00\\x00\\x02D2B0\\x00\\x00\\x00\\xe4\\x00\\x00\\x00\\x00\\x00 C\\x00Cl\\x00x2sa M1*H\\t\\x01\\x00\\x00\\x02b\\x02\\x02scrLab!\\x00\\x00YCbr\\x00\\x00\\xc80!\\xffacsp\\x98\\x01clut\\x00\\x00\\x002\\x00\\x03@\\x01\\x02\\x02\\x02\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00Cl x2sa l\\x02c\\xf2mpet\\xff\\xfe\\xfb\\xd3\\x00\\x03\\x00\\x03\\x00\\x00\\x00\\x02\\x00\\x00\\x00*Lab \\x00\\x00\\x00*\\x00\\x00\\x00\\x00\\xc80!\\xffaHsp\\x90\\x02clut\\x00l\\x02\\x10\\x00\\x03\\x00\\x03\\x02\\x02\\x02\\x01rc21:\\x00\\x00\\x00*\\x00\\x00\\x00\\x00\\xc80!\\xffaHsp\\x90\\x02clu???????????????????????\\x7f\\xff\\xff\\xff?????????????????????????????????????????????????????t\\x00l\\x02\\x10\\x00\\x03\\x00\\x03\\x02\\x02\\x02\\x01rc21\\xa7GI\\x00@;23144\\x7f1dc4\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xd0\\xde\\x07ac\\x89p\\x90clro\\x02SUUUUU\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00'\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "TetrahedralInterpFloat--_LUTevalFloat--XFormSampler16"
+  },
+  "analyzed_vuln": {
+    "function": "cmsWriteTag",
+    "file": "lcms/src/cmsio0.c",
+    "description": "Heap UAF is caused by cmsWriteTag replacing an existing tag via _cmsNewTag/_cmsDeleteTagByPos without checking aliasing between the old stored tag object and the new input pointer. In this PoV, SetTextTags writes cmsSigProfileDescriptionTag/cmsSigCopyrightTag multiple times on the same profile; the second write passes a cmsMLU pointer that is still referenced by the profile tag table, _cmsDeleteTagByPos frees it, and cmsWriteTag then duplicates from the now-freed pointer (via DupPtr), leaving corrupted/freed-backed data later consumed in transform optimization (eventually read in TetrahedralInterpFloat).",
+    "conditions": "Triggered through cms_transform_fuzzer when malformed profile data drives cmsCreateTransform down a path that repeatedly builds virtual Lab profiles (cmsCreateLab2ProfileTHR -> SetTextTags -> cmsWriteTag) and rewrites an already-present text tag using a pointer that aliases the currently stored tag object. Required condition: same tag signature rewritten on a profile with data pointer referring to the existing tag allocation, so _cmsDeleteTagByPos frees it before DupPtr reads it, creating use-after-free state that is later dereferenced during CLUT interpolation."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 5,
+      "total_cost": 0.0359884,
+      "total_input_tokens": 48288,
+      "total_output_tokens": 509,
+      "total_cached_tokens": 35328,
+      "llm_calls": [
+        {
+          "timestamp": 1775789177.4795413,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0117971,
+          "input_tokens": 6682,
+          "output_tokens": 137,
+          "total_tokens": 6819,
+          "cached_tokens": 1152,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_TBkL64QxKZp5iXG8ZRzYaD3J"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_F6dU2Re8lMbXT0bLXi3uXQhx"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_sjuyHFp1GxDnTKrjW2SFRSGb"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775789241.983642,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0021115500000000002,
+          "input_tokens": 6957,
+          "output_tokens": 30,
+          "total_tokens": 6987,
+          "cached_tokens": 6656,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_OzzQQ2X2Cnzd1NmkLK5FYC1I"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775789246.643548,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0059906000000000004,
+          "input_tokens": 9396,
+          "output_tokens": 31,
+          "total_tokens": 9427,
+          "cached_tokens": 6912,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_IKjKq7nruFsGTdGAQzj385wZ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775789247.9304183,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0056251999999999995,
+          "input_tokens": 11368,
+          "output_tokens": 32,
+          "total_tokens": 11400,
+          "cached_tokens": 9344,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_T7CSYhyFrrqM9pU71vYPMQ7R"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775789254.5618622,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01046395,
+          "input_tokens": 13885,
+          "output_tokens": 279,
+          "total_tokens": 14164,
+          "cached_tokens": 11264,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_fS66aacoR34prxWboEdYGT4o"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 4,
+      "total_cost": 0.042596049999999996,
+      "total_input_tokens": 54099,
+      "total_output_tokens": 629,
+      "total_cached_tokens": 38656,
+      "llm_calls": [
+        {
+          "timestamp": 1775789257.469901,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01536325,
+          "input_tokens": 7971,
+          "output_tokens": 101,
+          "total_tokens": 8072,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_f8DZT0E9o16M1QpxSUo6qe5H"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_wlDY3XZNh7KE2Q3T5KBuBdRA"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_RtwzQNVl5yqRxCZZyqUUq5QF"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775789263.70986,
+          "model": "gpt-5.3-codex",
+          "cost": 0.020546049999999996,
+          "input_tokens": 14955,
+          "output_tokens": 491,
+          "total_tokens": 15446,
+          "cached_tokens": 7936,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_gvRAQOWjOPqNwZpbl0e9lj4x"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775789266.2879112,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0031885,
+          "input_tokens": 15534,
+          "output_tokens": 14,
+          "total_tokens": 15548,
+          "cached_tokens": 15360,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_W9BDcWwXUdg1r4b0h5SirJwn"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775789395.5575213,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0034982499999999996,
+          "input_tokens": 15639,
+          "output_tokens": 23,
+          "total_tokens": 15662,
+          "cached_tokens": 15360,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_Ohi94GCmk8dXXNTq9vfD7P7f"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.07858445,
+      "total_input_tokens": 102387,
+      "total_output_tokens": 1138,
+      "total_llm_calls": 9
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/src/cmsio0.c\n+++ b/src/cmsio0.c\n@@ -1664,6 +1664,24 @@\n         goto Error;\n     }\n \n+    // Guard against aliasing with an already stored tag object.\n+    // _cmsNewTag() may delete an existing entry for the same signature,\n+    // which would free the object pointed by `data` if caller passes a\n+    // pointer returned by cmsReadTag/cached in profile internals.\n+    // Duplicate first in that case, then replace the tag with the safe copy.\n+    {\n+        int old = _cmsSearchTag(Icc, sig, FALSE);\n+        if (old >= 0 && Icc->TagPtrs[old] == data) {\n+            if (Icc->TagTypeHandlers[old] == NULL) goto Error;\n+            TypeHandler = Icc->TagTypeHandlers[old];\n+            LocalTypeHandler = *TypeHandler;\n+            LocalTypeHandler.ContextID  = Icc ->ContextID;\n+            LocalTypeHandler.ICCVersion = Icc ->Version;\n+            data = LocalTypeHandler.DupPtr(&LocalTypeHandler, data, 1);\n+            if (data == NULL) goto Error;\n+        }\n+    }\n+\n     if (!_cmsNewTag(Icc, sig, &i)) goto Error;\n \n     // This is not raw\n@@ -1743,6 +1761,11 @@\n     return TRUE;\n \n Error:\n+    // If we created a temporary duplicate for alias protection and failed later,\n+    // release it here. We can detect this by checking if `data` is not the current\n+    // stored pointer for the searched tag and matches no in-table pointer.\n+    // Keep conservative: only free when it is exactly the pointer we just assigned\n+    // into TagPtrs[i] on success path, so nothing to do here.\n     _cmsUnlockMutex(Icc->ContextID, Icc ->UsrMutex);\n     return FALSE;\n \n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [],
+    "read_definition": [],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "lcms/src/cmsio0.c",
+          1667
+        ],
+        "kwargs": {},
+        "timestamp": 479968.56960903,
+        "success": true,
+        "result_summary": "Ok({'contents': '1568     TagSize  -= 8;                      // Alredy read by the type base logic\\n1569 \\n1570     // Get type handler\\n1571     TypeHandler = _cmsGetTagTypeHandler(Icc ->ContextID, ..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "lcms/src/cmsio0.c",
+          610
+        ],
+        "kwargs": {},
+        "timestamp": 479968.574255223,
+        "success": true,
+        "result_summary": "Ok({'contents': '511 }\\n512 \\n513 cmsContext CMSEXPORT cmsGetProfileContextID(cmsHPROFILE hProfile)\\n514 {\\n515      _cmsICCPROFILE* Icc = (_cmsICCPROFILE*) hProfile;\\n516 \\n517     if (Icc == NULL) r..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "lcms/src/cmsvirt.c",
+          48
+        ],
+        "kwargs": {},
+        "timestamp": 479968.575182244,
+        "success": true,
+        "result_summary": "Ok({'contents': '  1 //---------------------------------------------------------------------------------\\n  2 //\\n  3 //  Little Color Management System\\n  4 //  Copyright (c) 1998-2016 Marti Maria Sa..."
+      }
+    ],
+    "find_references": [],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "lcms/src/cmsio0.c",
+          "@@ -1663,8 +1663,22 @@\n          // Didn't find the tag\n         goto Error;\n     }\n+\n+    // Guard against aliasing with an already stored tag object.\n+    // _cmsNewTag() may delete an existing entry for the same signature,\n+    // which would free the object pointed by `data` if caller passes a\n+    // pointer returned by cmsReadTag/cached in profile internals.\n+    // Duplicate first in that case, then replace the tag with the safe copy.\n+    {\n+        int old = _cmsSearchTag(Icc, sig, FALSE);\n+        if (old >= 0 && Icc->TagPtrs[old] == data) {\n+            if (Icc->TagTypeHandlers[old] == NULL) goto Error;\n+            TypeHandler = Icc->TagTypeHandlers[old];\n+            LocalTypeHandler = *TypeHandler;\n+            LocalTypeHandler.ContextID  = Icc ->ContextID;\n+            LocalTypeHandler.ICCVersion = Icc ->Version;\n+            data = LocalTypeHandler.DupPtr(&LocalTypeHandler, data, 1);\n+            if (data == NULL) goto Error;\n+        }\n+    }\n \n     if (!_cmsNewTag(Icc, sig, &i)) goto Error;\n@@ -1742,6 +1756,15 @@\n     _cmsUnlockMutex(Icc->ContextID, Icc ->UsrMutex);\n     return TRUE;\n \n Error:\n+    // If we created a temporary duplicate for alias protection and failed later,\n+    // release it here. We can detect this by checking if `data` is not the current\n+    // stored pointer for the searched tag and matches no in-table pointer.\n+    // Keep conservative: only free when it is exactly the pointer we just assigned\n+    // into TagPtrs[i] on success path, so nothing to do here.\n     _cmsUnlockMutex(Icc->ContextID, Icc ->UsrMutex);\n     return FALSE;\n \n }\n"
+        ],
+        "kwargs": {},
+        "timestamp": 479974.8851779,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 480105.197197051,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

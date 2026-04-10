@@ -1,0 +1,39 @@
+--- a/src/cmsio0.c
++++ b/src/cmsio0.c
+@@ -1664,6 +1664,24 @@
+         goto Error;
+     }
+ 
++    // Guard against aliasing with an already stored tag object.
++    // _cmsNewTag() may delete an existing entry for the same signature,
++    // which would free the object pointed by `data` if caller passes a
++    // pointer returned by cmsReadTag/cached in profile internals.
++    // Duplicate first in that case, then replace the tag with the safe copy.
++    {
++        int old = _cmsSearchTag(Icc, sig, FALSE);
++        if (old >= 0 && Icc->TagPtrs[old] == data) {
++            if (Icc->TagTypeHandlers[old] == NULL) goto Error;
++            TypeHandler = Icc->TagTypeHandlers[old];
++            LocalTypeHandler = *TypeHandler;
++            LocalTypeHandler.ContextID  = Icc ->ContextID;
++            LocalTypeHandler.ICCVersion = Icc ->Version;
++            data = LocalTypeHandler.DupPtr(&LocalTypeHandler, data, 1);
++            if (data == NULL) goto Error;
++        }
++    }
++
+     if (!_cmsNewTag(Icc, sig, &i)) goto Error;
+ 
+     // This is not raw
+@@ -1743,6 +1761,11 @@
+     return TRUE;
+ 
+ Error:
++    // If we created a temporary duplicate for alias protection and failed later,
++    // release it here. We can detect this by checking if `data` is not the current
++    // stored pointer for the searched tag and matches no in-table pointer.
++    // Keep conservative: only free when it is exactly the pointer we just assigned
++    // into TagPtrs[i] on success path, so nothing to do here.
+     _cmsUnlockMutex(Icc->ContextID, Icc ->UsrMutex);
+     return FALSE;
+ 

@@ -77,8 +77,12 @@ def extract_project_info(metadata: dict) -> dict:
             if fuzzer_match:
                 project_info["fuzzer_name"] = fuzzer_match.group(1)
         
-        # Extract Reproducer Testcase URL
-        poc_match = re.search(r"Reproducer Testcase:\s*(https://oss-fuzz.com/download\?testcase_id=\d+)", content)
+        # Extract Reproducer Testcase URL.
+        # Older reports use:
+        #   https://oss-fuzz.com/download?testcase_id=123
+        # Newer reports often use a signed download URL such as:
+        #   https://oss-fuzz.com/download/<token>?testcase_id=123
+        poc_match = re.search(r"Reproducer Testcase:\s*(https://oss-fuzz\.com/download\S+)", content)
         if poc_match:
             project_info["poc_download_url"] = poc_match.group(1)
         

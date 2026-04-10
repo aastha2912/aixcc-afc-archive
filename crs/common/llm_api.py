@@ -8,6 +8,7 @@ import orjson
 import os
 import random
 import re
+from urllib.parse import urlsplit, urlunsplit
 
 import litellm
 
@@ -256,13 +257,36 @@ def _responses_cost(model: str, usage: dict[str, Any]) -> float:
     )
 
 
+def _normalized_openai_base_url() -> str:
+    configured = (os.environ.get("OPENAI_API_BASE") or "").strip()
+    if not configured:
+        return "https://us.api.openai.com/v1"
+
+    parsed = urlsplit(configured)
+    if parsed.netloc == "api.openai.com":
+        path = parsed.path or "/v1"
+        if path == "/":
+            path = "/v1"
+        return urlunsplit(
+            (
+                parsed.scheme or "https",
+                "us.api.openai.com",
+                path,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+
+    return configured
+
+
 async def _responses_completion(args: 'CompletionArgs', tools: Optional[list[dict[str, Any]]]) -> dict[str, Any]:
     from openai import AsyncOpenAI
 
     instructions, input_items = _responses_input_from_messages(args["messages"])
     client = AsyncOpenAI(
         api_key=os.environ.get("OPENAI_API_KEY"),
-        base_url=os.environ.get("OPENAI_API_BASE") or None,
+        base_url=_normalized_openai_base_url(),
     )
 
     kwargs: dict[str, Any] = {

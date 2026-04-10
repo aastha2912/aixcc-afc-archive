@@ -1,0 +1,341 @@
+{
+  "vuln_id": 539,
+  "crash_result": {
+    "output": "==27469==ERROR: AddressSanitizer: attempting double-free on 0x6030000002e0 in thread T0:\nSCARINESS: 42 (double-free)\n    #0 0x521cd2 in free /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:127:3\n    #1 0x584730 in sc_pkcs15_clear_tokeninfo /src/opensc/src/libopensc/pkcs15.c:741:2\n    #2 0x5880b4 in sc_pkcs15_free_tokeninfo /src/opensc/src/libopensc/pkcs15.c:768:2\n    #3 0x5886c2 in sc_pkcs15_card_free /src/opensc/src/libopensc/pkcs15.c:810:2\n    #4 0x554127 in LLVMFuzzerTestOneInput",
+    "stack": "#0 0x521cd2 in free llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:127:3\n#1 0x584730 in sc_pkcs15_clear_tokeninfo opensc/src/libopensc/pkcs15.c:741:2\n#2 0x5880b4 in sc_pkcs15_free_tokeninfo opensc/src/libopensc/pkcs15.c:768:2\n#3 0x5886c2 in sc_pkcs15_card_free opensc/src/libopensc/pkcs15.c:810:2\n#4 0x554127 in LLVMFuzzerTestOneInput opensc/src/tests/fuzzing/fuzz_pkcs15_reader.c:124:9\n#5 0x459891 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) llvm-project/compile",
+    "dedup": "free--sc_pkcs15_clear_tokeninfo--sc_pkcs15_free_tokeninfo"
+  },
+  "pov_run_data": {
+    "task_uuid": "5c87c663-48d9-5e5d-89b5-159ea74d8375",
+    "project_name": "opensc",
+    "harness": "fuzz_pkcs15_reader",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "free--sc_pkcs15_clear_tokeninfo--sc_pkcs15_free_tokeninfo"
+  },
+  "decoded_pov": {
+    "project_name": "opensc",
+    "harness": "fuzz_pkcs15_reader",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'\\x14\\x00;\\x7f \\x00\\x00\\x801\\x80e\\xb0    \\x12\\x0f\\xfe\\x82\\x90\\x00\\x06\\x00    a \\x0f\\x00o\\x0b \\x00\\x80\\x01       \\x90 \\x06\\x00      \\x06\\x00    \\x90\\xff\\x14\\x00b\\x0e\\x80\\x03\\x00             \\x90 \\x8b\\x00\\x01    tinfo\\x00  p11\\x00 \\xff\\xff                                               \\xff\\xff\\xff\\xff\\xff\\xff\\xff                                                               \\x90 \\x02\\x00  \\n\\x00          \\x06\\x00      \\x06\\x00     \\xff\\x14\\x00b\\x0e\\x80\\x03              \\x90 5\\x00    \\xff                     \\xff\\xff                       \\x90   \\x90 '\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "free--sc_pkcs15_clear_tokeninfo--sc_pkcs15_free_tokeninfo"
+  },
+  "analyzed_vuln": {
+    "function": "idprime_get_token_name",
+    "file": "opensc/src/libopensc/card-idprime.c",
+    "description": "`idprime_get_token_name()` allocates `*tname` and, on `read_binary` short/failed read (`r < 1`), frees that buffer but does not null out `*tname` and returns an error. The caller path in `sc_pkcs15emu_idprime_init()` keeps the `token_name` pointer variable and later cleanup (`sc_pkcs15_clear_tokeninfo` via card free) frees the same pointer again after it has been assigned into `p15card->tokeninfo->label`, causing a double-free. Root cause is ownership/lifetime violation in `idprime_get_token_name` error handling (freeing caller-owned out-pointer without resetting it).",
+    "conditions": "In fuzz_pkcs15_reader, `sc_pkcs15_bind` reaches IDPrime emulation (`sc_pkcs15emu_idprime_init`), which calls `sc_card_ctl(...SC_CARDCTL_IDPRIME_GET_TOKEN_NAME...)` -> `idprime_get_token_name`. Input/card state must make token-info file appear present and pass initial checks, allocate token name, then make second `read_binary` return `<1` so `idprime_get_token_name` frees the allocated buffer and returns error with stale pointer. Later teardown (`sc_pkcs15_card_free` -> `sc_pkcs15_clear_tokeninfo`) frees `tokeninfo->label` that aliases that stale pointer, triggering double-free."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 5,
+      "total_cost": 0.0363524,
+      "total_input_tokens": 39184,
+      "total_output_tokens": 809,
+      "total_cached_tokens": 27648,
+      "llm_calls": [
+        {
+          "timestamp": 1775794208.4347281,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0092036,
+          "input_tokens": 5128,
+          "output_tokens": 146,
+          "total_tokens": 5274,
+          "cached_tokens": 1152,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_iZibX5poNbu5ALuu5uJH122m"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_RqCTv5xinx3KV1EW8vfqnjhf"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_3C7lWXV3BmK2jOdwTwmiYNew"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775794344.876595,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0035192500000000002,
+          "input_tokens": 5403,
+          "output_tokens": 152,
+          "total_tokens": 5555,
+          "cached_tokens": 5120,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_FBZRybjmc6iaQ4G9wIVkctv9"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_e0wW5XaLl0MEXE3FEKGHHlGq"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_VkrXjPrp7MkynIlZoo2sRaGr"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775794382.0687244,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00366905,
+          "input_tokens": 5719,
+          "output_tokens": 152,
+          "total_tokens": 5871,
+          "cached_tokens": 5376,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_hRC2vwbD1KsKvHaOQL3iS7qH"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_6EabudpqWilYYU3oGzaE8kXn"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_3aDsj3E83WAtNXvzhcEHVpQN"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775794414.9836946,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00949725,
+          "input_tokens": 10339,
+          "output_tokens": 34,
+          "total_tokens": 10373,
+          "cached_tokens": 5760,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_zmHXmBe5wJA6EqaSywJozx8w"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775794419.9537618,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01046325,
+          "input_tokens": 12595,
+          "output_tokens": 325,
+          "total_tokens": 12920,
+          "cached_tokens": 10240,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_G1wJN2bJXN6pMyZkRgouwMDR"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 4,
+      "total_cost": 0.035389199999999996,
+      "total_input_tokens": 42728,
+      "total_output_tokens": 254,
+      "total_cached_tokens": 27264,
+      "llm_calls": [
+        {
+          "timestamp": 1775794421.8415318,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0097132,
+          "input_tokens": 6400,
+          "output_tokens": 81,
+          "total_tokens": 6481,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 2,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_lqgBTfBDj3BexhEH6vcsSwCr"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_UcbYCzeo2Yl9ZeTTykQfPxsO"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775794425.5063007,
+          "model": "gpt-5.3-codex",
+          "cost": 0.02015195,
+          "input_tokens": 11925,
+          "output_tokens": 136,
+          "total_tokens": 12061,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_ZtXmKadYbgwdZkunzLaARoyg"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775794428.2509,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0027079499999999998,
+          "input_tokens": 12149,
+          "output_tokens": 14,
+          "total_tokens": 12163,
+          "cached_tokens": 11904,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_Gu45qE5dp2RLfpQBb6Ib6nC6"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775794689.169864,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0028161,
+          "input_tokens": 12254,
+          "output_tokens": 23,
+          "total_tokens": 12277,
+          "cached_tokens": 12032,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_dVnYLImyGMpcUj97RYUhcI9D"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.07174159999999999,
+      "total_input_tokens": 81912,
+      "total_output_tokens": 1063,
+      "total_llm_calls": 9
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/src/libopensc/card-idprime.c\n+++ b/src/libopensc/card-idprime.c\n@@ -483,6 +483,7 @@\n \tr = iso_ops->read_binary(card, 2, (unsigned char *)*tname, buf[1], 0);\n \tif (r < 1) {\n \t\tfree(*tname);\n+\t\t*tname = NULL;\n \t\tLOG_FUNC_RETURN(card->ctx, r);\n \t}\n \n",
+    "build_artifacts_count": 1,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [],
+    "read_definition": [],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "opensc/src/libopensc/card-idprime.c",
+          470
+        ],
+        "kwargs": {},
+        "timestamp": 485133.085596597,
+        "success": true,
+        "result_summary": "Ok({'contents': '371 /* initialize getting a list and return the number of elements in the list */\\n372 static int idprime_get_init_and_get_count(list_t *list, idprime_object_t **entry, int *countp)\\n..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "opensc/src/libopensc/pkcs15-idprime.c",
+          118
+        ],
+        "kwargs": {},
+        "timestamp": 485133.087050399,
+        "success": true,
+        "result_summary": "Ok({'contents': ' 19  *\\n 20  * You should have received a copy of the GNU Lesser General Public\\n 21  * License along with this library; if not, write to the Free Software\\n 22  * Foundation, Inc., 5..."
+      }
+    ],
+    "find_references": [],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "opensc/src/libopensc/card-idprime.c",
+          "@@ -483,8 +483,9 @@\n \tr = iso_ops->read_binary(card, 2, (unsigned char *)*tname, buf[1], 0);\n \tif (r < 1) {\n \t\tfree(*tname);\n+\t\t*tname = NULL;\n \t\tLOG_FUNC_RETURN(card->ctx, r);\n \t}\n \n \tif ((*tname)[r-1] != '\\0') {\n"
+        ],
+        "kwargs": {},
+        "timestamp": 485136.703229216,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 485399.202076448,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

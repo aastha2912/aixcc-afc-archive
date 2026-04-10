@@ -1,0 +1,463 @@
+{
+  "vuln_id": 573,
+  "crash_result": {
+    "output": "==8481==ERROR: AddressSanitizer: attempting double-free on 0x602000000350 in thread T0:\nSCARINESS: 42 (double-free)\n    #0 0x52ee02 in free /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:52:3\n    #1 0x13740df in dwg_free_common_entity_data /src/libredwg/src/free.c:414:3\n    #2 0x12630d7 in dwg_free_PLANESURFACE /src/libredwg/src/./dwg.spec:9796:1\n    #3 0x12583c7 in dwg_free_variable_no_class /src/libredwg/src/./objects.inc:76:1\n    #4 0x1287e9b in dwg_free_variable_type /src/libre",
+    "stack": "#0 0x52ee02 in free llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:52:3\n#1 0x13740df in dwg_free_common_entity_data libredwg/src/free.c:414:3\n#2 0x12630d7 in dwg_free_PLANESURFACE libredwg/src/./dwg.spec:9796:1\n#3 0x12583c7 in dwg_free_variable_no_class libredwg/src/./objects.inc:76:1\n#4 0x1287e9b in dwg_free_variable_type libredwg/src/free.c\n#5 0x1366c96 in dwg_free_object libredwg/src/free.c:1228:25\n#6 0x136a283 in dwg_free libredwg/src/free.c:1651:13\n#7 0x56c9a0 in LLVMFuzzerTestOneI",
+    "dedup": "free--dwg_free_common_entity_data--dwg_free_PLANESURFACE"
+  },
+  "pov_run_data": {
+    "task_uuid": "76ddce4a-9e2e-590a-a691-628765fdfe10",
+    "project_name": "libredwg",
+    "harness": "llvmfuzz",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "free--dwg_free_common_entity_data--dwg_free_PLANESURFACE"
+  },
+  "decoded_pov": {
+    "project_name": "libredwg",
+    "harness": "llvmfuzz",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'  0\\nSECTION\\n  2\\nHEADER\\n  9\\n$ACADVER\\n  1\\nAC1015\\n  9LOCKS\\x00\\x00\\x04\\x00\\x00}{\\xff\\xff:AAs9\\r\\x00\\x00 99\\xc4\\xc4\\xc4\\xff\\xff\\xff\\xff\\xff\\xff\\n\\n00000000ENDSEC\\x0006\\xff\\xff\\xff\\x7f\\xff\\xff#E&}E\\n0SECTION\\x00;i\\x00\\x00\\xdc\\xfa\\xd7\\xec\\xf6\\xb6\\x00\\x00\\x00\\x00\\x00\\x00\\x00,\\x00     \\n 2BLOCKS\\x00J \\xff    \\n0SURFACE\\x00 \\xff  \\xff                 \\xdc\\xdfTITIES\\x00THUMBNAI\\x00\\xff\\x00\\xff\\xff   \\xff\\xffG\\n310\\x00CLAS\\x13ES\\x00ACh_fac\\n70\\n\\xff      '\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "free--dwg_free_common_entity_data--dwg_free_PLANESURFACE"
+  },
+  "analyzed_vuln": {
+    "function": "new_object",
+    "file": "libredwg/src/in_dxf.c",
+    "description": "`new_object` frees the current `Dxf_Pair` (`dxf_free_pair(pair)` at loop end / error paths) after copying some string fields into object members by pointer alias instead of deep-copying in at least one parsed path for this PoV (PLANESURFACE/common entity preview). That leaves object state holding a pointer into `pair->value.s` storage that has already been freed. Later, teardown (`dwg_free_PLANESURFACE` -> `dwg_free_common_entity_data`) frees that member again (`FREE_IF(_ent->preview)`), causing the ASan double-free. The crash is observed in `dwg_free_common_entity_data`, but root cause is unsafe ownership transfer in DXF import (`new_object`).",
+    "conditions": "Fuzzer input is parsed as DXF (`dwg_read_dxf` via `llvmfuzz`). A malformed/minimal BLOCKS section containing a `SURFACE`/PLANESURFACE entity with specific string-tag sequence causes `new_object` to assign an entity string field (ultimately `_ent->preview`) from a transient `Dxf_Pair` buffer, then free the pair each iteration. On final `dwg_free`, entity cleanup frees `_ent->preview` again, triggering double-free. Trigger requires reaching the PLANESURFACE entity parsing path and storing a borrowed `pair->value.s` pointer without duplicating/nulling ownership."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 3,
+      "total_cost": 0.028472149999999995,
+      "total_input_tokens": 22649,
+      "total_output_tokens": 513,
+      "total_cached_tokens": 11648,
+      "llm_calls": [
+        {
+          "timestamp": 1775806156.3886468,
+          "model": "gpt-5.3-codex",
+          "cost": 0.007604799999999999,
+          "input_tokens": 4992,
+          "output_tokens": 92,
+          "total_tokens": 5084,
+          "cached_tokens": 1536,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_QAL1gOnk0e4l0wqtpBTvuRxB"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_lMVXfGMNG6EAont1aDHIKhlg"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_mxkI2dyXfjpkVsOjBKRFFEqm"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775806163.9056816,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00267085,
+          "input_tokens": 5211,
+          "output_tokens": 101,
+          "total_tokens": 5312,
+          "cached_tokens": 4992,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_JnFP4N4ig3uZ7Gwx7FWJ5OJt"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_VQmF0L913M46onHHk7zployn"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_zUGxxqelrR3OEcBxsfv8n8l1"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775806171.561731,
+          "model": "gpt-5.3-codex",
+          "cost": 0.018196499999999997,
+          "input_tokens": 12446,
+          "output_tokens": 320,
+          "total_tokens": 12766,
+          "cached_tokens": 5120,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_YczFI6fqb1AjcmRXaYPjUiOy"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 8,
+      "total_cost": 0.0486983,
+      "total_input_tokens": 102538,
+      "total_output_tokens": 410,
+      "total_cached_tokens": 86656,
+      "llm_calls": [
+        {
+          "timestamp": 1775806173.468144,
+          "model": "gpt-5.3-codex",
+          "cost": 0.008650950000000001,
+          "input_tokens": 6225,
+          "output_tokens": 99,
+          "total_tokens": 6324,
+          "cached_tokens": 2304,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_98ITHTJ3ec0eNvC0bafxVPMG"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_T6k1q5cSckoGRtohZw6IBfHi"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_artzzcto3YcIgekuhLDNCnEh"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775806199.1266894,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0032242,
+          "input_tokens": 6508,
+          "output_tokens": 108,
+          "total_tokens": 6616,
+          "cached_tokens": 6144,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_hzl1gZ6q5fQ7eds6qw0IFfno"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_M7JaUje8Hs52nOqgVu7vZWq9"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Ts6tP9DnMyAzlS8t9OhoR1s2"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775806216.4717107,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0115584,
+          "input_tokens": 12224,
+          "output_tokens": 32,
+          "total_tokens": 12256,
+          "cached_tokens": 6528,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_jINGYD3vzE3sppsWM7gQ6DTY"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775806217.7918818,
+          "model": "gpt-5.3-codex",
+          "cost": 0.007344749999999999,
+          "input_tokens": 14829,
+          "output_tokens": 39,
+          "total_tokens": 14868,
+          "cached_tokens": 12160,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_DAnL20kgBzGfoGNsqalGQV5o"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775806224.3611422,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0034614999999999993,
+          "input_tokens": 14906,
+          "output_tokens": 40,
+          "total_tokens": 14946,
+          "cached_tokens": 14720,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_mgM9hdbJnPZa4X9ggD2bcb6s"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775806227.1770582,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0033264,
+          "input_tokens": 14968,
+          "output_tokens": 37,
+          "total_tokens": 15005,
+          "cached_tokens": 14848,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_Leqy1uhWH6G1RwibpQW0BoKe"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775806241.5802684,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0037166499999999997,
+          "input_tokens": 15231,
+          "output_tokens": 32,
+          "total_tokens": 15263,
+          "cached_tokens": 14848,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_39tIHgfjEDGonNTlUhi3pszl"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775806244.2535481,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0074154500000000005,
+          "input_tokens": 17647,
+          "output_tokens": 23,
+          "total_tokens": 17670,
+          "cached_tokens": 15104,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_KyPD3VTncjwHt4CTYtNyHhzW"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.07717045,
+      "total_input_tokens": 125187,
+      "total_output_tokens": 923,
+      "total_llm_calls": 11
+    }
+  },
+  "patch_result": {
+    "success": false,
+    "failure_reason": "the agent did not produce a result"
+  },
+  "context_retrieval": {
+    "source_questions": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "new_object",
+          "libredwg/src/in_dxf.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 496936.956336101,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found, extra=None))"
+      }
+    ],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "src/in_dxf.c",
+          12015
+        ],
+        "kwargs": {},
+        "timestamp": 496887.233764555,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'src/in_dxf.c' does not exist in directory tree. Similar paths: libredwg/src/in_dxf.c, extra=None))"
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "src/in_dxf.c",
+          8770
+        ],
+        "kwargs": {},
+        "timestamp": 496888.187851595,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'src/in_dxf.c' does not exist in directory tree. Similar paths: libredwg/src/in_dxf.c, extra=None))"
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "libredwg/src/in_dxf.c",
+          11850
+        ],
+        "kwargs": {},
+        "timestamp": 496910.221574333,
+        "success": true,
+        "result_summary": "Ok({'contents': '11751                                          pair->value.s, f->type, pair->code)\\n11752                             }\\n11753                           else\\n11754                   ..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "libredwg/src/in_dxf.c",
+          12015
+        ],
+        "kwargs": {},
+        "timestamp": 496910.224820874,
+        "success": true,
+        "result_summary": "Ok({'contents': '11916                       LOG_TRACE (\"%s.color.rgb = %08X [%s %d]\\\\n\", name,\\n11917                                  pair->value.u, \"CMC\", pair->code);\\n11918                     }\\..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "libredwg/src/in_dxf.c",
+          6907
+        ],
+        "kwargs": {},
+        "timestamp": 496927.567427778,
+        "success": true,
+        "result_summary": "Ok({'contents': '6808       }\\n6809       break;\\n6810     case DWG_VT_BINARY:\\n6811       // convert from hex\\n6812       if (!pair->value.s)\\n6813         goto invalid;\\n6814       {\\n6815         s..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "libredwg/src/in_dxf.c",
+          8764
+        ],
+        "kwargs": {},
+        "timestamp": 496952.675417253,
+        "success": true,
+        "result_summary": "Ok({'contents': '8665   dwg_dynapi_entity_value (_obj, obj->name, \"horiz_alignment\",\\n8666                            &horiz_alignment, NULL);\\n8667   dwg_dynapi_entity_value (_obj, obj->name, \"vert_a..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "preview",
+          "src/in_dxf.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 496906.397975591,
+        "success": true,
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: libredwg/test/unit-testing/dynapi_test.c, libredwg/test/unit-testing/block_header.c, libredwg/src/free.c, libredw..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "preview",
+          "libredwg/src/in_dxf.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 496926.045548144,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='libredwg/src/in_dxf.c', refs=[FileReference(line=6907, content='  ent->preview', enclosing_definition='add_ent_preview'), FileReference(line=6909, content='  if (!ent->pr..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "pair->value.s",
+          "libredwg/src/in_dxf.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 496933.350416083,
+        "success": true,
+        "result_summary": "Err(CRSError(Found too many(more than 50) references to that string. Please reconsider your approach., extra=None))"
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "new_object",
+          "libredwg/src/in_dxf.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 496951.290134547,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='libredwg/src/in_dxf.c', refs=[FileReference(line=8764, content='static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (', enclosing_definition='__nonnull'), FileReference(..."
+      }
+    ],
+    "apply_patch": [],
+    "test_patch": [],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

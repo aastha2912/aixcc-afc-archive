@@ -1,0 +1,346 @@
+{
+  "vuln_id": 547,
+  "crash_result": {
+    "output": "AddressSanitizer:DEADLYSIGNAL\n=================================================================\n==20859==ERROR: AddressSanitizer: SEGV on unknown address (pc 0x0000005c9cc6 bp 0x7ffc15cd5120 sp 0x7ffc15cd50b0 T0)\n==20859==The signal is caused by a READ memory access.\n==20859==Hint: this fault was caused by a dereference of a high value address (see register values below).  Disassemble the provided pc to learn which register was used.\nSCARINESS: 20 (wild-addr-read)\n    #0 0x5c9cc6 in sc_file_clea",
+    "stack": "#0 0x5c9cc6 in sc_file_clear_acl_entries opensc/src/libopensc/sc.c:609:28\n#1 0x5ca197 in sc_file_free opensc/src/libopensc/sc.c:633:3\n#2 0x5a7604 in free_file_list opensc/src/tests/fuzzing/../../../src/pkcs15init/profile.c:1210:4\n#3 0x55f9e0 in sc_profile_free opensc/src/tests/fuzzing/../../../src/pkcs15init/profile.c:459:2\n#4 0x5aab35 in fuzz_pkcs15init_bind opensc/src/tests/fuzzing/fuzz_pkcs15init.c:101:9\n#5 0x5ad74f in LLVMFuzzerTestOneInput opensc/src/tests/fuzzing/fuzz_pkcs15init.c:307:5\n#6",
+    "dedup": "sc_file_clear_acl_entries--sc_file_free--free_file_list"
+  },
+  "pov_run_data": {
+    "task_uuid": "5c87c663-48d9-5e5d-89b5-159ea74d8375",
+    "project_name": "opensc",
+    "harness": "fuzz_pkcs15init",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "sc_file_clear_acl_entries--sc_file_free--free_file_list"
+  },
+  "decoded_pov": {
+    "project_name": "opensc",
+    "harness": "fuzz_pkcs15init",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'filesystem {DF MF {path =01F2defa6692093846cac3360823463e file-id =5501 DF MF {file-id =340F\\x00\\x00\\x00\\x00\\x00  \\x90\\x00'\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "sc_file_clear_acl_entries--sc_file_free--free_file_list"
+  },
+  "analyzed_vuln": {
+    "function": "do_acl_entry",
+    "file": "opensc/src/pkcs15init/profile.c",
+    "description": "The root cause is unsafe ACL pointer encoding in profile parsing: ACL entries parsed from fuzzed profile text can assign raw integer values (e.g., 0x9000) into sc_file_t->acl[] instead of valid heap nodes or the three reserved sentinels (1/2/3). Later, sc_profile_free()->free_file_list()->sc_file_free() calls sc_file_clear_acl_entries(), which treats any non-NULL/non-1/2/3 value as a linked-list head and dereferences e->next, causing wild read/SEGV. Crash is observed in sc_file_clear_acl_entries, but missing validation/sanitization occurs when parsing ACL config in do_acl_entry.",
+    "conditions": "Trigger by providing a malformed pkcs15init profile string (via fuzz_pkcs15init input) that creates file definitions with crafted ACL/access rules so file->acl[op] becomes an invalid non-sentinel pointer value. During cleanup path (e.g., sc_profile_finish failure or normal teardown), sc_profile_free frees file list and sc_file_free iterates ACL ops; sc_file_clear_acl_entries dereferences the attacker-influenced bogus pointer and crashes."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 2,
+      "total_cost": 0.020891149999999997,
+      "total_input_tokens": 13037,
+      "total_output_tokens": 381,
+      "total_cached_tokens": 4608,
+      "llm_calls": [
+        {
+          "timestamp": 1775795568.994944,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00446705,
+          "input_tokens": 3055,
+          "output_tokens": 110,
+          "total_tokens": 3165,
+          "cached_tokens": 1536,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_48cB4kfCdemin5ZSITSuGTLc"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_mGB74oONq3WZF7o2cf5P4mxe"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_noby7cYzJtt74brgtRw2Vrzn"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775795576.3409507,
+          "model": "gpt-5.3-codex",
+          "cost": 0.016424099999999997,
+          "input_tokens": 9982,
+          "output_tokens": 271,
+          "total_tokens": 10253,
+          "cached_tokens": 3072,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_xc6im9V1ZGI9fKkxaBea1zMp"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 6,
+      "total_cost": 0.04064725,
+      "total_input_tokens": 73491,
+      "total_output_tokens": 485,
+      "total_cached_tokens": 60160,
+      "llm_calls": [
+        {
+          "timestamp": 1775795578.3272305,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00524895,
+          "input_tokens": 4185,
+          "output_tokens": 111,
+          "total_tokens": 4296,
+          "cached_tokens": 2304,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_44LxJXIBHflWazh5QYUwDqty"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_DDpV1sJc0rHjBN51qAaDb7jO"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_ofjITmnjS7Jzt1prKe63nYpj"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775796643.7883935,
+          "model": "gpt-5.3-codex",
+          "cost": 0.011839450000000001,
+          "input_tokens": 10295,
+          "output_tokens": 34,
+          "total_tokens": 10329,
+          "cached_tokens": 4224,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_DHHD7XfxDIcuZ8jmco1C0X8r"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775796645.1141148,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00647325,
+          "input_tokens": 12643,
+          "output_tokens": 34,
+          "total_tokens": 12677,
+          "cached_tokens": 10240,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_tXXS0ULNhsWxrSyBDiKqcisu"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775796648.2662911,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01057945,
+          "input_tokens": 15183,
+          "output_tokens": 269,
+          "total_tokens": 15452,
+          "cached_tokens": 12544,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_332ZBbNDDXdctgNuXDRqRB6N"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775796649.2905462,
+          "model": "gpt-5.3-codex",
+          "cost": 0.003199,
+          "input_tokens": 15540,
+          "output_tokens": 14,
+          "total_tokens": 15554,
+          "cached_tokens": 15360,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_Kr3pb6ZmbMhCMFTm7f9KtYCK"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775796692.9254162,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00330715,
+          "input_tokens": 15645,
+          "output_tokens": 23,
+          "total_tokens": 15668,
+          "cached_tokens": 15488,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_JoUHxvVZm37ypGcumVz7OZYn"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.0615384,
+      "total_input_tokens": 86528,
+      "total_output_tokens": 866,
+      "total_llm_calls": 8
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/src/pkcs15init/profile.c\n+++ b/src/pkcs15init/profile.c\n@@ -1600,8 +1600,11 @@\n \n \t\t\tif (map_str2int(cur, oper, &op, fileOpNames))\n \t\t\t\tgoto bad;\n-\t\t\tif (!(acl = sc_file_get_acl_entry(file, op)))\n+\t\t\tacl = sc_file_get_acl_entry(file, op);\n+\t\t\tif (acl == NULL)\n \t\t\t\tgoto bad;\n+\t\t\tif (acl != file->acl[op])\n+\t\t\t\tacl = NULL;\n \t\t\tif (acl->method == SC_AC_NEVER\n \t\t\t || acl->method == SC_AC_NONE\n \t\t\t || acl->method == SC_AC_UNKNOWN)\n",
+    "build_artifacts_count": 1,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "do_acl_entry",
+          "opensc/src/pkcs15init/profile.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 486411.653040161,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found, extra=None))"
+      }
+    ],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "opensc/src/libopensc/sc.c",
+          580
+        ],
+        "kwargs": {},
+        "timestamp": 486289.438149479,
+        "success": true,
+        "result_summary": "Ok({'contents': \"481 \\tsc_path_t tpath;\\n482 \\n483 \\tif (prefix->len > path->len)\\n484 \\t\\treturn 0;\\n485 \\n486 \\ttpath     = *path;\\n487 \\ttpath.len = prefix->len;\\n488 \\n489 \\treturn sc_compare_path..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "opensc/src/pkcs15init/profile.c",
+          1500
+        ],
+        "kwargs": {},
+        "timestamp": 487354.88155901,
+        "success": true,
+        "result_summary": "Ok({'contents': '1401 \\treturn 0;\\n1402 }\\n1403 \\n1404 static int\\n1405 do_reclength(struct state *cur, int argc, char **argv)\\n1406 {\\n1407 \\tunsigned int\\treclength;\\n1408 \\n1409 \\tif (!cur->file) {..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "opensc/src/pkcs15init/profile.c",
+          1601
+        ],
+        "kwargs": {},
+        "timestamp": 487356.207159702,
+        "success": true,
+        "result_summary": "Ok({'contents': '1502 \\n1503 \\tif (!cur->file) {\\n1504 \\t\\tparse_error(cur, \"Invalid state\\\\n\");\\n1505 \\t\\treturn 1;\\n1506 \\t}\\n1507 \\tfile = cur->file->file;\\n1508 \\n1509 #ifdef DEBUG_PROFILE\\n1510 \\..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "SC_AC_NONE",
+          "",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 487353.537222803,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='opensc/src/libopensc/card-setcos.c', refs=[FileReference(line=354, content='\\tcase SC_AC_NONE:', enclosing_definition='acl_to_byte'), FileReference(line=384, content='\\t\\..."
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "opensc/src/pkcs15init/profile.c",
+          "@@ -1599,12 +1599,16 @@ do_acl(struct state *cur, int argc, char **argv)\n \t\t\tconst sc_acl_entry_t *acl;\n \n \t\t\tif (map_str2int(cur, oper, &op, fileOpNames))\n \t\t\t\tgoto bad;\n-\t\t\tif (!(acl = sc_file_get_acl_entry(file, op)))\n+\t\t\tacl = sc_file_get_acl_entry(file, op);\n+\t\t\tif (acl == NULL)\n \t\t\t\tgoto bad;\n+\t\t\tif (acl != file->acl[op])\n+\t\t\t\tacl = NULL;\n \t\t\tif (acl->method == SC_AC_NEVER\n \t\t\t || acl->method == SC_AC_NONE\n \t\t\t || acl->method == SC_AC_UNKNOWN)\n \t\t\t\tsc_file_clear_acl_entries(file, op);\n \n \t\t\tsc_file_add_acl_entry(file, op, method, id);\n \t\t}\n"
+        ],
+        "kwargs": {},
+        "timestamp": 487359.394914543,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 487402.9788414,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

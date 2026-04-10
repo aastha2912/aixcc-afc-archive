@@ -1,0 +1,344 @@
+{
+  "vuln_id": 519,
+  "crash_result": {
+    "output": "==668==ERROR: AddressSanitizer: heap-use-after-free on address 0x61300000c730 at pc 0x00000061d264 bp 0x7fff3b98f290 sp 0x7fff3b98f288\nREAD of size 8 at 0x61300000c730 thread T0\nSCARINESS: 51 (8-byte-read-heap-use-after-free)\n    #0 0x61d263 in UA_Subscription_answerPublishRequestsNoSubscription /src/open62541/src/server/ua_subscription.c:487:20\n    #1 0x6165a9 in processDelayedCallbacks /src/open62541/src/server/ua_server_worker.c:180:9\n    #2 0x6165a9 in UA_Server_run_shutdown /src/open62541/s",
+    "stack": "#0 0x61d263 in UA_Subscription_answerPublishRequestsNoSubscription open62541/src/server/ua_subscription.c:487:20\n#1 0x6165a9 in processDelayedCallbacks open62541/src/server/ua_server_worker.c:180:9\n#2 0x6165a9 in UA_Server_run_shutdown open62541/src/server/ua_server_worker.c:379\n#3 0x54eda3 in LLVMFuzzerTestOneInput open62541/tests/fuzz/fuzz_binary_message.cc:36:5\n#4 0x686100 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) libfuzzer/FuzzerLoop.cpp:512:13\n#5 0x6647f5 in fu",
+    "dedup": "UA_Subscription_answerPublishRequestsNoSubscription--processDelayedCallbacks--UA_Server_run_shutdown"
+  },
+  "pov_run_data": {
+    "task_uuid": "7561f721-f888-5e74-a1c0-a6d6568d99b5",
+    "project_name": "open62541",
+    "harness": "fuzz_binary_message",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "UA_Subscription_answerPublishRequestsNoSubscription--processDelayedCallbacks--UA_Server_run_shutdown"
+  },
+  "decoded_pov": {
+    "project_name": "open62541",
+    "harness": "fuzz_binary_message",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'HELF<\\x00\\x00\\x00                       \\xff                            OPNF\\x85\\x00\\x00\\x00    /\\x00\\x00\\x00http://opcfoundation.org/UA/SecurityPolicy#None\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff        \\x01 \\xbe\\x01\\x00                 \\xff\\xff\\xff\\xff    \\x00 \\x00    \\x00\\x00\\x00\\x00\\x01\\x00\\x00\\x00   \\xff    \\x00MSGFp\\x01\\x00\\x00                \\x01 \\xcd\\x01\\x04                                  \\xff\\xff\\xff\\xff    \\x00 \\x00:\\x00\\x00\\x00                                                          \\x1e\\x00\\x00\\x00                              \\x02\\x1b\\x00\\x00\\x00                               \\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff   \\xff\\xff\\xff\\xff\\xff\\x1c\\x00\\x00\\x00                            :\\x00\\x00\\x00                                                             \\xff   \\xff       \\xff                    \\xff\\xff\\xff\\xff            MSGF\\x8f\\x00\\x00\\x00                \\x01 \\xd3\\x01\\x04        \\xff                         \\xff\\xff\\xff\\xff    \\x00 \\x00\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff   \\xff\\x01\\x00\\x00\\x00\\x02\\x00\\x00\\x00  \\x01\\x00A\\x01\\x01    \\x1a\\x00\\x00\\x00open62541-anonymous-policy\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xffMSGFV\\x00\\x00\\x00                \\x01   \\x04        \\xff                         \\xff\\xff\\xff\\xff    \\x00 \\x00            MSGFR\\x00\\x00\\x00                \\x01 O\\x03\\x04        \\xff                         \\xff\\xff\\xff\\xff    \\x00 \\x00   \\xff    MSGF\\x8f\\x00\\x00\\x00                \\x01 \\xd9\\x01\\x00        \\xff        \\x0f\\x00\\x00\\x00  \\xff\\xff\\xff\\xff   \\xff\\xff        \\x00 \\x00                   \\xff                         \\xff\\xff                 \\xff\\xff\\xff    '\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "UA_Subscription_answerPublishRequestsNoSubscription--processDelayedCallbacks--UA_Server_run_shutdown"
+  },
+  "analyzed_vuln": {
+    "function": "removeSessionCallback",
+    "file": "open62541/src/server/ua_session_manager.c",
+    "description": "The root cause is a lifetime/order bug: removeSession() schedules removeSessionCallback as a delayed callback that calls UA_Session_deleteMembersCleanup() and frees the session entry, but pending repeated subscription publish callbacks are not unregistered/cancelled before that free. During shutdown, processDelayedCallbacks executes the delayed free, and then a stale publish/subscription callback path reaches UA_Subscription_answerPublishRequestsNoSubscription() with a dangling UA_Session*, causing heap-use-after-free when accessing session fields (e.g., serverSubscriptions / channel). The crash is observed in ua_subscription.c, but the missing teardown ordering is in session removal/cleanup logic.",
+    "conditions": "Trigger requires creating a session (via fuzzed binary CreateSession flow), establishing state that leaves subscription/publish-related callbacks or queued publish handling associated with that session, then driving shutdown (harness calls UA_Server_run_shutdown). In single-threaded delayed-callback processing, the session memory is freed by removeSessionCallback, yet later callback execution still uses the freed session pointer in UA_Subscription_answerPublishRequestsNoSubscription, producing UAF."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 2,
+      "total_cost": 0.023695,
+      "total_input_tokens": 15268,
+      "total_output_tokens": 360,
+      "total_cached_tokens": 5120,
+      "llm_calls": [
+        {
+          "timestamp": 1775789172.4722764,
+          "model": "gpt-5.3-codex",
+          "cost": 0.010384500000000001,
+          "input_tokens": 5086,
+          "output_tokens": 106,
+          "total_tokens": 5192,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_VWCEM3CJkMw86ERMe7ILe3Mg"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_zo233EzamyUgAjeouhCtaqh9"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_6d7zrOdiMLIkEldfJ9JICuKu"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775789184.4614904,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0133105,
+          "input_tokens": 10182,
+          "output_tokens": 254,
+          "total_tokens": 10436,
+          "cached_tokens": 5120,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_IQZcD2ALbKOHqEILqhsOlCQi"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 6,
+      "total_cost": 0.037093,
+      "total_input_tokens": 63276,
+      "total_output_tokens": 428,
+      "total_cached_tokens": 50560,
+      "llm_calls": [
+        {
+          "timestamp": 1775789187.9590461,
+          "model": "gpt-5.3-codex",
+          "cost": 0.01263675,
+          "input_tokens": 6317,
+          "output_tokens": 113,
+          "total_tokens": 6430,
+          "cached_tokens": 0,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_sa5jYuCh9m6N5Jmh3ZlyGd4D"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_nFkxXgNjXhNf9pVErcqEKh3u"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_2beOf1fsLKlwc1wMioeofUku"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775789260.8968139,
+          "model": "gpt-5.3-codex",
+          "cost": 0.007973349999999999,
+          "input_tokens": 9897,
+          "output_tokens": 38,
+          "total_tokens": 9935,
+          "cached_tokens": 6272,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_Zy1saVqAdNjrAIud2x6eu4yc"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775789271.655587,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00252455,
+          "input_tokens": 10049,
+          "output_tokens": 33,
+          "total_tokens": 10082,
+          "cached_tokens": 9856,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_lwmbF0AMIj13rYBeVfRtkGl8"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775789275.5565145,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0083587,
+          "input_tokens": 12106,
+          "output_tokens": 207,
+          "total_tokens": 12313,
+          "cached_tokens": 9984,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_zWDoZORpNS9eejCJTfFsf48q"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775789276.9655135,
+          "model": "gpt-5.3-codex",
+          "cost": 0.00274575,
+          "input_tokens": 12401,
+          "output_tokens": 14,
+          "total_tokens": 12415,
+          "cached_tokens": 12160,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_wiGLDlPfUPh8H6SOIFGCNSjg"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1775789395.258014,
+          "model": "gpt-5.3-codex",
+          "cost": 0.0028538999999999995,
+          "input_tokens": 12506,
+          "output_tokens": 23,
+          "total_tokens": 12529,
+          "cached_tokens": 12288,
+          "input_cost_per_token": 1.75e-06,
+          "output_cost_per_token": 1.4e-05,
+          "cache_cost_per_token": 1.75e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_DMaLs8hpqZDyMWMqulMYWzmo"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.060788,
+      "total_input_tokens": 78544,
+      "total_output_tokens": 788,
+      "total_llm_calls": 8
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/src/server/ua_session_manager.c\n+++ b/src/server/ua_session_manager.c\n@@ -42,6 +42,14 @@\n     /* Deactivate the session */\n     sentry->session.activated = false;\n \n+#ifdef UA_ENABLE_SUBSCRIPTIONS\n+    /* Ensure callbacks and pending publish handling tied to the session are\n+     * drained before the delayed free runs. Otherwise delayed publish paths can\n+     * still dereference the session after removeSessionCallback frees it. */\n+    UA_Session_deleteSubscription(&sentry->session, sm->server);\n+    UA_Subscription_answerPublishRequestsNoSubscription(sm->server, &sentry->session);\n+#endif\n+\n     /* Add a delayed callback to remove the session when the currently\n      * scheduled jobs have completed */\n     UA_StatusCode retval = UA_Server_delayedCallback(sm->server, removeSessionCallback, sentry);\n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [],
+    "read_definition": [],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "open62541/src/server/ua_session_manager.c",
+          1
+        ],
+        "kwargs": {},
+        "timestamp": 479899.273606816,
+        "success": true,
+        "result_summary": "Ok({'contents': '  1 /* This Source Code Form is subject to the terms of the Mozilla Public\\n  2  * License, v. 2.0. If a copy of the MPL was not distributed with this\\n  3  * file, You can obtain one..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "open62541/src/server/ua_subscription.c",
+          487
+        ],
+        "kwargs": {},
+        "timestamp": 479899.275667508,
+        "success": true,
+        "result_summary": "Ok({'contents': '388     /* Reset subscription state to normal. */\\n389     sub->state = UA_SUBSCRIPTIONSTATE_NORMAL;\\n390     sub->currentKeepAliveCount = 0;\\n391 \\n392     /* Free the response */\\n3..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "open62541/src/server/ua_session_manager.c",
+          30
+        ],
+        "kwargs": {},
+        "timestamp": 479982.74853127,
+        "success": true,
+        "result_summary": "Ok({'contents': '  1 /* This Source Code Form is subject to the terms of the Mozilla Public\\n  2  * License, v. 2.0. If a copy of the MPL was not distributed with this\\n  3  * file, You can obtain one..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "removeSessionCallback",
+          "open62541/src/server/ua_session_manager.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 479970.703029968,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='open62541/src/server/ua_session_manager.c', refs=[FileReference(line=47, content='                       UA_StatusCode_name(retval));', enclosing_definition='removeSessio..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "UA_Session_deleteMembersCleanup",
+          "open62541/src/server",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 479981.454208636,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='open62541/src/server/ua_session_manager.c', refs=[FileReference(line=27, content='removeSessionCallback(UA_Server *server, void *entry) {', enclosing_definition='UA_Sessi..."
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "open62541/src/server/ua_session_manager.c",
+          "@@ -41,6 +41,13 @@\n removeSession(UA_SessionManager *sm, session_list_entry *sentry) {\n     /* Deactivate the session */\n     sentry->session.activated = false;\n+\n+#ifdef UA_ENABLE_SUBSCRIPTIONS\n+    /* Ensure callbacks and pending publish handling tied to the session are\n+     * drained before the delayed free runs. Otherwise delayed publish paths can\n+     * still dereference the session after removeSessionCallback frees it. */\n+    UA_Session_deleteSubscription(&sentry->session, sm->server);\n+    UA_Subscription_answerPublishRequestsNoSubscription(sm->server, &sentry->session);\n+#endif\n \n     /* Add a delayed callback to remove the session when the currently\n      * scheduled jobs have completed */\n"
+        ],
+        "kwargs": {},
+        "timestamp": 479986.679937186,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 480105.061924412,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}
