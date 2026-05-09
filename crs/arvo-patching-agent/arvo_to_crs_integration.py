@@ -654,6 +654,70 @@ def normalize_stack_line(line: str) -> str:
     return line.replace(" /src/", " ")
 
 
+def truncate_sanitizer_report(report_text: str, max_stack_frames: int = 30) -> str:
+    """
+    [ARVO FIX] Truncate a sanitizer report to its essential parts to avoid
+    exceeding the triage LLM context window on large reports.
+
+    Keeps:
+      - The error header lines (==ERROR==, READ/WRITE of size, SCARINESS)
+      - Up to max_stack_frames stack frames (#0, #1, ...)
+      - The first DEDUP_TOKEN line
+      - The SUMMARY line
+
+    Discards:
+      - Allocation traces ("allocated by thread T0 here")
+      - Redundant address/region info
+      - Any frames beyond max_stack_frames
+    """
+    header_lines: list[str] = []
+    stack_lines: list[str] = []
+    dedup_line: str | None = None
+    summary_line: str | None = None
+
+    in_header = True
+    frame_count = 0
+
+    for line in report_text.splitlines():
+        stripped = line.strip()
+
+        # Keep the error header up until the first stack frame
+        if in_header and not stripped.startswith("#"):
+            # Only keep meaningful header lines, skip blank lines in header
+            if stripped:
+                header_lines.append(line)
+            continue
+
+        if stripped.startswith("#"):
+            in_header = False
+            if frame_count < max_stack_frames:
+                stack_lines.append(line)
+                frame_count += 1
+            continue
+
+        if "DEDUP_TOKEN:" in line and dedup_line is None:
+            dedup_line = line
+            continue
+
+        if stripped.startswith("SUMMARY:") and summary_line is None:
+            summary_line = line
+            continue
+
+    parts = header_lines + stack_lines
+    if dedup_line:
+        parts.append(dedup_line)
+    if summary_line:
+        parts.append(summary_line)
+
+    truncated = "\n".join(parts)
+    original_len = len(report_text)
+    truncated_len = len(truncated)
+    if truncated_len < original_len:
+        print(f"[ARVO FIX] Truncated sanitizer report: {original_len} → {truncated_len} chars "
+              f"(kept {frame_count} stack frames, max={max_stack_frames})")
+    return truncated
+
+
 def extract_stack_and_dedup(report_text: str) -> tuple[str, str]:
     """Extract normalized stack trace and dedup token from a sanitizer report."""
     stack_lines: list[str] = []
@@ -804,6 +868,14 @@ async def create_crash_result_from_metadata_report(task, metadata_entry: dict):
     report_text = metadata_entry.get("sanitizer_report")
     if not report_text:
         raise RuntimeError("metadata.json entry is missing 'sanitizer_report'")
+
+    # [ARVO FIX 1] Truncate the report before passing to CrashResult.output.
+    # The triage LLM receives crash_result.output as part of its initial prompt.
+    # Very long sanitizer reports (large allocations traces, many frames) can
+    # exceed the model context window and crash the triage phase entirely.
+    # We keep the essential parts: header, first 30 stack frames, DEDUP_TOKEN,
+    # and SUMMARY — all the triage agent actually needs.
+    report_text = truncate_sanitizer_report(report_text, max_stack_frames=30)
 
     stack, dedup_token = extract_stack_and_dedup(report_text)
     build_config = resolve_build_config(
@@ -1328,9 +1400,74 @@ def print_summary(vuln_id, analyzed_vuln, decoded_pov, workflow_data):
     print("   From ARVO crash data to working patches using real CRS agents!")
 
 
+def resolve_vuln_file_path(analyzed_vuln, ossfuzz_hash: str, project_name: str) -> None:
+    """
+    [ARVO FIX 2] Validate that the file path identified by triage actually exists
+    in the extracted src tarball that apply_patch will use.
+
+    If the path is wrong (e.g. vendored library nested at a different depth),
+    search the tarball for a file with the same basename and correct
+    analyzed_vuln.file in-place before the patching agent starts.
+
+    This fixes cases like:
+      triage says:   hdf5-1.12.0/src/H5Oattr.c
+      actual path:   matio/hdf5-1.12.0/src/H5Oattr.c
+      apply_patch:   fails because it searches a different root
+    """
+    from crs import config as crs_config
+    import tarfile
+
+    if not analyzed_vuln or not analyzed_vuln.file:
+        return
+
+    data_dir = Path(crs_config.CACHE_DIR) / "data" / ossfuzz_hash / project_name
+    src_tar_path = data_dir / "src.tar"
+
+    if not src_tar_path.exists():
+        print(f"[ARVO FIX 2] src.tar not found at {src_tar_path}, skipping path validation")
+        return
+
+    target_file = analyzed_vuln.file.lstrip("/")
+    target_basename = Path(target_file).name
+
+    try:
+        with tarfile.open(src_tar_path, "r") as tf:
+            members = [m.name.lstrip("./") for m in tf.getmembers() if m.isfile()]
+    except Exception as e:
+        print(f"[ARVO FIX 2] Could not open src.tar for path validation: {e}")
+        return
+
+    # Check if the triage-identified path exists exactly
+    if target_file in members:
+        print(f"[ARVO FIX 2] Verified vuln file path in src.tar: {target_file}")
+        return
+
+    # Exact path not found — search by basename
+    matches = [m for m in members if Path(m).name == target_basename]
+    if not matches:
+        print(f"[ARVO FIX 2] WARNING: '{target_file}' not found in src.tar "
+              f"and no file named '{target_basename}' exists either. "
+              f"apply_patch will likely fail.")
+        return
+
+    if len(matches) == 1:
+        corrected = matches[0]
+    else:
+        # Prefer the match whose path most closely resembles the original
+        original_parts = set(Path(target_file).parts)
+        def overlap(path):
+            return len(set(Path(path).parts) & original_parts)
+        corrected = max(matches, key=overlap)
+
+    print(f"[ARVO FIX 2] Correcting vuln file path:")
+    print(f"  triage gave:  {target_file}")
+    print(f"  found in tar: {corrected}")
+    analyzed_vuln.file = corrected
+
+
 async def test_poc(arvo_id):
     """Test the PoC against the vulnerable version - Following CRS workflow"""
-    
+
     current_phase = "PHASE 1: SETTING UP PROJECT AND HARNESSES"
     try:
         # Phase 1: Setup project and harnesses
@@ -1362,17 +1499,45 @@ async def test_poc(arvo_id):
         if analyzed_vuln is None:
             raise RuntimeError("Triage returned no analyzed vulnerability")
 
+        # [ARVO FIX 2] Validate and correct the vulnerable file path before
+        # handing it to the patching agent. Triage may identify a path that
+        # read_source can resolve but apply_patch cannot (e.g. vendored libs).
+        current_phase = "PHASE 5b: VALIDATING VULN FILE PATH"
+        from pathlib import Path as StdPath
+        import hashlib as _hashlib
+        import subprocess as _sp
+        projects_dir = StdPath(CONFIG['project_dir']).parent
+        proc_hash = _sp.run(
+            ["git", "-C", str(projects_dir.absolute()), "log", "-1", "--pretty=format:'%H'",
+             str(projects_dir.absolute())],
+            stdout=_sp.PIPE, stderr=_sp.PIPE
+        )
+        proc_diff = _sp.run(
+            ["git", "-C", str(projects_dir.absolute()), "diff", str(projects_dir.absolute())],
+            stdout=_sp.PIPE, stderr=_sp.PIPE
+        )
+        _h = _hashlib.sha256()
+        _h.update(proc_hash.stdout)
+        _h.update(proc_diff.stdout)
+        ossfuzz_hash = _h.hexdigest()
+        project_name = StdPath(CONFIG['project_dir']).name
+        resolve_vuln_file_path(analyzed_vuln, ossfuzz_hash, project_name)
+
         # Phase 6: Store vulnerability in database
         current_phase = "PHASE 6: STORING VULNERABILITY IN DATABASE"
         vuln_id = await store_vulnerability_in_database(crs_instance, task, analyzed_vuln)
 
         # Phase 7: Save workflow data
         current_phase = "PHASE 7: SAVING WORKFLOW DATA"
-        workflow_data, workflow_file = save_workflow_data(vuln_id, crash_result, pov_run_data, decoded_pov, analyzed_vuln, arvo_id, triage_llm_calls)
+        workflow_data, workflow_file = save_workflow_data(
+            vuln_id, crash_result, pov_run_data, decoded_pov, analyzed_vuln, arvo_id, triage_llm_calls
+        )
 
         # Phase 8: Run patching agent
         current_phase = "PHASE 8: RUNNING PATCHING AGENT"
-        workflow_data = await run_patching_agent(task, analyzed_vuln, decoded_pov, vuln_id, workflow_data, workflow_file, arvo_id)
+        workflow_data = await run_patching_agent(
+            task, analyzed_vuln, decoded_pov, vuln_id, workflow_data, workflow_file, arvo_id
+        )
 
         # Print summary
         current_phase = "FINAL SUMMARY"
