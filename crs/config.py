@@ -64,9 +64,9 @@ MAX_ERROR_OUTPUT = 2048
 # Intended usage: run one workflow per process (e.g., one ARVO ID).
 # This local/dev default is intentionally low to cap spend unless overridden.
 try:
-    LLM_BUDGET_USD = float(os.getenv("CRS_LLM_BUDGET_USD", "2.50"))
+    LLM_BUDGET_USD = float(os.getenv("CRS_LLM_BUDGET_USD", "0.10"))
 except ValueError:
-    LLM_BUDGET_USD = 2.50
+    LLM_BUDGET_USD = 0.10
 
 OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 OTEL_TELEGRAF_ENDPOINT = os.getenv("OTEL_TELEGRAF_ENDPOINT")
@@ -114,6 +114,30 @@ litellm.modify_params = True
 litellm.suppress_debug_info = True
 litellm.drop_params = True
 
+# litellm==1.67.2 (pinned in pyproject.toml) predates GPT-5.6 and has no
+# built-in pricing for it, so litellm.get_model_info()/context-window checks
+# would fail without this. Values below are the short-context (<=272K
+# prompt tokens) tier from OpenAI's official docs
+# (developers.openai.com/api/docs/models/gpt-5.6-sol): $5/1M input, $0.50/1M
+# cached input, $30/1M output tokens. GPT-5.6 also bills a long-context
+# surcharge above that threshold (2x input/1.5x output) that a flat
+# litellm.register_model() entry can't express -- the cost actually charged
+# against CRS_LLM_BUDGET_USD is computed per-call with tier awareness in
+# crs/common/llm_api.py's _tiered_completion_cost(); this registration is
+# the fallback/metadata source (provider, context window) only.
+litellm.register_model({
+    "gpt-5.6-sol": {
+        "input_cost_per_token": 5e-06,
+        "output_cost_per_token": 3e-05,
+        "cache_read_input_token_cost": 5e-07,
+        "max_input_tokens": 922_000,
+        "max_output_tokens": 128_000,
+        "max_tokens": 1_050_000,
+        "litellm_provider": "openai",
+        "mode": "chat",
+    }
+})
+
 # API auth for AIxCC services
 CAPI_URL = os.environ.get("CAPI_URL") or "http://localhost:1323"
 CAPI_ID = os.environ.get("CAPI_ID") or "11111111-1111-1111-1111-111111111111"
@@ -149,8 +173,8 @@ def parse_model_map(path: Path | str) -> ModelMap:
     return TypeAdapter(ModelMap).validate_python(tomllib.load(open(path, "rb")))
 _default_model_map = parse_model_map(path) if (path := os.environ.get("MODEL_MAP")) else {}
 MODEL_MAP: ContextVar[ModelMap] = ContextVar('MODEL_MAP', default=_default_model_map)
-MODEL: ContextVar[str] = ContextVar('MODEL', default=os.environ.get("MODEL") or "gpt-5.3-codex")
-SMALLMODEL: ContextVar[str] = ContextVar('SMALLMODEL', default=os.environ.get("SMALLMODEL") or "gpt-5.3-codex")
+MODEL: ContextVar[str] = ContextVar('MODEL', default=os.environ.get("MODEL") or "gpt-5.6-sol")
+SMALLMODEL: ContextVar[str] = ContextVar('SMALLMODEL', default=os.environ.get("SMALLMODEL") or "gpt-5.6-sol")
 
 # Logging configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

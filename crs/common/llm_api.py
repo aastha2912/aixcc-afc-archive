@@ -107,6 +107,59 @@ CODEX_PRICING_FALLBACKS: dict[str, dict[str, float]] = {
     },
 }
 
+# GPT-5.6 Sol bills a long-context surcharge (2x input / 1.5x output) on the
+# ENTIRE request once prompt_tokens exceeds the threshold below, not just the
+# overage. litellm==1.67.2 (pinned in pyproject.toml) predates native GPT-5.6
+# tier support (added upstream in litellm 1.93.0), and litellm.completion_cost()
+# only does flat per-token multiplication, so it can't express this on its
+# own -- we compute cost for these models ourselves instead.
+# Source (confirmed): https://developers.openai.com/api/docs/models/gpt-5.6-sol
+#   short (<=272K prompt tokens): $5/1M in, $0.50/1M cached-read, $30/1M out
+#   long   (>272K prompt tokens): $10/1M in, $45/1M out (2x / 1.5x of short)
+# NOT modeled: OpenAI also documents a "cache write" rate (1.25x uncached
+# input) for this family, but litellm's Usage object only exposes
+# prompt_tokens_details.cached_tokens (cache READS) -- there's no field here
+# distinguishing which uncached tokens were freshly written to cache. Those
+# tokens are billed below at the plain input rate, which slightly
+# undercounts cost for calls that populate the cache. The long-context
+# cache-read rate below is not published by OpenAI; it's assumed to scale
+# the same way the short-tier cache-read rate does (10% of that tier's input
+# rate) and should be verified against real billing data.
+TIERED_PRICING: dict[str, dict[str, Any]] = {
+    "gpt-5.6-sol": {
+        "long_context_threshold_tokens": 272_000,
+        "short": {
+            "input_cost_per_token": 5e-06,
+            "output_cost_per_token": 3e-05,
+            "cache_read_input_token_cost": 5e-07,
+        },
+        "long": {
+            "input_cost_per_token": 1e-05,
+            "output_cost_per_token": 4.5e-05,
+            "cache_read_input_token_cost": 1e-06,  # assumed, see note above
+        },
+    },
+}
+
+
+def _tiered_completion_cost(
+    model: str, prompt_tokens: int, completion_tokens: int, cached_tokens: int
+) -> Optional[float]:
+    """Cost for models with long-context pricing tiers litellm's flat
+    per-token multiplication can't express. Returns None if `model` isn't
+    one of them, so the caller can fall back to litellm.completion_cost().
+    """
+    spec = TIERED_PRICING.get(model)
+    if spec is None:
+        return None
+    uncached_input_tokens = max(prompt_tokens - cached_tokens, 0)
+    tier: dict[str, float] = spec["long"] if prompt_tokens > spec["long_context_threshold_tokens"] else spec["short"]
+    return (
+        uncached_input_tokens * tier["input_cost_per_token"]
+        + cached_tokens * tier["cache_read_input_token_cost"]
+        + completion_tokens * tier["output_cost_per_token"]
+    )
+
 
 def is_codex_model(model: str) -> bool:
     model_name = DUPE_MODEL_MAP.get(model, model)
@@ -540,7 +593,14 @@ async def do_completion(args: CompletionArgs) -> dict[str, Any]:
                 kwargs['messages'].append({'role': 'user','content': 'keep going','thinking_blocks': None,'tool_call_id': None,'name': None,'tool_calls': None})
     res = await litellm.acompletion(**kwargs) # type: ignore
     try:
-        cost = litellm.completion_cost(res, model=model) # type: ignore
+        _usage: litellm.Usage = cast(litellm.Usage, res.usage) # type: ignore
+        tiered_cost = _tiered_completion_cost(
+            model,
+            prompt_tokens=_usage.prompt_tokens,
+            completion_tokens=_usage.completion_tokens,
+            cached_tokens=_usage.prompt_tokens_details.cached_tokens or 0, # type: ignore
+        )
+        cost = tiered_cost if tiered_cost is not None else litellm.completion_cost(res, model=model) # type: ignore
         llm_spend_tracker.get().add(cost)
     except Exception as e:
         cost = 0.0
