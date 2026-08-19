@@ -562,19 +562,31 @@ async def setup_project_and_harnesses():
     # =========================================================================
     # At this point, if we extracted src.tar, CRS will find it and skip Dockerfile build
     project = await TestProject.from_dir(PROJECT_DIR)
-    task = await project.task()
-    
+
     # =========================================================================
     # Step 5: Override build_image to use ARVO container for all operations
     # =========================================================================
     # CRS generates image names like "libraw:abc123" which don't exist
     # We override to use ARVO image which has everything
+    #
+    # This MUST happen before project.task() below, not after: TestProject.task()
+    # builds Task.debugger via Debugger(self) -> Project.new_fork(), which copies
+    # build_image at that exact moment rather than keeping a live reference to
+    # `project`. Setting the override on task.project afterward (as this used to)
+    # correctly updated the main project (used by patching/static analysis/etc.,
+    # which is why those work), but left the debugger's forked project pinned to
+    # the original non-existent "<project>:<hash>" tag forever - breaking
+    # gdb_exec specifically for every project (confirmed via identical
+    # "docker run did not write container ID" / "pull access denied" failures
+    # across libxml2, mruby, open62541, etc.).
     if use_prebuilt_image and arvo_image_name and prebuilt_setup_done:
         print(f"Setting build_image to ARVO image: {arvo_image_name}")
-        task.project.build_image = arvo_image_name
+        project.build_image = arvo_image_name
         print(f"All build operations will now use ARVO prebuilt image")
     else:
         raise RuntimeError("Prebuilt-image-only mode: internal error (prebuilt_setup_done was false).")
+
+    task = await project.task()
     
     # =========================================================================
     # Step 6: Extract prebuilt binaries from ARVO /out
