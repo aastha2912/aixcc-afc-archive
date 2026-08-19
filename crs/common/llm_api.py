@@ -175,6 +175,14 @@ def is_codex_model(model: str) -> bool:
 # option for using this model with reasoning_effort set.
 RESPONSES_API_REQUIRED_MODELS = {"gpt-5.6-sol"}
 
+# Models that reject `temperature` outright on /v1/responses (confirmed via
+# the API's own error: "Unsupported parameter: 'temperature' is not
+# supported with this model."). gpt-5.3-codex accepts temperature there;
+# gpt-5.6-sol does not - this is model-specific, not something drop_params
+# can help with, since _responses_completion calls the openai SDK directly
+# rather than going through litellm.
+RESPONSES_API_NO_TEMPERATURE_MODELS = {"gpt-5.6-sol"}
+
 def requires_responses_api(model: str) -> bool:
     model_name = DUPE_MODEL_MAP.get(model, model)
     return is_codex_model(model_name) or model_name in RESPONSES_API_REQUIRED_MODELS
@@ -370,10 +378,12 @@ async def _responses_completion(args: 'CompletionArgs', tools: Optional[list[dic
         "instructions": instructions,
         "tools": _responses_tools(tools),
         "tool_choice": _responses_tool_choice(args.get("tool_choice")),
-        "temperature": args.get("temperature"),
         "max_output_tokens": args.get("max_completion_tokens"),
         "top_logprobs": args.get("top_logprobs"),
     }
+    model_name = DUPE_MODEL_MAP.get(args["model"], args["model"])
+    if model_name not in RESPONSES_API_NO_TEMPERATURE_MODELS:
+        kwargs["temperature"] = args.get("temperature")
     if reasoning_effort := args.get("reasoning_effort"):
         kwargs["reasoning"] = {"effort": reasoning_effort}
     kwargs = {k: v for k, v in kwargs.items() if v is not None}
