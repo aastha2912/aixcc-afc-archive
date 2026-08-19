@@ -64,9 +64,9 @@ MAX_ERROR_OUTPUT = 2048
 # Intended usage: run one workflow per process (e.g., one ARVO ID).
 # This local/dev default is intentionally low to cap spend unless overridden.
 try:
-    LLM_BUDGET_USD = float(os.getenv("CRS_LLM_BUDGET_USD", "0.10"))
+    LLM_BUDGET_USD = float(os.getenv("CRS_LLM_BUDGET_USD", "5.00"))
 except ValueError:
-    LLM_BUDGET_USD = 0.10
+    LLM_BUDGET_USD = 5.00
 
 OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 OTEL_TELEGRAF_ENDPOINT = os.getenv("OTEL_TELEGRAF_ENDPOINT")
