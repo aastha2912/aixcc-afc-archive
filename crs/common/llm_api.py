@@ -165,6 +165,19 @@ def is_codex_model(model: str) -> bool:
     model_name = DUPE_MODEL_MAP.get(model, model)
     return "codex" in model_name
 
+# Models that must go through the Responses API even though they aren't
+# Codex. OpenAI rejects function tools + reasoning_effort together on
+# /v1/chat/completions for these (confirmed via the API's own error):
+#   "Function tools with reasoning_effort are not supported for gpt-5.6-sol
+#   in /v1/chat/completions. To use function tools, use /v1/responses or
+#   set reasoning_effort to 'none'."
+# Since CRS agents rely on tool calls, that leaves /v1/responses as the only
+# option for using this model with reasoning_effort set.
+RESPONSES_API_REQUIRED_MODELS = {"gpt-5.6-sol"}
+
+def requires_responses_api(model: str) -> bool:
+    model_name = DUPE_MODEL_MAP.get(model, model)
+    return is_codex_model(model_name) or model_name in RESPONSES_API_REQUIRED_MODELS
 
 def _msg_text_content(msg: dict[str, Any]) -> str:
     content = msg.get("content")
@@ -298,10 +311,19 @@ def _model_pricing(model: str) -> dict[str, float]:
 
 
 def _responses_cost(model: str, usage: dict[str, Any]) -> float:
-    pricing = _model_pricing(model)
     prompt_tokens = int(usage.get("prompt_tokens", 0))
     completion_tokens = int(usage.get("completion_tokens", 0))
     cached_tokens = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0))
+
+    # gpt-5.6-sol now goes through this path too (see requires_responses_api)
+    # and needs the same long-context tiered pricing as the standard
+    # litellm.acompletion path -- flat _model_pricing() below can't express
+    # the surcharge, so try the tiered calculator first.
+    tiered_cost = _tiered_completion_cost(model, prompt_tokens, completion_tokens, cached_tokens)
+    if tiered_cost is not None:
+        return tiered_cost
+
+    pricing = _model_pricing(model)
     uncached_input_tokens = max(prompt_tokens - cached_tokens, 0)
     return (
         uncached_input_tokens * pricing["input_cost_per_token"]
@@ -528,7 +550,7 @@ async def do_completion(args: CompletionArgs) -> dict[str, Any]:
         del args["use_caching"]
     tools: Optional[list[dict[str, Any]]] = args.get("tools")
 
-    if is_codex_model(model):
+    if requires_responses_api(model):
         completion = await _responses_completion(args, tools)
         usage = completion["usage"]
         llm_spend_tracker.get().add(completion["cost"])
@@ -562,7 +584,7 @@ async def do_completion(args: CompletionArgs) -> dict[str, Any]:
             tokens_output_counter.add(usage["completion_tokens"], model_attrs)
             tokens_cached_counter.add(usage["prompt_tokens_details"]["cached_tokens"], model_attrs)
         except Exception as e:
-            logger.exception("Exception while reporting Codex metrics", exception=e)
+            logger.exception("Exception while reporting Responses API metrics", exception=e)
         return completion
 
     # hack for anthropic API being annoying
