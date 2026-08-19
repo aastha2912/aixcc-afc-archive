@@ -257,9 +257,15 @@ async def extract_arvo_binaries(task, arvo_image_name: str) -> bool:
     from crs.common.types import Ok, Err
     
     print(f"\nExtracting prebuilt binaries (/out) from ARVO image...")
-    
+
     try:
-        async with docker.scope(timeout=300) as scope:
+        # Timeouts here (and on the docker.run() below) were raised from their
+        # original 300s/120s: under real N-way concurrent extraction (multiple
+        # workers each streaming a /out tar out of a fresh container at once,
+        # competing for disk I/O), individual extractions that comfortably fit
+        # in the old budget started timing out - observed directly across
+        # multiple unrelated projects once actual worker concurrency increased.
+        async with docker.scope(timeout=600) as scope:
             # Extract build artifacts for each build config
             # ARVO images have the vulnerable version already compiled in /out
             for build_config in task.project.info.build_configs:
@@ -273,7 +279,7 @@ async def extract_arvo_binaries(task, arvo_image_name: str) -> bool:
                     continue
                 
                 # Run a container from the ARVO image and copy /out directory
-                async with docker.run(arvo_image_name, timeout=120, group=docker.DockerGroup.Misc) as run:
+                async with docker.run(arvo_image_name, timeout=300, group=docker.DockerGroup.Misc) as run:
                     # Stream directly to file to avoid memory issues
                     with open(build_tar_path, "wb") as f:
                         proc = await run.exec(
@@ -777,7 +783,9 @@ async def run_arvo_and_capture_crash(arvo_image_name: str, testcase_path: Path, 
             testcase_data = f.read()
         
         # Run ARVO container
-        async with docker.run(arvo_image_name, timeout=120, group=docker.DockerGroup.Misc) as run:
+        # (timeout raised from 120s for the same reason as extract_arvo_binaries()
+        # above - real N-way concurrent docker.run() calls contend for I/O now)
+        async with docker.run(arvo_image_name, timeout=300, group=docker.DockerGroup.Misc) as run:
             # Write testcase to container
             from crs.common.docker import vwrite
             from crs.common.types import Ok, Err
