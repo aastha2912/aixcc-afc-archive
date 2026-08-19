@@ -21,12 +21,12 @@ import shlex
 import subprocess
 import sys
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import Lock
-from typing import Iterable
+from queue import Queue
+from threading import Lock, Thread
+from typing import Callable, Iterable, Optional
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -34,7 +34,7 @@ REPO_ROOT = SCRIPT_DIR.parent.parent
 SETUP_SCRIPT = SCRIPT_DIR / "setup_arvo_project.py"
 INTEGRATION_SCRIPT_IN_CONTAINER = "/crs/crs/arvo-patching-agent/arvo_to_crs_integration.py"
 DEFAULT_IDS_FILE = SCRIPT_DIR / "ids.csv"
-MAX_PARALLEL_IDS = 5
+MAX_PARALLEL_IDS = 8
 STATUS_FILE = SCRIPT_DIR / "run_arvo_workflow_status.json"
 STATUS_LOCK = Lock()
 
@@ -376,14 +376,78 @@ def process_id(arvo_id: str, *, force: bool) -> RunResult:
             append_log(arvo_id, f"WARNING: failed to remove CRS cache: {exc}")
 
 
-def process_config_with_project_lock(
-    cfg: ArvoRunConfig,
-    *,
-    force: bool,
-    project_locks: dict[str, Lock],
-) -> RunResult:
-    with project_locks[cfg.project_name]:
-        return process_id(cfg.arvo_id, force=force)
+def run_scheduled(
+    configs: list[ArvoRunConfig],
+    effective_workers: int,
+    process_fn: Callable[[str], RunResult],
+) -> list[RunResult]:
+    """
+    Run `configs` with up to `effective_workers` truly-concurrent workers, while
+    guaranteeing IDs that share a project never run concurrently with each other.
+
+    A naive ThreadPoolExecutor(max_workers=N) with one future pre-submitted per
+    ID (each future acquiring a per-project Lock) doesn't actually achieve N-way
+    concurrency here: a worker thread that draws an ID whose project is already
+    locked by another in-flight future just blocks on that lock for the rest of
+    its run, rather than picking up a different, currently-available project.
+    With IDs clustered across few distinct projects, most of the pool can end up
+    idle-blocked instead of doing useful work.
+
+    Here, pending IDs are grouped per-project into a shared queue keyed by
+    project name (not by ID). A worker pulls the next AVAILABLE project - one
+    not currently checked out by any other worker - takes one ID from it, and
+    only makes that project available again (re-queues it) once it's done. An
+    idle worker therefore always picks up a DIFFERENT ready project instead of
+    blocking on one already in flight, so `effective_workers` is the number
+    that's actually concurrently busy whenever that many distinct projects have
+    ready work, instead of silently dropping below it due to same-project
+    clustering.
+    """
+    project_ids: dict[str, list[str]] = {}
+    for cfg in configs:
+        project_ids.setdefault(cfg.project_name, []).append(cfg.arvo_id)
+
+    total_ids = sum(len(ids) for ids in project_ids.values())
+    if total_ids == 0:
+        return []
+
+    work_queue: "Queue[Optional[str]]" = Queue()
+    for project_name in project_ids:
+        work_queue.put(project_name)
+
+    results: list[RunResult] = []
+    results_lock = Lock()
+    completed_count = 0
+
+    def worker() -> None:
+        nonlocal completed_count
+        while True:
+            project_name = work_queue.get()
+            if project_name is None:
+                return
+            arvo_id = project_ids[project_name].pop(0)
+            try:
+                result = process_fn(arvo_id)
+            except Exception as exc:  # noqa: BLE001
+                update_status(arvo_id, stage="failed", status="failed", detail=str(exc))
+                append_log(arvo_id, f"Workflow failed: {exc}")
+                result = RunResult(arvo_id=arvo_id, status="failed", detail=str(exc))
+            with results_lock:
+                results.append(result)
+                completed_count += 1
+                all_done = completed_count == total_ids
+            if project_ids[project_name]:
+                work_queue.put(project_name)
+            if all_done:
+                for _ in range(effective_workers):
+                    work_queue.put(None)
+
+    threads = [Thread(target=worker, name=f"arvo-worker-{i}") for i in range(effective_workers)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    return results
 
 
 def determine_effective_workers(configs: list[ArvoRunConfig], requested_workers: int) -> tuple[int, str]:
@@ -480,25 +544,11 @@ def main() -> int:
                 append_log(arvo_id, f"Workflow failed: {exc}")
                 results.append(RunResult(arvo_id=arvo_id, status="failed", detail=str(exc)))
     else:
-        project_locks = {project_name: Lock() for project_name in {cfg.project_name for cfg in configs}}
-        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
-            futures = {
-                executor.submit(
-                    process_config_with_project_lock,
-                    config_by_id[arvo_id],
-                    force=True,
-                    project_locks=project_locks,
-                ): arvo_id
-                for arvo_id in ready_ids
-            }
-            for future in as_completed(futures):
-                arvo_id = futures[future]
-                try:
-                    results.append(future.result())
-                except Exception as exc:  # noqa: BLE001
-                    update_status(arvo_id, stage="failed", status="failed", detail=str(exc))
-                    append_log(arvo_id, f"Workflow failed: {exc}")
-                    results.append(RunResult(arvo_id=arvo_id, status="failed", detail=str(exc)))
+        results.extend(run_scheduled(
+            configs,
+            effective_workers,
+            lambda arvo_id: process_id(arvo_id, force=True),
+        ))
 
     order = {arvo_id: index for index, arvo_id in enumerate(ids)}
     results.sort(key=lambda item: order.get(item.arvo_id, len(order)))
