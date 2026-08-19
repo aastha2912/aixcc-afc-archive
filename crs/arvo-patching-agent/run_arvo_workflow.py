@@ -34,7 +34,7 @@ REPO_ROOT = SCRIPT_DIR.parent.parent
 SETUP_SCRIPT = SCRIPT_DIR / "setup_arvo_project.py"
 INTEGRATION_SCRIPT_IN_CONTAINER = "/crs/crs/arvo-patching-agent/arvo_to_crs_integration.py"
 DEFAULT_IDS_FILE = SCRIPT_DIR / "ids.csv"
-MAX_PARALLEL_IDS = 5
+MAX_PARALLEL_IDS = 10
 STATUS_FILE = SCRIPT_DIR / "run_arvo_workflow_status.json"
 STATUS_LOCK = Lock()
 
