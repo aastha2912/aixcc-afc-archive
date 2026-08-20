@@ -324,7 +324,15 @@ class CoverageAnalyzer():
         await self.db.foreach_covered_lines(self.graph.add_new_hit)
         return Ok(None)
 
-    @alru_cache(maxsize=None, filter=only_ok)
+    # (aastham) no filter=only_ok here, deliberately unlike the other alru_cache uses in
+    # this file: a coverage build failure due to missing infra (e.g. llvm-cov/lcov_parser
+    # unavailable) is persistent for the rest of this run, not transient. With
+    # filter=only_ok, every query_coverage call re-attempts this (twice, via the fallback
+    # below) from scratch with zero memory of prior failures - observed directly burning
+    # large amounts of wall-clock time via repeated container spin-up/teardown for a build
+    # that can never succeed. Caching the failure too means it's attempted once per project
+    # per run instead of once per tool call.
+    @alru_cache(maxsize=None)
     async def artifacts(self):
         cfg = self.project.info.coverage_build_config.model_copy()
         res = await self.project.build(cfg)

@@ -329,7 +329,23 @@ async def run(
             stdout=PIPE
         )
         assert proc.stdout is not None
-        _ = await proc.stdout.readline()
+        # `--cidfile` gets written once the container is *created*, but creation can
+        # succeed while the container then fails to actually *start* (e.g. a bad mount
+        # at start time) - in that case docker never emits a "start" event, and
+        # readline() below would block forever with no way out. Observed directly:
+        # containers stuck 10+ minutes with zero further log output, an orphaned
+        # `docker events` process still blocked on this exact readline(). Bound it with
+        # the same budget used for the cidfile wait above, and fail loudly instead of
+        # hanging so this surfaces through the normal error/retry path.
+        try:
+            async with asyncio.timeout(CONTAINER_SPAWN_TIMEOUT):
+                _ = await proc.stdout.readline()
+        except TimeoutError:
+            proc.kill()
+            _ = await proc.wait()
+            raise RuntimeError(
+                f"container {cid} (image={image!r}) did not report a start event within {CONTAINER_SPAWN_TIMEOUT}s"
+            )
         proc.kill()
         _ = await proc.wait()
         port_map: dict[int, HostPort] = {}
