@@ -509,6 +509,13 @@ async def run_povs_post_acquire(
 # note: must always accessed from a single run-loop
 build_locks: defaultdict[Tuple[str, BuildConfig], asyncio.Lock] = defaultdict(asyncio.Lock)
 
+# negative cache for bear builds already known to fail for this (state, build_config) -
+# without this, every separate tool call that needs bear (read_definition, find_references,
+# etc.) re-attempts the identical failing build from scratch, spinning up and tearing down a
+# fresh container each time. Observed directly: multiple attempts per second for a project
+# whose image genuinely lacks /opt/bear, with zero chance any of them will succeed.
+bear_build_failures: set[Tuple[str, BuildConfig]] = set()
+
 class Project:
     project_dir: Path
     info: ProjectInfo
@@ -912,9 +919,13 @@ class Project:
         state = await self.edit_state()
         if await (bear_tar := await self.get_bear_tar()).exists():
             return bear_tar
+        if (state, build_config) in bear_build_failures:
+            return None
         async with build_locks[(state, build_config)]:
             if await bear_tar.exists():
                 return bear_tar
+            if (state, build_config) in bear_build_failures:
+                return None
             # try using bear on the default build
             match await self._build(build_config, mounts, timeout, capture_output, using_bear=True):
                 case Ok(res):
@@ -923,6 +934,7 @@ class Project:
                     return bear_tar
                 case Err(error):
                     logger.warning(f"error during bear build: {error}")
+                    bear_build_failures.add((state, build_config))
                     return None
 
     async def build_all(self, timeout: float = DEFAULT_BUILD_TIMEOUT, capture_output: bool = False) -> Result[list[BuildArtifacts]]:
