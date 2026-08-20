@@ -1,0 +1,1052 @@
+{
+  "vuln_id": 638,
+  "crash_result": {
+    "output": "AddressSanitizer:DEADLYSIGNAL\n=================================================================\n==9562==ERROR: AddressSanitizer: SEGV on unknown address 0x000097b34018 (pc 0x0000005714ab bp 0x7ffdf210c310 sp 0x7ffdf210c310 T0)\n==9562==The signal is caused by a READ memory access.\nSCARINESS: 20 (wild-addr-read)\n    #0 0x5714ab in MqttProps_Free /src/wolfmqtt/src/mqtt_packet.c:1838:20\n    #1 0x56d618 in MqttClient_PropsFree /src/wolfmqtt/src/mqtt_client.c:2168:12\n    #2 0x56d618 in MqttClient_Unsu",
+    "stack": "#0 0x5714ab in MqttProps_Free wolfmqtt/src/mqtt_packet.c:1838:20\n#1 0x56d618 in MqttClient_PropsFree wolfmqtt/src/mqtt_client.c:2168:12\n#2 0x56d618 in MqttClient_Unsubscribe wolfmqtt/src/mqtt_client.c:1913:9\n#3 0x562e93 in wolfMQTTFuzzer::unsubscribe() wolfmqtt-fuzzers/fuzzer.cpp:284:9\n#4 0x5662ca in wolfMQTTFuzzer::Run() wolfmqtt-fuzzers/fuzzer.cpp:480:21\n#5 0x566fe5 in LLVMFuzzerTestOneInput wolfmqtt-fuzzers/fuzzer.cpp:541:12\n#6 0x456bf3 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*,",
+    "dedup": "MqttProps_Free--MqttClient_PropsFree--MqttClient_Unsubscribe"
+  },
+  "pov_run_data": {
+    "task_uuid": "4235055a-30ec-53ad-8a05-0026ba8fef80",
+    "project_name": "wolfmqtt",
+    "harness": "wolfmqtt-fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "MqttProps_Free--MqttClient_PropsFree--MqttClient_Unsubscribe"
+  },
+  "decoded_pov": {
+    "project_name": "wolfmqtt",
+    "harness": "wolfmqtt-fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'@\\x01\\x00#\\xef/\\x00\\x00,\\x10\\xfe\\xfe\\xff\\xf7\\x00\\x03\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\n\\x02\\x00\\x00\\x00\\x01\\x00\\x00~\\x00\\x00\\xb9\\x00\\x00\\x00\\xff\\x00\\x00-\\x00\\xfe\\\\c\\xbeB\\x01\\x00\\x04\\x02\\x00\\xff\\x00\\xeb\\x87\\r\\x00\\x00\\x00\\x00\\x05*\\x04\\x04\\x04\\x04\\x04\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\x9e\\x08\\x02\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\xbd\\x00\\x01\\x00\\x00X\\x00\\x00\\n\\x02\\x00\\x00\\x00\\x01\\x00\\x00~\\x00\\x00\\xb9\\x00\\x00\\x00\\xff\\x00\\x00-\\x00\\xfe\\\\c\\xbeB\\x01\\x00\\x04\\x02\\x00\\xff\\x00\\xeb\\x87\\r\\x00\\x00\\x00\\x00\\x05*\\x04\\x04\\x04\\x04\\x04\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\x9e\\x08\\x02\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\xbd\\x00\\x02\\x00\\x00\\x00\\x9e\\xbd\\x00\\x00\\x08\\xe4\\x02\\x00\\x00\\x00B\\x01\\x01\\x00\\x00\\x00\\x00'\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "MqttProps_Free--MqttClient_PropsFree--MqttClient_Unsubscribe"
+  },
+  "analyzed_vuln": {
+    "function": "MqttClient_Unsubscribe",
+    "file": "wolfmqtt/src/mqtt_client.c",
+    "description": "The unsubscribe completion path releases `unsubscribe->ack.props` a second time. During UNSUBACK decoding, `MqttClient_DecodePacket` calls `Handle_Props`, which already calls `MqttProps_Free` but leaves the caller's `props` pointer non-NULL. `MqttClient_Unsubscribe` then unconditionally calls `MqttClient_PropsFree` on that stale property-list pointer. This duplicate traversal of the property pool can follow list links that have been invalidated/reused, producing the wild read in `MqttProps_Free` at mqtt_packet.c:1838. The anomalous second cleanup is in `MqttClient_Unsubscribe`; other ACK paths rely on `Handle_Props`.",
+    "conditions": "MQTT v5 must be active, the harness must reach an unsubscribe action and receive a matching UNSUBACK for its packet ID containing at least one decoded property so `ack.props` is non-NULL. The network bytes come directly from the fuzz datasource through `wolfMQTTFuzzer::recv` into `client->rx_buf`; `MqttDecode_UnsubscribeAck` builds `unsubscribe->ack.props`, `MqttClient_DecodePacket`/`Handle_Props` frees that list, and then `MqttClient_Unsubscribe` frees the same stale pointer again. The PoV's preceding packet/action sequence leaves property-pool links in a state where the second traversal reaches a wild pointer and crashes."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 15,
+      "total_cost": 0.5788705,
+      "total_input_tokens": 336725,
+      "total_output_tokens": 8004,
+      "total_cached_tokens": 298861,
+      "llm_calls": [
+        {
+          "timestamp": 1787173464.9482067,
+          "model": "gpt-5.6-sol",
+          "cost": 0.022850000000000002,
+          "input_tokens": 3250,
+          "output_tokens": 220,
+          "total_tokens": 3470,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_kY42v9hjb6utvTLMET3V3Jp1"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_DlzBF1JuX9a6QE5F6B9jyFYi"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ROgwrAVEKJmmtdP0dwwpydZi"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_6XvwCAQ7VjNbw3D5zzTrKzaZ"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_eX3GGbhXG6NGvJPZ6FgNKwBK"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787173604.9487488,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0104385,
+          "input_tokens": 3702,
+          "output_tokens": 218,
+          "total_tokens": 3920,
+          "cached_tokens": 3247,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Bvievx8SKSV2zfVIUrCxKhGq"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_NR6pHqrsQrN1KQ8x2OKJX2FE"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_lytV077yb70dGESRm4CGtudq"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_gnfsCQcJoeXVsYROpHOsiu8F"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_tSNI7VIVLQCqdhoNhJFttQzq"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787173728.9381216,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0189595,
+          "input_tokens": 5801,
+          "output_tokens": 220,
+          "total_tokens": 6021,
+          "cached_tokens": 3699,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_NkI9jmbRhTBSPimxnZdIyclL"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_Btpzs86rKJOCj3oWkGqEeRFO"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_j1ekLc5uYiAC3xUKFx93d6rS"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_XDckU0hD55pNdw4WeBNB0Jru"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_AUIoyFuoKydL40hihK5oOjGq"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174328.2745202,
+          "model": "gpt-5.6-sol",
+          "cost": 0.017604,
+          "input_tokens": 7515,
+          "output_tokens": 204,
+          "total_tokens": 7719,
+          "cached_tokens": 5798,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_YwoaE8XJhzvx1mC2vle19GK6"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_y8jF1mLVqatNdaEQTBGgZJpw"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_2lsth5C1UvT20hhd09hqpBUx"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_aeEYm3N3G5XdOLHd7X9N0pBl"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_UjaGMV7h0qWs2HApeWfhcoLy"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174385.7245908,
+          "model": "gpt-5.6-sol",
+          "cost": 0.041601,
+          "input_tokens": 13587,
+          "output_tokens": 249,
+          "total_tokens": 13836,
+          "cached_tokens": 7512,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Jd8ATnRSuIIl4nKpcMfRPy6F"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_a3AmZyJZJIvt7pdd9l2IEy6Q"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_NDsVPZXoVpEejDf06ryD59Y1"
+            },
+            {
+              "tool_name": "debug_pov",
+              "tool_call_id": "call_xxYCwNqOCzQwfOXNR9aYAiDB"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174426.309852,
+          "model": "gpt-5.6-sol",
+          "cost": 0.030347,
+          "input_tokens": 16981,
+          "output_tokens": 219,
+          "total_tokens": 17200,
+          "cached_tokens": 13584,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_dl6YFdE6bpf15BsAIrL61aD5"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_UXTjro8BmSY8aw7PP5BBoXX8"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_DiKBo0d5aSn5v18mzSJl6zqY"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_03ofcuztxVtcftDXFiJIV7AP"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_zFkHchBQBtwBB7ek8eCwCOSM"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174455.2461483,
+          "model": "gpt-5.6-sol",
+          "cost": 0.034199,
+          "input_tokens": 19732,
+          "output_tokens": 398,
+          "total_tokens": 20130,
+          "cached_tokens": 16978,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_0GT1gv2QhCzET5IJjQliwpiZ"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_AYPpwYw0gFKjvkihmPrWevvg"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_qf1xL14drvr6yj06sZTVLigg"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_rlQGLZt5G8L5wuM7EpQeaWzl"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_bpdTQt2RFM6oHreYEONJo37H"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174558.4173977,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0586295,
+          "input_tokens": 24172,
+          "output_tokens": 885,
+          "total_tokens": 25057,
+          "cached_tokens": 19729,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_6Ig91OyJk9TSdpUgwXyrmCGM"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_lyowOnzPpY4XJs8AzIkDDl8Y"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_H9kkSfJeD9IPKvyPxYAqfkh5"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_evkAtgrw4li7lS5d8FWMIyA3"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Ml5jKQ5asWI5F2VdMaSRV2q1"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174622.4738739,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0475745,
+          "input_tokens": 28381,
+          "output_tokens": 481,
+          "total_tokens": 28862,
+          "cached_tokens": 24169,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_WmFv0ww3CsaX3ncIoxlI3nCS"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_xiWIspDTwxh2PjBg4tAronQY"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_OEq9LG045Q6sK2IM50K3ur3l"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_6oUHmtQoRXgAybkhDVn84m6t"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_zZpnm9gkUVlanM08Wo560FdY"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174688.356403,
+          "model": "gpt-5.6-sol",
+          "cost": 0.035539,
+          "input_tokens": 31766,
+          "output_tokens": 147,
+          "total_tokens": 31913,
+          "cached_tokens": 28378,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_tqoxW2HcY3UlkQwlM1ARQY1L"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_EH6A8EdJt3LuD2Hi2264ERuW"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_b0rR73BvA9PM5Nrnr1C145HO"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_jvTt2OZS9F65aCIeGQeCaTDy"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174727.9019043,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0469665,
+          "input_tokens": 34560,
+          "output_tokens": 570,
+          "total_tokens": 35130,
+          "cached_tokens": 31763,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_R0mgWj1V5BEtA3gUrPSJExAN"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_l4Y0PwRjpg7N6tUDsYyhyR51"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_rWml84MuKZDSd16P3HMzH2uT"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_XBgdiqZcqaS6rOexrogKBzLj"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174867.9472358,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0713585,
+          "input_tokens": 36265,
+          "output_tokens": 1518,
+          "total_tokens": 37783,
+          "cached_tokens": 34557,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_a6BR6kGXzRa9JbeQVBFrJqUa"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174899.43066,
+          "model": "gpt-5.6-sol",
+          "cost": 0.044150999999999996,
+          "input_tokens": 36546,
+          "output_tokens": 820,
+          "total_tokens": 37366,
+          "cached_tokens": 36262,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_R2sYY7n1XP4UKerGyuqPCd9Q"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174912.263721,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0200715,
+          "input_tokens": 36645,
+          "output_tokens": 43,
+          "total_tokens": 36688,
+          "cached_tokens": 36543,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_pJ4RuwK7qFhvx8bCKIX2vXqX"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174966.3733013,
+          "model": "gpt-5.6-sol",
+          "cost": 0.078581,
+          "input_tokens": 37822,
+          "output_tokens": 1812,
+          "total_tokens": 39634,
+          "cached_tokens": 36642,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_DbBTKfINS2dycBtwY4IVF9En"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 9,
+      "total_cost": 0.140442,
+      "total_input_tokens": 84843,
+      "total_output_tokens": 1271,
+      "total_cached_tokens": 71534,
+      "llm_calls": [
+        {
+          "timestamp": 1787174970.5180554,
+          "model": "gpt-5.6-sol",
+          "cost": 0.025995,
+          "input_tokens": 4383,
+          "output_tokens": 136,
+          "total_tokens": 4519,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_wZlh3dySRX3E7AMvLJAZ3PLi"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_AMsu8o1VlhOGF3XQZXXVDcQ5"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_ec0scUVEPiJG2X7K2KXPsRBQ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175002.1866841,
+          "model": "gpt-5.6-sol",
+          "cost": 0.009105,
+          "input_tokens": 4659,
+          "output_tokens": 184,
+          "total_tokens": 4843,
+          "cached_tokens": 4380,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Eavhys7cSUmXMzxDQj0xSTJw"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Ir57olCJ4npRebh3pmwjHFY9"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_FYsznofoz0VkIOhkh5grfADQ"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Ic3mMU6hAkt2KmT8wkN5KkkC"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175041.9368417,
+          "model": "gpt-5.6-sol",
+          "cost": 0.009513,
+          "input_tokens": 5073,
+          "output_tokens": 170,
+          "total_tokens": 5243,
+          "cached_tokens": 4656,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_KuY1ATDVMzw3TKviVG7EgK6v"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_uY6HRlKGwMy69o7N2EJQ6v08"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_gfYUWrnaN7wW66eeRqnqJVIr"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Y4jX76d52WaI26Uci8oMb0wM"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175079.3404782,
+          "model": "gpt-5.6-sol",
+          "cost": 0.027660000000000004,
+          "input_tokens": 8931,
+          "output_tokens": 194,
+          "total_tokens": 9125,
+          "cached_tokens": 5070,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_WUtrXG41F1Z5aEIq8m2M4XDX"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_fZQnZoNoUqJ0K1J6aG4NPSIy"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_9E9FoIPurxQSyI0qYusp4uTG"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_8ztBPCKCfRAhi1FX5Hp4DpIs"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175319.8592546,
+          "model": "gpt-5.6-sol",
+          "cost": 0.011684,
+          "input_tokens": 9550,
+          "output_tokens": 137,
+          "total_tokens": 9687,
+          "cached_tokens": 8928,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_8u7rJMg7u4lKpX6itkuFs7IC"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_UHDhX7DrgDWna1d3xaUGVYMj"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ftgerFgWoRCaDael9KigE5W0"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175348.4338546,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0302035,
+          "input_tokens": 12809,
+          "output_tokens": 304,
+          "total_tokens": 13113,
+          "cached_tokens": 9547,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_QT5ZNxfHPwZMGUEG6QnkMn2N"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175351.2503603,
+          "model": "gpt-5.6-sol",
+          "cost": 0.007913,
+          "input_tokens": 13024,
+          "output_tokens": 14,
+          "total_tokens": 13038,
+          "cached_tokens": 12806,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_JOPfSEJckOTWSNxdZosOPs9v"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175421.1863391,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0099605,
+          "input_tokens": 13129,
+          "output_tokens": 97,
+          "total_tokens": 13226,
+          "cached_tokens": 13021,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_DzLmGqs4wk1J0KCoBWrNg2IH"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175423.428459,
+          "model": "gpt-5.6-sol",
+          "cost": 0.008407999999999999,
+          "input_tokens": 13285,
+          "output_tokens": 35,
+          "total_tokens": 13320,
+          "cached_tokens": 13126,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_oDxnmZaEHEeG3Nc1a4YYaC3c"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.7193125,
+      "total_input_tokens": 421568,
+      "total_output_tokens": 9275,
+      "total_llm_calls": 24
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/wolfmqtt/src/mqtt_client.c\n+++ b/wolfmqtt/src/mqtt_client.c\n@@ -1899,13 +1899,6 @@\n     }\n #endif\n \n-#ifdef WOLFMQTT_V5\n-    if (unsubscribe->ack.props != NULL) {\n-        /* Release the allocated properties */\n-        MqttClient_PropsFree(unsubscribe->ack.props);\n-    }\n-#endif\n-\n     /* reset state */\n     unsubscribe->stat = MQTT_MSG_BEGIN;\n \n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "MqttClient_Unsubscribe",
+          "src/mqtt_client.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584378.662310221,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: wolfmqtt/src/mqtt_client.c, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "Handle_Props",
+          "src/mqtt_client.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584386.102214605,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: wolfmqtt/src/mqtt_client.c, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "MqttClient_Unsubscribe",
+          "wolfmqtt/src/mqtt_client.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584403.202394874,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1814 int MqttClient_Unsubscribe(MqttClient *client, MqttUnsubscribe *unsubscribe), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "Handle_Props",
+          "wolfmqtt/src/mqtt_client.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584414.89109161,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n281 static int Handle_Props(MqttClient* client, MqttProp* props), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "MqttProps_Free",
+          "wolfmqtt/src/mqtt_packet.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584426.919133885,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1831 int MqttProps_Free(MqttProp *head), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "MqttProps_Free",
+          "wolfmqtt/src/mqtt_packet.c",
+          1831,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584440.671522023,
+        "success": true,
+        "result_summary": "Ok({'contents': '1831 int MqttProps_Free(MqttProp *head)\\n1832 {\\n1833 #ifdef WOLFMQTT_MULTITHREAD\\n1834     if (wm_SemLock(&clientPropStack_lock))\\n1835         return -1;\\n1836 #endif\\n1837     whil..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "Handle_Props",
+          "wolfmqtt/src/mqtt_client.c",
+          281,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584451.876242034,
+        "success": true,
+        "result_summary": "Ok({'contents': '281 static int Handle_Props(MqttClient* client, MqttProp* props)\\n282 {\\n283     int rc = MQTT_CODE_SUCCESS;\\n284 \\n285     /* If no properties, just return */\\n286     if (props != N..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "MqttClient_Unsubscribe",
+          "wolfmqtt/src/mqtt_client.c",
+          1814,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584463.784033598,
+        "success": true,
+        "result_summary": "Ok({'contents': '1814 int MqttClient_Unsubscribe(MqttClient *client, MqttUnsubscribe *unsubscribe)\\n1815 {\\n1816     int rc, len;\\n1817 \\n1818     /* Validate required arguments */\\n1819     if (clien..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "MqttDecode_UnsubscribeAck",
+          "wolfmqtt/src/mqtt_packet.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584564.021528367,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1395 int MqttDecode_UnsubscribeAck(byte *rx_buf, int rx_buf_len,, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "MqttClient_DecodePacket",
+          "wolfmqtt/src/mqtt_client.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584577.121701178,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n321 static int MqttClient_DecodePacket(MqttClient* client, byte* rx_buf,, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "MqttClient_DecodePacket",
+          "wolfmqtt/src/mqtt_client.c",
+          321,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584716.376880872,
+        "success": true,
+        "result_summary": "Ok({'contents': '321 static int MqttClient_DecodePacket(MqttClient* client, byte* rx_buf,\\n322     word32 rx_len, void *packet_obj, MqttPacketType* ppacket_type,\\n323     MqttQoS* ppacket_qos, word16*..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "MqttDecode_UnsubscribeAck",
+          "wolfmqtt/src/mqtt_packet.c",
+          1395,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584722.933507106,
+        "success": true,
+        "result_summary": "Ok({'contents': '1395 int MqttDecode_UnsubscribeAck(byte *rx_buf, int rx_buf_len,\\n1396     MqttUnsubscribeAck *unsubscribe_ack)\\n1397 {\\n1398     int header_len, remain_len;\\n1399     byte *rx_payloa..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "MqttClient_Subscribe",
+          "wolfmqtt/src/mqtt_client.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584729.335387352,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1712 int MqttClient_Subscribe(MqttClient *client, MqttSubscribe *subscribe), extra=None))"
+      }
+    ],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "wolfmqtt/src/mqtt_client.c",
+          1220
+        ],
+        "kwargs": {},
+        "timestamp": 1584430.653056196,
+        "success": true,
+        "result_summary": "Ok({'contents': '1121 }\\n1122 \\n1123 #ifdef WOLFMQTT_DISCONNECT_CB\\n1124 int MqttClient_SetDisconnectCallback(MqttClient *client,\\n1125         MqttDisconnectCb discCb, void* ctx)\\n1126 {\\n1127     if..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "MqttClient_PropsFree",
+          "src/mqtt_client.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1584359.318406382,
+        "success": true,
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: wolfmqtt/examples/multithread/multithread.c, wolfmqtt/src/mqtt_client.c, wolfmqtt/examples/mqttclient/mqttclient...."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "MqttClient_PropsFree",
+          "wolfmqtt/src/mqtt_client.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1584390.888812413,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='wolfmqtt/src/mqtt_client.c', refs=[FileReference(line=1267, content='        MqttClient_PropsFree(p_auth->props);', enclosing_definition='MqttClient_Connect'), FileRefere..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "ack.props",
+          "wolfmqtt/src/mqtt_client.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1584600.649445254,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='/src/wolfmqtt/src/mqtt_client.c', refs=[FileReference(line=1903, content='    if (unsubscribe->ack.props != NULL) {', enclosing_definition='N/A'), FileReference(line=1905..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "Handle_Props",
+          "wolfmqtt/src/mqtt_client.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1584703.777130231,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='wolfmqtt/src/mqtt_client.c', refs=[FileReference(line=365, content='                int tmp = Handle_Props(client, p_connect_ack->props);', enclosing_definition='MqttClie..."
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "wolfmqtt/src/mqtt_client.c",
+          "@@ -1899,12 +1899,6 @@\n     }\n #endif\n \n-#ifdef WOLFMQTT_V5\n-    if (unsubscribe->ack.props != NULL) {\n-        /* Release the allocated properties */\n-        MqttClient_PropsFree(unsubscribe->ack.props);\n-    }\n-#endif\n-\n     /* reset state */\n     unsubscribe->stat = MQTT_MSG_BEGIN;\n \n"
+        ],
+        "kwargs": {},
+        "timestamp": 1584737.379121653,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1584807.470455104,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

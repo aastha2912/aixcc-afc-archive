@@ -1,0 +1,124 @@
+--- a/src/cmsio0.c
++++ b/src/cmsio0.c
+@@ -692,6 +692,44 @@
+ // Enforces that the profile version is per. spec.
+ // Operates on the big endian bytes from the profile.
+ // Called before converting to platform endianness.
++
++// Check whether a tag type can be represented by a tag descriptor. This is
++// also used while building links, before any tag data has been cooked.
++static
++cmsBool IsTypeSupportedByDescriptor(const cmsTagDescriptor* TagDescriptor, cmsTagTypeSignature Type)
++{
++    cmsUInt32Number i, nMaxTypes;
++
++    if (TagDescriptor == NULL) return FALSE;
++
++    nMaxTypes = TagDescriptor->nSupportedTypes;
++    if (nMaxTypes >= MAX_TYPES_IN_LCMS_PLUGIN)
++        nMaxTypes = MAX_TYPES_IN_LCMS_PLUGIN;
++
++    for (i = 0; i < nMaxTypes; i++) {
++        if (Type == TagDescriptor->SupportedTypes[i]) return TRUE;
++    }
++
++    return FALSE;
++}
++
++// Linked tags share the same cooked object. Therefore both tag signatures
++// must accept the actual type stored in the shared block and must agree on
++// the number of elements represented by that object.
++static
++cmsBool AreTagDescriptorsCompatible(_cmsICCPROFILE* Icc, cmsTagSignature First,
++                                    cmsTagSignature Second, cmsTagTypeSignature Type)
++{
++    cmsTagDescriptor* FirstDescriptor  = _cmsGetTagDescriptor(Icc->ContextID, First);
++    cmsTagDescriptor* SecondDescriptor = _cmsGetTagDescriptor(Icc->ContextID, Second);
++
++    if (FirstDescriptor == NULL || SecondDescriptor == NULL) return FALSE;
++    if (FirstDescriptor->ElemCount != SecondDescriptor->ElemCount) return FALSE;
++
++    return IsTypeSupportedByDescriptor(FirstDescriptor, Type) &&
++           IsTypeSupportedByDescriptor(SecondDescriptor, Type);
++}
++
+ // Byte 0 is BCD major version, so max 9.
+ // Byte 1 is 2 BCD digits, one per nibble.
+ // Reserved bytes 2 & 3 must be 0.
+@@ -720,9 +758,11 @@
+     cmsTagEntry Tag;
+     cmsICCHeader Header;
+     cmsUInt32Number i, j;
++    cmsUInt32Number DirectoryPos;
+     cmsUInt32Number HeaderSize;
+     cmsIOHANDLER* io = Icc ->IOhandler;
+     cmsUInt32Number TagCount;
++    cmsTagTypeSignature BaseType;
+ 
+ 
+     // Read the header
+@@ -792,21 +832,35 @@
+         Icc -> TagOffsets[Icc ->TagCount] = Tag.offset;
+         Icc -> TagSizes[Icc ->TagCount]   = Tag.size;
+ 
+-       // Search for links
+-        for (j=0; j < Icc ->TagCount; j++) {
+-           
+-            if ((Icc ->TagOffsets[j] == Tag.offset) &&
+-                (Icc ->TagSizes[j]   == Tag.size)) {
++        Icc ->TagCount++;
++    }
+ 
+-                // Check types. 
+-                Icc ->TagLinked[Icc ->TagCount] = Icc ->TagNames[j];
+-            }
++    // Search for links. Equal offsets and sizes alone are insufficient: a
++    // cooked read caches the object in the link target's directory slot, so
++    // both signatures must use a compatible in-memory representation.
++    DirectoryPos = io->Tell(io);
++    for (i = 0; i < Icc->TagCount; i++) {
++        for (j = 0; j < i; j++) {
+ 
++            if ((Icc->TagOffsets[j] == Icc->TagOffsets[i]) &&
++                (Icc->TagSizes[j]   == Icc->TagSizes[i]) &&
++                (Icc->TagSizes[i] >= 8)) {
++
++                if (!io->Seek(io, Icc->TagOffsets[i])) continue;
++                BaseType = _cmsReadTypeBase(io);
++
++                if (BaseType != 0 &&
++                    AreTagDescriptorsCompatible(Icc, Icc->TagNames[j],
++                                                Icc->TagNames[i], BaseType)) {
++                    Icc->TagLinked[i] = Icc->TagNames[j];
++                    break;
++                }
++            }
+         }
+-
+-        Icc ->TagCount++;
+     }
+ 
++    if (!io->Seek(io, DirectoryPos)) return FALSE;
++
+ 
+     for (i = 0; i < Icc->TagCount; i++) {
+         for (j = 0; j < Icc->TagCount; j++) {
+@@ -1541,17 +1595,7 @@
+ static
+ cmsBool IsTypeSupported(cmsTagDescriptor* TagDescriptor, cmsTagTypeSignature Type)
+ {
+-    cmsUInt32Number i, nMaxTypes;
+-
+-    nMaxTypes = TagDescriptor->nSupportedTypes;
+-    if (nMaxTypes >= MAX_TYPES_IN_LCMS_PLUGIN)
+-        nMaxTypes = MAX_TYPES_IN_LCMS_PLUGIN;
+-
+-    for (i=0; i < nMaxTypes; i++) {
+-        if (Type == TagDescriptor ->SupportedTypes[i]) return TRUE;
+-    }
+-
+-    return FALSE;
++    return IsTypeSupportedByDescriptor(TagDescriptor, Type);
+ }
+ 
+ 

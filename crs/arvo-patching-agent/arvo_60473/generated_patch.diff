@@ -1,0 +1,139 @@
+--- a/Packet++/src/DnsLayer.cpp
++++ b/Packet++/src/DnsLayer.cpp
+@@ -12,6 +12,65 @@
+ namespace pcpp
+ {
+ 
++namespace
++{
++
++// Validate a DNS name before creating an IDnsResource. In addition to validating
++// the bytes occupied by the name at its current location, follow compression
++// pointers so malformed/truncated pointed-to names aren't accepted.
++bool validateDnsName(const uint8_t* data, size_t dataLen, size_t offsetAdjustment,
++					size_t nameOffset, size_t& encodedNameLen, size_t& expandedNameLen,
++					unsigned int recursionDepth)
++{
++	if (recursionDepth > 20 || nameOffset >= dataLen)
++		return false;
++
++	size_t currentOffset = nameOffset;
++	while (currentOffset < dataLen)
++	{
++		uint8_t labelLength = data[currentOffset];
++		if (labelLength == 0)
++		{
++			if (expandedNameLen >= 255)
++				return false;
++			expandedNameLen++;
++			encodedNameLen = currentOffset - nameOffset + 1;
++			return true;
++		}
++
++		if ((labelLength & 0xc0) == 0xc0)
++		{
++			if (dataLen - currentOffset < sizeof(uint16_t))
++				return false;
++
++			size_t pointerOffset = offsetAdjustment +
++					(((size_t)labelLength & 0x3f) << 8) + data[currentOffset + 1];
++			if (pointerOffset < offsetAdjustment + sizeof(dnshdr) || pointerOffset >= dataLen)
++				return false;
++
++			size_t pointedNameLen = 0;
++			if (!validateDnsName(data, dataLen, offsetAdjustment, pointerOffset, pointedNameLen,
++							expandedNameLen, recursionDepth + 1))
++				return false;
++
++			encodedNameLen = currentOffset - nameOffset + sizeof(uint16_t);
++			return true;
++		}
++
++		// The two high bits are reserved for label types and a label is at most 63 bytes.
++		if ((labelLength & 0xc0) != 0 || dataLen - currentOffset - 1 < labelLength ||
++			expandedNameLen > 255 - labelLength - 1)
++			return false;
++
++		expandedNameLen += labelLength + 1;
++		currentOffset += labelLength + 1;
++	}
++
++	return false;
++}
++
++} // anonymous namespace
++
+ // ~~~~~~~~
+ // DnsLayer
+ // ~~~~~~~~
+@@ -182,6 +241,45 @@
+ 			numOfAdditional--;
+ 		}
+ 
++		// Validate the complete wire record before constructing an object. The
++		// constructors decode the variable-length name, and DnsResource::getSize()
++		// reads RDLENGTH, so checking only after getSize() is too late.
++		size_t encodedNameLen = 0;
++		size_t expandedNameLen = 0;
++		if (offsetInPacket >= m_DataLen ||
++			!validateDnsName(m_Data, m_DataLen, m_OffsetAdjustment, offsetInPacket,
++						 encodedNameLen, expandedNameLen, 1))
++			return;
++
++		size_t remaining = m_DataLen - offsetInPacket;
++		if (encodedNameLen > remaining)
++			return;
++		remaining -= encodedNameLen;
++
++		size_t resourceSize = encodedNameLen;
++		if (resType == DnsQueryType)
++		{
++			const size_t queryFieldsSize = 2 * sizeof(uint16_t);
++			if (remaining < queryFieldsSize)
++				return;
++			resourceSize += queryFieldsSize;
++		}
++		else
++		{
++			const size_t fixedResourceFieldsSize = 3 * sizeof(uint16_t) + sizeof(uint32_t);
++			if (remaining < fixedResourceFieldsSize)
++				return;
++
++			uint16_t dataLengthNetworkOrder = 0;
++			memcpy(&dataLengthNetworkOrder,
++				   m_Data + offsetInPacket + encodedNameLen + fixedResourceFieldsSize - sizeof(uint16_t),
++				   sizeof(dataLengthNetworkOrder));
++			size_t dataLength = be16toh(dataLengthNetworkOrder);
++			if (dataLength > remaining - fixedResourceFieldsSize)
++				return;
++			resourceSize += fixedResourceFieldsSize + dataLength;
++		}
++
+ 		DnsResource* newResource = nullptr;
+ 		DnsQuery* newQuery = nullptr;
+ 		IDnsResource* newGenResource = nullptr;
+@@ -189,21 +287,20 @@
+ 		{
+ 			newQuery = new DnsQuery(this, offsetInPacket);
+ 			newGenResource = newQuery;
+-			offsetInPacket += newQuery->getSize();
+ 		}
+ 		else
+ 		{
+ 			newResource = new DnsResource(this, offsetInPacket, resType);
+ 			newGenResource = newResource;
+-			offsetInPacket += newResource->getSize();
+ 		}
+ 
+-		if (offsetInPacket > m_DataLen)
++		// Keep the validator and decoder in agreement before exposing the object.
++		if (newGenResource->m_NameLength != encodedNameLen)
+ 		{
+-			//Parse packet failed, DNS resource is out of bounds. Probably a bad packet
+ 			delete newGenResource;
+ 			return;
+ 		}
++		offsetInPacket += resourceSize;
+ 
+ 		// this resource is the first resource
+ 		if (m_ResourceList == nullptr)

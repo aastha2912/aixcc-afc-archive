@@ -1,0 +1,146 @@
+{
+  "source_questions": [
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Inspect libxml2/parser.c function xmlParseExternalEntityPrivate and identify the safest cleanup/control-flow fix when its initial GROW or encoding setup changes ctxt->instate to XML_PARSER_EOF. Compare nearby parser entry points for established patterns that check fatal halt after GROW or xmlSwitchEncoding. Explain which return value and cleanup path should be used.",
+        "The reported ASan crash occurs because xmlParserGrow during the initial GROW can invoke xmlHaltParser after allocation failure, freeing the input buffer and setting base/cur/end to a global empty sentinel while setting instate XML_PARSER_EOF. xmlParseExternalEntityPrivate later unconditionally sets instate XML_PARSER_CONTENT and invokes xmlParseContent, causing RAW to read before/around the sentinel. The provided schema harness PoC forces maxAlloc to zero and reaches this path through an external general parsed entity. We need edit only libxml2 source and preserve all function-owned cleanup, so I am determining whether to jump to an existing cleanup label or return after freeing the temporary parser context."
+      ],
+      "kwargs": {},
+      "timestamp": 1625761.134198498,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='The unsafe sequence is at `parser.c:12870-12936`:\\n\\n```c\\nGROW;\\n...\\nxmlSwitchEncoding(ctxt, enc);\\n...\\nctxt->instate = XML_PARSER_CONTENT;\\n...\\nxmlParseContent(ct..."
+    }
+  ],
+  "read_definition": [
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "xmlParseExternalEntityPrivate",
+        "libxml2/parser.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1625660.594457161,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n12795 xmlParseExternalEntityPrivate(xmlDocPtr doc, xmlParserCtxtPtr oldctxt,, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "xmlParseExternalEntityPrivate",
+        "libxml2/parser.c",
+        12795,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1625762.671358858,
+      "success": true,
+      "result_summary": "Ok({'contents': '12794 static xmlParserErrors\\n12795 xmlParseExternalEntityPrivate(xmlDocPtr doc, xmlParserCtxtPtr oldctxt,\\n12796 \\t              xmlSAXHandlerPtr sax,\\n12797 \\t\\t      void *user_dat..."
+    }
+  ],
+  "read_source": [
+    {
+      "tool_name": "read_source",
+      "args": [
+        "libxml2/parser.c",
+        12995
+      ],
+      "kwargs": {},
+      "timestamp": 1625829.564658199,
+      "success": true,
+      "result_summary": "Ok({'contents': '12896             xmlFatalErrMsg(ctxt, XML_ERR_VERSION_MISMATCH,\\n12897                            \"Version mismatch between document and entity\\\\n\");\\n12898         }\\n12899     }\\n1..."
+    }
+  ],
+  "find_references": [
+    {
+      "tool_name": "find_references",
+      "args": [
+        "XML_PARSER_EOF",
+        "libxml2/parser.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1625661.568720076,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='libxml2/parser.c', refs=[FileReference(line=225, content='        (ctxt->instate == XML_PARSER_EOF))', enclosing_definition='xmlErrAttributeDup'), FileReference(line=262,..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "early_halt",
+        "libxml2/parser.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1625823.486597185,
+      "success": true,
+      "result_summary": "Err(CRSError(no results found, extra=None))"
+    }
+  ],
+  "apply_patch": [
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "libxml2/parser.c",
+        "@@ -12867,6 +12867,8 @@\n      * plug some encoding conversion routines.\n      */\n     GROW;\n+    if (ctxt->instate == XML_PARSER_EOF)\n+        goto early_halt;\n     if ((ctxt->input->end - ctxt->input->cur) >= 4) {\n \tstart[0] = RAW;\n \tstart[1] = NXT(1);\n@@ -12878,6 +12880,8 @@\n \t    xmlSwitchEncoding(ctxt, enc);\n \t}\n     }\n+    if (ctxt->instate == XML_PARSER_EOF)\n+        goto early_halt;\n \n     /*\n      * Parse a possible text declaration first\n@@ -12893,6 +12897,8 @@\n                            \"Version mismatch between document and entity\\n\");\n         }\n     }\n+    if (ctxt->instate == XML_PARSER_EOF)\n+        goto early_halt;\n \n     ctxt->instate = XML_PARSER_CONTENT;\n     ctxt->depth = depth;\n@@ -13006,6 +13012,22 @@\n     xmlFreeDoc(newDoc);\n \n     return(ret);\n+\n+early_halt:\n+    ret = (xmlParserErrors) ctxt->errNo;\n+    if (oldctxt != NULL) {\n+        oldctxt->errNo = ctxt->errNo;\n+        oldctxt->wellFormed = 0;\n+        xmlCopyError(&ctxt->lastError, &oldctxt->lastError);\n+        oldctxt->nbErrors = ctxt->nbErrors;\n+        oldctxt->nbWarnings = ctxt->nbWarnings;\n+    }\n+\n+    xmlFreeParserCtxt(ctxt);\n+    newDoc->intSubset = NULL;\n+    newDoc->extSubset = NULL;\n+    xmlFreeDoc(newDoc);\n+\n+    return(ret);\n }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1625775.121857752,
+      "success": true,
+      "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 3 (line 13006): sw_align failed: Context lines did not match OR matched multiple locations. Please double-check the correctness of th..."
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "libxml2/parser.c",
+        "@@ -12865,8 +12865,10 @@\n     /*\n      * Get the 4 first bytes and decode the charset\n      * if enc != XML_CHAR_ENCODING_NONE\n      * plug some encoding conversion routines.\n      */\n     GROW;\n+    if (ctxt->instate == XML_PARSER_EOF)\n+        goto early_halt;\n     if ((ctxt->input->end - ctxt->input->cur) >= 4) {\n \tstart[0] = RAW;\n \tstart[1] = NXT(1);\n@@ -12876,8 +12878,10 @@\n \tenc = xmlDetectCharEncoding(start, 4);\n \tif (enc != XML_CHAR_ENCODING_NONE) {\n \t    xmlSwitchEncoding(ctxt, enc);\n \t}\n     }\n+    if (ctxt->instate == XML_PARSER_EOF)\n+        goto early_halt;\n \n     /*\n      * Parse a possible text declaration first\n@@ -12890,8 +12894,10 @@\n         if ((xmlStrEqual(oldctxt->version, BAD_CAST \"1.0\")) &&\n             (!xmlStrEqual(ctxt->input->version, BAD_CAST \"1.0\"))) {\n             xmlFatalErrMsg(ctxt, XML_ERR_VERSION_MISMATCH,\n                            \"Version mismatch between document and entity\\n\");\n         }\n     }\n+    if (ctxt->instate == XML_PARSER_EOF)\n+        goto early_halt;\n \n     ctxt->instate = XML_PARSER_CONTENT;\n     ctxt->depth = depth;\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1625782.032538799,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "libxml2/parser.c",
+        "@@ -13009,7 +13009,23 @@\n     xmlFreeParserCtxt(ctxt);\n     newDoc->intSubset = NULL;\n     newDoc->extSubset = NULL;\n     xmlFreeDoc(newDoc);\n \n     return(ret);\n+\n+early_halt:\n+    ret = (xmlParserErrors) ctxt->errNo;\n+    if (oldctxt != NULL) {\n+        oldctxt->errNo = ctxt->errNo;\n+        oldctxt->wellFormed = 0;\n+        xmlCopyError(&ctxt->lastError, &oldctxt->lastError);\n+        oldctxt->nbErrors = ctxt->nbErrors;\n+        oldctxt->nbWarnings = ctxt->nbWarnings;\n+    }\n+\n+    xmlFreeParserCtxt(ctxt);\n+    newDoc->intSubset = NULL;\n+    newDoc->extSubset = NULL;\n+    xmlFreeDoc(newDoc);\n+\n+    return(ret);\n }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1625838.062529393,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    }
+  ],
+  "test_patch": [
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1625819.030628516,
+      "success": true,
+      "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1625871.529826198,
+      "success": true,
+      "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+    }
+  ],
+  "undo_last_patch": [],
+  "list_current_edits": [
+    {
+      "tool_name": "list_current_edits",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1625821.654845246,
+      "success": true,
+      "result_summary": "Ok({'edits': ['@@ -12865,8 +12865,10 @@\\n     /*\\n      * Get the 4 first bytes and decode the charset\\n      * if enc != XML_CHAR_ENCODING_NONE\\n      * plug some encoding conversion routines.\\n     ..."
+    }
+  ]
+}

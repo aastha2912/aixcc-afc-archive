@@ -1,0 +1,82 @@
+--- a/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c
++++ b/internal-complibs/zstd-1.4.9/decompress/zstd_decompress_block.c
+@@ -767,15 +767,18 @@
+                             const BYTE** litPtr, const BYTE* const litLimit,
+                             const BYTE* const prefixStart, const BYTE* const virtualStart, const BYTE* const dictEnd)
+ {
+-    BYTE* const oLitEnd = op + sequence.litLength;
+-    size_t const sequenceLength = sequence.litLength + sequence.matchLength;
+-    const BYTE* const iLitEnd = *litPtr + sequence.litLength;
+-    const BYTE* match = oLitEnd - sequence.offset;
+-    BYTE* const oend_w = oend - WILDCOPY_OVERLENGTH;
++    size_t const oRemaining = (size_t)(oend - op);
+ 
+     /* bounds checks : careful of address space overflow in 32-bit mode */
+-    RETURN_ERROR_IF(sequenceLength > (size_t)(oend - op), dstSize_tooSmall, "last match must fit within dstBuffer");
+     RETURN_ERROR_IF(sequence.litLength > (size_t)(litLimit - *litPtr), corruption_detected, "try to read beyond literal buffer");
++    RETURN_ERROR_IF(sequence.litLength > oRemaining, dstSize_tooSmall, "last match must fit within dstBuffer");
++    RETURN_ERROR_IF(sequence.matchLength > oRemaining - sequence.litLength, dstSize_tooSmall, "last match must fit within dstBuffer");
++    {   BYTE* const oLitEnd = op + sequence.litLength;
++        size_t const sequenceLength = sequence.litLength + sequence.matchLength;
++        const BYTE* const iLitEnd = *litPtr + sequence.litLength;
++        const BYTE* match = oLitEnd - sequence.offset;
++        BYTE* const oend_w = oend - WILDCOPY_OVERLENGTH;
++
+     assert(op < op + sequenceLength);
+     assert(oLitEnd < op + sequenceLength);
+ 
+@@ -802,6 +805,7 @@
+     }   }
+     ZSTD_safecopy(op, oend_w, match, sequence.matchLength, ZSTD_overlap_src_before_dst);
+     return sequenceLength;
++    }
+ }
+ 
+ HINT_INLINE
+@@ -810,26 +814,29 @@
+                          const BYTE** litPtr, const BYTE* const litLimit,
+                          const BYTE* const prefixStart, const BYTE* const virtualStart, const BYTE* const dictEnd)
+ {
+-    BYTE* const oLitEnd = op + sequence.litLength;
+-    size_t const sequenceLength = sequence.litLength + sequence.matchLength;
+-    BYTE* const oMatchEnd = op + sequenceLength;   /* risk : address space overflow (32-bits) */
++    size_t const oRemaining = (size_t)(oend - op);
+     BYTE* const oend_w = oend - WILDCOPY_OVERLENGTH;   /* risk : address space underflow on oend=NULL */
+-    const BYTE* const iLitEnd = *litPtr + sequence.litLength;
+-    const BYTE* match = oLitEnd - sequence.offset;
+ 
+     assert(op != NULL /* Precondition */);
+     assert(oend_w < oend /* No underflow */);
+     /* Handle edge cases in a slow path:
+      *   - Read beyond end of literals
+      *   - Match end is within WILDCOPY_OVERLIMIT of oend
+-     *   - 32-bit mode and the match length overflows
++     *   - Literal or match lengths don't fit in the output buffer
+      */
+     if (UNLIKELY(
+-            iLitEnd > litLimit ||
+-            oMatchEnd > oend_w ||
+-            (MEM_32bits() && (size_t)(oend - op) < sequenceLength + WILDCOPY_OVERLENGTH)))
++            sequence.litLength > (size_t)(litLimit - *litPtr) ||
++            oRemaining < WILDCOPY_OVERLENGTH ||
++            sequence.litLength > oRemaining - WILDCOPY_OVERLENGTH ||
++            sequence.matchLength > oRemaining - WILDCOPY_OVERLENGTH - sequence.litLength))
+         return ZSTD_execSequenceEnd(op, oend, sequence, litPtr, litLimit, prefixStart, virtualStart, dictEnd);
+ 
++    {   BYTE* const oLitEnd = op + sequence.litLength;
++        size_t const sequenceLength = sequence.litLength + sequence.matchLength;
++        BYTE* const oMatchEnd = op + sequenceLength;
++        const BYTE* const iLitEnd = *litPtr + sequence.litLength;
++        const BYTE* match = oLitEnd - sequence.offset;
++
+     /* Assumptions (everything else goes into ZSTD_execSequenceEnd()) */
+     assert(op <= oLitEnd /* No overflow */);
+     assert(oLitEnd < oMatchEnd /* Non-zero match & no overflow */);
+@@ -894,6 +901,7 @@
+         ZSTD_wildcopy(op, match, (ptrdiff_t)sequence.matchLength-8, ZSTD_overlap_src_before_dst);
+     }
+     return sequenceLength;
++    }
+ }
+ 
+ static void

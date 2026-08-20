@@ -1,0 +1,227 @@
+--- a/code/AssetLib/MDL/MDLMaterialLoader.cpp
++++ b/code/AssetLib/MDL/MDLMaterialLoader.cpp
+@@ -96,12 +96,21 @@
+ 
+     aiColor4D clrOut;
+     clrOut.r = get_qnan();
+-    if (!pcTexture->mHeight || !pcTexture->mWidth)
++    if (!pcTexture->mHeight || !pcTexture->mWidth || !pcTexture->pcData)
+         return clrOut;
+ 
+-    const unsigned int iNumPixels = pcTexture->mHeight * pcTexture->mWidth;
++    const size_t width = pcTexture->mWidth;
++    const size_t height = pcTexture->mHeight;
++    if (width > SIZE_MAX / height) {
++        return clrOut;
++    }
++
++    const size_t iNumPixels = width * height;
++    if (iNumPixels == 0 || iNumPixels > SIZE_MAX / sizeof(aiTexel)) {
++        return clrOut;
++    }
+     const aiTexel *pcTexel = pcTexture->pcData + 1;
+-    const aiTexel *const pcTexelEnd = &pcTexture->pcData[iNumPixels];
++    const aiTexel *const pcTexelEnd = pcTexture->pcData + iNumPixels;
+ 
+     while (pcTexel != pcTexelEnd) {
+         if (*pcTexel != *(pcTexel - 1)) {
+@@ -214,20 +223,66 @@
+         aiTexture *pcNew) {
+     const bool do_read = bad_texel != pcNew->pcData;
+ 
+-    // allocate storage for the texture image
++    size_t bytesPerPixel;
++    switch (iType) {
++    case 0:
++        bytesPerPixel = 1;
++        break;
++    case 2:
++    case 3:
++    case 10:
++    case 11:
++        bytesPerPixel = 2;
++        break;
++    case 4:
++    case 12:
++        bytesPerPixel = 3;
++        break;
++    case 5:
++    case 13:
++        bytesPerPixel = 4;
++        break;
++    default:
++        throw DeadlyImportError("Unsupported MDL texture color format");
++    }
++
++    const size_t width = pcNew->mWidth;
++    const size_t height = pcNew->mHeight;
++    if (height != 0 && width > SIZE_MAX / height) {
++        throw DeadlyImportError("Invalid MDL texture dimensions");
++    }
++    const size_t pixelCount = width * height;
++    if (pixelCount > SIZE_MAX / sizeof(aiTexel) ||
++            pixelCount > SIZE_MAX / bytesPerPixel) {
++        throw DeadlyImportError("Invalid MDL texture dimensions");
++    }
++
++    size_t dataSize = pixelCount * bytesPerPixel;
++    if (iType >= 10) {
++        const size_t mipPixels = (pixelCount >> 2) + (pixelCount >> 4) + (pixelCount >> 6);
++        if (mipPixels > (SIZE_MAX - dataSize) / bytesPerPixel) {
++            throw DeadlyImportError("Invalid MDL texture dimensions");
++        }
++        dataSize += mipPixels * bytesPerPixel;
++    }
++    if (dataSize > UINT_MAX || !IsPosValid(szData) ||
++            dataSize > static_cast<size_t>(mBuffer + iFileSize - szData)) {
++        throw DeadlyImportError("Invalid MDL texture data size");
++    }
++    *piSkip = static_cast<unsigned int>(dataSize);
++    VALIDATE_FILE_SIZE(szData + dataSize);
++
++    // Validate all sizes and the complete input range before allocating.
+     if (do_read) {
+-        pcNew->pcData = new aiTexel[pcNew->mWidth * pcNew->mHeight];
++        pcNew->pcData = new aiTexel[pixelCount];
+     }
+ 
+     // R5G6B5 format (with or without MIPs)
+     // ****************************************************************
+     if (2 == iType || 10 == iType) {
+-        VALIDATE_FILE_SIZE(szData + pcNew->mWidth * pcNew->mHeight * 2);
+-
+         // copy texture data
+-        unsigned int i;
+         if (do_read) {
+-            for (i = 0; i < pcNew->mWidth * pcNew->mHeight; ++i) {
++            for (size_t i = 0; i < pixelCount; ++i) {
+                 MDL::RGB565 val = ((MDL::RGB565 *)szData)[i];
+                 AI_SWAP2(val);
+ 
+@@ -236,26 +291,14 @@
+                 pcNew->pcData[i].g = (unsigned char)val.g << 2;
+                 pcNew->pcData[i].b = (unsigned char)val.r << 3;
+             }
+-        } else {
+-            i = pcNew->mWidth * pcNew->mHeight;
+-        }
+-        *piSkip = i * 2;
+-
+-        // apply MIP maps
+-        if (10 == iType) {
+-            *piSkip += ((i >> 2) + (i >> 4) + (i >> 6)) << 1;
+-            VALIDATE_FILE_SIZE(szData + *piSkip);
+         }
+     }
+     // ARGB4 format (with or without MIPs)
+     // ****************************************************************
+     else if (3 == iType || 11 == iType) {
+-        VALIDATE_FILE_SIZE(szData + pcNew->mWidth * pcNew->mHeight * 4);
+-
+         // copy texture data
+-        unsigned int i;
+         if (do_read) {
+-            for (i = 0; i < pcNew->mWidth * pcNew->mHeight; ++i) {
++            for (size_t i = 0; i < pixelCount; ++i) {
+                 MDL::ARGB4 val = ((MDL::ARGB4 *)szData)[i];
+                 AI_SWAP2(val);
+ 
+@@ -264,25 +307,14 @@
+                 pcNew->pcData[i].g = (unsigned char)val.g << 4;
+                 pcNew->pcData[i].b = (unsigned char)val.b << 4;
+             }
+-        } else
+-            i = pcNew->mWidth * pcNew->mHeight;
+-        *piSkip = i * 2;
+-
+-        // apply MIP maps
+-        if (11 == iType) {
+-            *piSkip += ((i >> 2) + (i >> 4) + (i >> 6)) << 1;
+-            VALIDATE_FILE_SIZE(szData + *piSkip);
+         }
+     }
+     // RGB8 format (with or without MIPs)
+     // ****************************************************************
+     else if (4 == iType || 12 == iType) {
+-        VALIDATE_FILE_SIZE(szData + pcNew->mWidth * pcNew->mHeight * 3);
+-
+         // copy texture data
+-        unsigned int i;
+         if (do_read) {
+-            for (i = 0; i < pcNew->mWidth * pcNew->mHeight; ++i) {
++            for (size_t i = 0; i < pixelCount; ++i) {
+                 const unsigned char *_szData = &szData[i * 3];
+ 
+                 pcNew->pcData[i].a = 0xFF;
+@@ -290,25 +322,14 @@
+                 pcNew->pcData[i].g = *_szData++;
+                 pcNew->pcData[i].r = *_szData;
+             }
+-        } else
+-            i = pcNew->mWidth * pcNew->mHeight;
+-
+-        // apply MIP maps
+-        *piSkip = i * 3;
+-        if (12 == iType) {
+-            *piSkip += ((i >> 2) + (i >> 4) + (i >> 6)) * 3;
+-            VALIDATE_FILE_SIZE(szData + *piSkip);
+         }
+     }
+     // ARGB8 format (with ir without MIPs)
+     // ****************************************************************
+     else if (5 == iType || 13 == iType) {
+-        VALIDATE_FILE_SIZE(szData + pcNew->mWidth * pcNew->mHeight * 4);
+-
+         // copy texture data
+-        unsigned int i;
+         if (do_read) {
+-            for (i = 0; i < pcNew->mWidth * pcNew->mHeight; ++i) {
++            for (size_t i = 0; i < pixelCount; ++i) {
+                 const unsigned char *_szData = &szData[i * 4];
+ 
+                 pcNew->pcData[i].b = *_szData++;
+@@ -316,29 +337,16 @@
+                 pcNew->pcData[i].r = *_szData++;
+                 pcNew->pcData[i].a = *_szData;
+             }
+-        } else {
+-            i = pcNew->mWidth * pcNew->mHeight;
+-        }
+-
+-        // apply MIP maps
+-        *piSkip = i << 2;
+-        if (13 == iType) {
+-            *piSkip += ((i >> 2) + (i >> 4) + (i >> 6)) << 2;
+-        }
+     }
+     // palletized 8 bit texture. As for Quake 1
+     // ****************************************************************
+     else if (0 == iType) {
+-        VALIDATE_FILE_SIZE(szData + pcNew->mWidth * pcNew->mHeight);
+-
+         // copy texture data
+-        unsigned int i;
+         if (do_read) {
+-
+             const unsigned char *szColorMap;
+             SearchPalette(&szColorMap);
+ 
+-            for (i = 0; i < pcNew->mWidth * pcNew->mHeight; ++i) {
++            for (size_t i = 0; i < pixelCount; ++i) {
+                 const unsigned char val = szData[i];
+                 const unsigned char *sz = &szColorMap[val * 3];
+ 
+@@ -348,12 +356,7 @@
+                 pcNew->pcData[i].b = *sz;
+             }
+             this->FreePalette(szColorMap);
+-
+-        } else
+-            i = pcNew->mWidth * pcNew->mHeight;
+-        *piSkip = i;
+-
+-        // FIXME: Also support for MIP maps?
++        }
+     }
+ }
+ 

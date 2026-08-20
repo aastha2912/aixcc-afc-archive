@@ -1,0 +1,720 @@
+{
+  "vuln_id": 707,
+  "crash_result": {
+    "output": "/src/rdkit/Code/GraphMol/SubstanceGroup.cpp:63:27: runtime error: member call on address 0x000033836cc0 which does not point to an object of type 'RDKit::Atom'\n0x000033836cc0: note: object has invalid vptr\n 00 00 00 00  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  00 00 00 00\n              ^~~~~~~~~~~~~~~~~~~~~~~\n              invalid vptr\n    #0 0x82ecab in RDKit::SubstanceGroup::addAtomWithBookmark(int) /src/rdkit/Code/GraphMol/SubstanceGroup.cpp:63:27\n    #1 0x5b",
+    "stack": "#0 0x82ecab in RDKit::SubstanceGroup::addAtomWithBookmark(int) rdkit/Code/GraphMol/SubstanceGroup.cpp:63:27\n#1 0x5b491e in RDKit::SGroupParsing::ParseSGroupV2000VectorDataLine(std::__1::map<int, RDKit::SubstanceGroup, std::__1::less<int>, std::__1::allocator<std::__1::pair<int const, RDKit::SubstanceGroup> > >&, RDKit::RWMol*, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, unsigned int, bool) rdkit/Code/GraphMol/FileParsers/MolSGroupParsing.cpp:201:",
+    "dedup": "RDKit::SubstanceGroup::addAtomWithBookmark(int)--RDKit::SGroupParsing::ParseSGroupV2000VectorDataLine(std::__1::map<int, RDKit::SubstanceGroup, std::__1::less<int>, std::__1::allocator<std::__1::pair<int const, RDKit::SubstanceGroup> > >&, RDKit::RWMol*, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, unsigned int, bool)--RDKit::(anonymous namespace)::ParseMolBlockProperties(std::__1::basic_istream<char, std::__1::char_traits<char> >*, unsigned int&, RDKit::RWMol*, bool)"
+  },
+  "pov_run_data": {
+    "task_uuid": "a7816747-cdbd-5b29-92a0-dda7ba2c9a7d",
+    "project_name": "rdkit",
+    "harness": "mol_data_stream_to_mol_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "RDKit::SubstanceGroup::addAtomWithBookmark(int)--RDKit::SGroupParsing::ParseSGroupV2000VectorDataLine(std::__1::map<int, RDKit::SubstanceGroup, std::__1::less<int>, std::__1::allocator<std::__1::pair<int const, RDKit::SubstanceGroup> > >&, RDKit::RWMol*, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, unsigned int, bool)--RDKit::(anonymous namespace)::ParseMolBlockProperties(std::__1::basic_istream<char, std::__1::char_traits<char> >*, unsigned int&, RDKit::RWMol*, bool)"
+  },
+  "decoded_pov": {
+    "project_name": "rdkit",
+    "harness": "mol_data_stream_to_mol_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'\\n\\n\\n  5  4\\n                               C    \\n                               F  \\n                               C    \\n                               F   \\n                               F  \\n  1 2    \\n 1  3    \\n  1  4   \\n  1  5   \\nM  STY 1      MON \\nM  MRV SMA   4 \\nM  SAL     1   4 \\n   '\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "RDKit::SubstanceGroup::addAtomWithBookmark(int)--RDKit::SGroupParsing::ParseSGroupV2000VectorDataLine(std::__1::map<int, RDKit::SubstanceGroup, std::__1::less<int>, std::__1::allocator<std::__1::pair<int const, RDKit::SubstanceGroup> > >&, RDKit::RWMol*, std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> > const&, unsigned int, bool)--RDKit::(anonymous namespace)::ParseMolBlockProperties(std::__1::basic_istream<char, std::__1::char_traits<char> >*, unsigned int&, RDKit::RWMol*, bool)"
+  },
+  "analyzed_vuln": {
+    "function": "RWMol::replaceAtom",
+    "file": "rdkit/Code/GraphMol/RWMol.cpp",
+    "description": "RWMol::replaceAtom() copies the replacement Atom, then deletes the old graph Atom and installs the new pointer, but does not update d_atomBookmarks (the source even has `// FIX: do something about bookmarks`). Any bookmark targeting the replaced atom therefore becomes a dangling pointer. In this PoV, ParseMarvinSmartsLine() replaces atom index 3 while V2000 bookmark 4 still points to the freed Atom; the later SAL parser retrieves that dangling pointer, and SubstanceGroup::addAtomWithBookmark() crashes when calling atom->getIdx(). The fix should preserve all bookmarks associated with the old atom by retargeting their entries to the newly installed Atom before/while deleting the old object.",
+    "conditions": "A V2000 mol block must first create atom bookmarks during ParseMolBlockAtoms(), then an `M  MRV SMA` property must successfully parse SMARTS and cause ParseMarvinSmartsLine() to call replaceAtom() for one of those bookmarked atoms. A subsequent bookmark-based operation for that same atom is required to dereference the stale entry. The PoV uses `M  MRV SMA   4 ...` to replace atom 4, followed by `M  SAL     1   4`, which flows through ParseSGroupV2000VectorDataLine() to addAtomWithBookmark(4) and dereferences the freed bookmarked Atom."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 7,
+      "total_cost": 0.18999850000000001,
+      "total_input_tokens": 82559,
+      "total_output_tokens": 1966,
+      "total_cached_tokens": 62617,
+      "llm_calls": [
+        {
+          "timestamp": 1787214542.4358346,
+          "model": "gpt-5.6-sol",
+          "cost": 0.02262,
+          "input_tokens": 3558,
+          "output_tokens": 161,
+          "total_tokens": 3719,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_yn50jh4Ka8RpwRTuqvhP1rRm"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_tVBjVB8p0rssm364Cueisn2N"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Iw2VoOYJkhOyF27a2KtIHbmF"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214849.167065,
+          "model": "gpt-5.6-sol",
+          "cost": 0.024157500000000002,
+          "input_tokens": 6855,
+          "output_tokens": 196,
+          "total_tokens": 7051,
+          "cached_tokens": 3555,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_6Dz3VwXqpkJffPrY7AP32y4f"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_pa7PxiRN6daHV8rMCuisCGwA"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_PRcRVGCgJMomvMoBooKq2DsU"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_SQz9HZLESMzR3XSIqlghoCBm"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214855.4605262,
+          "model": "gpt-5.6-sol",
+          "cost": 0.021491,
+          "input_tokens": 8971,
+          "output_tokens": 249,
+          "total_tokens": 9220,
+          "cached_tokens": 6852,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Fpg9DGkYqw9kkiZ4RTDbKFNJ"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_rWF1hIyn55LGYZRw5RkBPNDZ"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_JRiSf2b2OzdEL1kVymrf4a2c"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_xeWCWze2semnJAgppKhPiWPz"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214860.8379838,
+          "model": "gpt-5.6-sol",
+          "cost": 0.020149,
+          "input_tokens": 10769,
+          "output_tokens": 222,
+          "total_tokens": 10991,
+          "cached_tokens": 8968,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_JLiIgnELeUneZ6389ymMmiLx"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_rrCsLE3ALbxlRJWpPhTnQfDc"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_JAPJXcG27mlgCSrTc1Bdcwen"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_B20cdPGBURkrcL5EWQ3ZH0I3"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214865.0277367,
+          "model": "gpt-5.6-sol",
+          "cost": 0.039413000000000004,
+          "input_tokens": 15970,
+          "output_tokens": 267,
+          "total_tokens": 16237,
+          "cached_tokens": 10766,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_PrCKR6DehRo29bLmEp6RvD05"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_TzhAtplAsG9AcwgdeEr6ULF8"
+            },
+            {
+              "tool_name": "debug_pov",
+              "tool_call_id": "call_ay9B4BVwUokhiLX0Gy5WSVho"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214869.1664736,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0183885,
+          "input_tokens": 16512,
+          "output_tokens": 256,
+          "total_tokens": 16768,
+          "cached_tokens": 15967,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_OX4CJYMMYWDoxTOi8wk7pPQo"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_tgvnBuu8WTZnYEDvGfkf1Ecc"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_owDYpjXaKhR0D2NNMYybnRbj"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Mnd53BVTXKQI8hDDQueZuXyy"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214881.754799,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0437795,
+          "input_tokens": 19924,
+          "output_tokens": 615,
+          "total_tokens": 20539,
+          "cached_tokens": 16509,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_HspN1nLMhUPIQLvta7HllfmW"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 10,
+      "total_cost": 0.254455,
+      "total_input_tokens": 80447,
+      "total_output_tokens": 3144,
+      "total_cached_tokens": 53800,
+      "llm_calls": [
+        {
+          "timestamp": 1787214889.7289398,
+          "model": "gpt-5.6-sol",
+          "cost": 0.03436,
+          "input_tokens": 4874,
+          "output_tokens": 333,
+          "total_tokens": 5207,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ryA31ViagWB8WuyqDzUOi7AI"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_NNC0AB6hU5FUDovUQVeYne0J"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_45SEVcu4rqs7Qv0R4uthkoX0"
+            },
+            {
+              "tool_name": "source_questions",
+              "tool_call_id": "call_uQhJXYQ1xxSthQ0r7GR7R1kp"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214893.1398172,
+          "model": "gpt-5.6-sol",
+          "cost": 0.013715000000000001,
+          "input_tokens": 1483,
+          "output_tokens": 210,
+          "total_tokens": 1693,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_wEA020IhCyHG6jfsDGz16nmE"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_C5SjMCnHLE8P80AnJFkL4dfL"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_OVfcwaHnjst4b0vgnBcBR8Af"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_QCa1gsILZkPUDejyyPyLWPyy"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_tVcGFQLuK2kC53gwjA4HpEYO"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214896.3455062,
+          "model": "gpt-5.6-sol",
+          "cost": 0.015085000000000001,
+          "input_tokens": 2813,
+          "output_tokens": 256,
+          "total_tokens": 3069,
+          "cached_tokens": 1480,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ggRf0SpH5hCLhkaNDR4ArqG3"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_rXw09LWkpJ2Oa48jSkPS8iDP"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_DCJok5fSsCjWUHOpDiVlkKrW"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_HbFOLxqvPkmK3xzXujjzpn6b"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_bqgvRV4P1eesWkjpc0WzN0mc"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_sjXr03e43SMwT1UY77jJVfX2"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214900.1357665,
+          "model": "gpt-5.6-sol",
+          "cost": 0.02623,
+          "input_tokens": 6209,
+          "output_tokens": 261,
+          "total_tokens": 6470,
+          "cached_tokens": 2810,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_EmbfS0qAcKWETqh3WNEd54pp"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_sg6JIoLcJqT2cAVlRtQkWam5"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_cDTOWQCcuOYKBe8e2yyR16yA"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_3O25pJwZ9fCjGUyrsw5nZgIw"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_eCOjsnP8vFRVQYldaJ6R6Qdg"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_Vb41s9tcqWcvHmgV7boVyQ5N"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214903.689922,
+          "model": "gpt-5.6-sol",
+          "cost": 0.026688,
+          "input_tokens": 9633,
+          "output_tokens": 215,
+          "total_tokens": 9848,
+          "cached_tokens": 6206,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_WaffoDu3QXji9KwnlScWQWsy"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_unjSWWKcmjJfi9KWPgWEZert"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_uYDG2Rgefm21DaKikVjrrBg7"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ILS0EOZCidhjIpiitfNloZbI"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_JjqRgPo79KRD7BGHSUBqhAVY"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214921.668063,
+          "model": "gpt-5.6-sol",
+          "cost": 0.07038,
+          "input_tokens": 15597,
+          "output_tokens": 1191,
+          "total_tokens": 16788,
+          "cached_tokens": 9630,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_JVToWAQbjB9pwCNTz2tLCgVP"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214924.515432,
+          "model": "gpt-5.6-sol",
+          "cost": 0.020360500000000004,
+          "input_tokens": 7376,
+          "output_tokens": 180,
+          "total_tokens": 7556,
+          "cached_tokens": 4871,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_2hAMpBa7CA4KgJ0CbOwsKLoe"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_x8VIlNIG9MMWMg50KY4DvBLb"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_QCFfeM91umZ1PZoj9VVUdhtI"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_PYw7dcp5LsJoETlbRRFIRxQ5"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214932.6769922,
+          "model": "gpt-5.6-sol",
+          "cost": 0.032656500000000005,
+          "input_tokens": 10515,
+          "output_tokens": 442,
+          "total_tokens": 10957,
+          "cached_tokens": 7373,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_XFbDmgyZxXVR0mpKw3KQx8sA"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214934.2261581,
+          "model": "gpt-5.6-sol",
+          "cost": 0.007721,
+          "input_tokens": 10921,
+          "output_tokens": 14,
+          "total_tokens": 10935,
+          "cached_tokens": 10512,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_kXJUtycS0bb6UNMYncCBcEif"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787216087.903537,
+          "model": "gpt-5.6-sol",
+          "cost": 0.007258999999999999,
+          "input_tokens": 11026,
+          "output_tokens": 42,
+          "total_tokens": 11068,
+          "cached_tokens": 10918,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_tccBXXLkT2FA8rQs47AS24A9"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.4444535,
+      "total_input_tokens": 163006,
+      "total_output_tokens": 5110,
+      "total_llm_calls": 17
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/Code/GraphMol/RWMol.cpp\n+++ b/Code/GraphMol/RWMol.cpp\n@@ -135,15 +135,24 @@\n   atom_p->setOwningMol(this);\n   atom_p->setIdx(idx);\n   MolGraph::vertex_descriptor vd = boost::vertex(idx, d_graph);\n+  Atom *oldAtom = d_graph[vd];\n   if (preserveProps) {\n     const bool replaceExistingData = false;\n-    atom_p->updateProps(*d_graph[vd], replaceExistingData);\n+    atom_p->updateProps(*oldAtom, replaceExistingData);\n   }\n   removeSubstanceGroupsReferencingAtom(*this, idx);\n-  delete d_graph[vd];\n-  d_graph[vd] = atom_p;\n \n-  // FIX: do something about bookmarks\n+  // Bookmarks store atom pointers, so preserve every bookmark associated with\n+  // the atom being replaced by retargeting it before deleting the old atom.\n+  for (auto &bookmark : d_atomBookmarks) {\n+    for (auto &bookmarkedAtom : bookmark.second) {\n+      if (bookmarkedAtom == oldAtom) {\n+        bookmarkedAtom = atom_p;\n+      }\n+    }\n+  }\n+  d_graph[vd] = atom_p;\n+  delete oldAtom;\n };\n \n void RWMol::replaceBond(unsigned int idx, Bond *bond_pin, bool preserveProps,\n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [
+      {
+        "tool_name": "source_questions",
+        "args": [
+          "In rdkit/Code/GraphMol/RWMol.cpp, how are atom bookmarks represented and maintained, and what is the safest way for RWMol::replaceAtom() to retarget every bookmark entry from the old Atom pointer to the newly installed Atom pointer? Please identify relevant typedefs/helpers and any analogous bond or atom replacement/removal logic.",
+          "The reported UBSan crash is a use-after-free: V2000 parsing creates atom bookmarks, ParseMarvinSmartsLine replaces atom index 3 via RWMol::replaceAtom(), and a later SAL lookup dereferences the bookmark still pointing to the deleted Atom. The source reportedly contains a FIX comment in replaceAtom. We need a minimal root-cause C++ patch under rdkit that preserves all bookmark associations, including potentially multiple atoms per bookmark and one atom under multiple bookmark keys, without changing parser behavior."
+        ],
+        "kwargs": {},
+        "timestamp": 1624310.36832744,
+        "success": true,
+        "result_summary": "Ok(SourceQuestionsResult(answer='Atom bookmarks are owned by `ROMol` and represented as:\\n\\n```cpp\\ntypedef std::list<Atom *> ATOM_PTR_LIST;\\ntypedef std::map<int, ATOM_PTR_LIST> ATOM_BOOKMARK_MAP;\\n`..."
+      }
+    ],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "replaceAtom",
+          "rdkit/Code/GraphMol/RWMol.cpp",
+          280,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624278.518662864,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n129 void RWMol::replaceAtom(unsigned int idx, Atom *atom_pin, bool updateLabel,, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "replaceBond",
+          "rdkit/Code/GraphMol/RWMol.cpp",
+          149,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624313.221085681,
+        "success": true,
+        "result_summary": "Ok({'contents': '149 void RWMol::replaceBond(unsigned int idx, Bond *bond_pin, bool preserveProps,\\n150                         bool keepSGroups) {\\n151   PRECONDITION(bond_pin, \"bad bond passed to re..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "replaceAtom",
+          "rdkit/Code/GraphMol/RWMol.cpp",
+          129,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624313.221897039,
+        "success": true,
+        "result_summary": "Ok({'contents': '129 void RWMol::replaceAtom(unsigned int idx, Atom *atom_pin, bool updateLabel,\\n130                         bool preserveProps) {\\n131   RDUNUSED_PARAM(updateLabel);\\n132   PRECONDIT..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "clearAtomBookmark",
+          "rdkit/Code/GraphMol/ROMol.cpp",
+          269,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624313.223442433,
+        "success": true,
+        "result_summary": "Ok({'contents': '269 void ROMol::clearAtomBookmark(int mark, const Atom *atom) {\\n270   if (d_atomBookmarks.count(mark) != 0) {\\n271     ATOM_PTR_LIST *entry = &d_atomBookmarks[mark];\\n272     unsigne..."
+      }
+    ],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "rdkit/Code/GraphMol/ROMol.h",
+          190
+        ],
+        "kwargs": {},
+        "timestamp": 1624313.21663747,
+        "success": true,
+        "result_summary": "Ok({'contents': \" 91     - each ROMol has collections of \\\\c bookmarks for Atoms and Bonds:\\n 92         - the Atom bookmarks and Bond bookmarks are stored separately\\n 93           from each other\\n ..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "d_atomBookmarks",
+          "rdkit/Code/GraphMol/RWMol.cpp",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1624280.23640658,
+        "success": true,
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: rdkit/Code/GraphMol/ROMol.cpp, rdkit/Code/GraphMol/ROMol.h, extra=None))"
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "replaceAtom",
+          "rdkit/Code/GraphMol",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1624280.246680471,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='rdkit/Code/GraphMol/TautomerQuery/TautomerQuery.cpp', refs=[FileReference(line=157, content='    templateMolecule->replaceAtom(idx, queryAtom, updateLabel, preserveProps)..."
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "rdkit/Code/GraphMol/RWMol.cpp",
+          "@@ -134,14 +134,21 @@\n   Atom *atom_p = atom_pin->copy();\n   atom_p->setOwningMol(this);\n   atom_p->setIdx(idx);\n   MolGraph::vertex_descriptor vd = boost::vertex(idx, d_graph);\n+  Atom *oldAtom = d_graph[vd];\n   if (preserveProps) {\n     const bool replaceExistingData = false;\n-    atom_p->updateProps(*d_graph[vd], replaceExistingData);\n+    atom_p->updateProps(*oldAtom, replaceExistingData);\n   }\n   removeSubstanceGroupsReferencingAtom(*this, idx);\n-  delete d_graph[vd];\n+\n+  // Bookmarks store atom pointers, so preserve every bookmark associated with\n+  // the atom being replaced by retargeting it before deleting the old atom.\n+  for (auto &bookmark : d_atomBookmarks) {\n+    for (auto &bookmarkedAtom : bookmark.second) {\n+      if (bookmarkedAtom == oldAtom) {\n+        bookmarkedAtom = atom_p;\n+      }\n+    }\n+  }\n   d_graph[vd] = atom_p;\n-\n-  // FIX: do something about bookmarks\n+  delete oldAtom;\n };"
+        ],
+        "kwargs": {},
+        "timestamp": 1624321.425417213,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1625474.874062715,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

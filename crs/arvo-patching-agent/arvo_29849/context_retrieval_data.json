@@ -1,0 +1,145 @@
+{
+  "source_questions": [
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "In skia/src/sksl/SkSLCompiler.cpp, analyze Compiler::simplifyStatement's constant-if folding at lines 1352-1367 and the contract of BasicBlock::Node::setStatement. What is the safest minimal way to preserve the removed IfStatement in OptimizationContext::fOwnedStatements after moving out the selected branch? Also identify whether existing nearby replacements retain returned statements and whether moving the selected branch before retaining the old IfStatement is safe.",
+        "The supplied ASan reproducer is `void a(){if(2>2)int a;a;}`. Folding the false condition replaces the IfStatement with Nop; the returned old statement is immediately destroyed, which destroys the eliminated VarDeclaration while a symbol-table-owned Variable still has fDeclaration pointing to it. Later VariableReference::constantPropagate invokes Variable::initialValue and dereferences that stale declaration. The dead VarDeclaration path at skia/src/sksl/SkSLCompiler.cpp:1342-1347 explicitly stores the old statement in OptimizationContext::fOwnedStatements. I plan to construct the selected branch/Nop replacement, invoke setStatement once, and push its returned old IfStatement into fOwnedStatements, but want to verify ownership and invalidation semantics."
+      ],
+      "kwargs": {},
+      "timestamp": 1629804.982168916,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer=\"`BasicBlock::Node::setStatement` does **not** return the old statement for an arbitrary replacement. Its contract and implementation are explicit:\\n\\n- `SkSLCFGGenerat..."
+    }
+  ],
+  "read_definition": [
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "OptimizationContext",
+        "skia/src/sksl/SkSLCompiler.cpp",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1629740.950055811,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: skia/src/sksl/SkSLCompiler.h, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "OptimizationContext",
+        "skia/src/sksl/SkSLCompiler.h",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1629753.97195777,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n81     struct OptimizationContext {, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "setStatement",
+        "skia/src/sksl/SkSLCFGGenerator.cpp",
+        44,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1629807.865399783,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n39 std::unique_ptr<Statement> BasicBlockNode::setStatement(std::unique_ptr<Statement> stmt,, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "OptimizationContext",
+        "skia/src/sksl/SkSLCompiler.h",
+        81,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1629807.865759272,
+      "success": true,
+      "result_summary": "Ok({'contents': \"81     struct OptimizationContext {\\n82         // nodes we have already reported errors for and should not error on again\\n83         std::unordered_set<const IRNode*> fSilences;\\n84..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "setStatement",
+        "skia/src/sksl/SkSLCFGGenerator.cpp",
+        39,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1629820.694402098,
+      "success": true,
+      "result_summary": "Ok({'contents': '39 std::unique_ptr<Statement> BasicBlockNode::setStatement(std::unique_ptr<Statement> stmt,\\n40                                                         ProgramUsage* usage) {\\n41     ..."
+    }
+  ],
+  "read_source": [
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/sksl/SkSLCompiler.cpp",
+        1350
+      ],
+      "kwargs": {},
+      "timestamp": 1629740.947107139,
+      "success": true,
+      "result_summary": "Ok({'contents': '1251 // (which, owing to the statements being owned by unique_ptrs, means the switch itself will be\\n1252 // broken by this call and must then be discarded).\\n1253 // Returns null (an..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/sksl/SkSLCFGGenerator.h",
+        45
+      ],
+      "kwargs": {},
+      "timestamp": 1629807.861967165,
+      "success": true,
+      "result_summary": "Ok({'contents': '  1 /*\\n  2  * Copyright 2016 Google Inc.\\n  3  *\\n  4  * Use of this source code is governed by a BSD-style license that can be\\n  5  * found in the LICENSE file.\\n  6  */\\n  7 \\n  8..."
+    }
+  ],
+  "find_references": [
+    {
+      "tool_name": "find_references",
+      "args": [
+        "fOwnedStatements",
+        "skia/src/sksl/SkSLCompiler.cpp",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1629740.942754465,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='skia/src/sksl/SkSLCompiler.cpp', refs=[FileReference(line=1347, content='                optimizationContext->fOwnedStatements.push_back(std::move(old));', enclosing_defi..."
+    }
+  ],
+  "apply_patch": [
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/sksl/SkSLCompiler.cpp",
+        "@@ -1352,17 +1352,27 @@\n         case Statement::Kind::kIf: {\n             IfStatement& i = stmt->as<IfStatement>();\n             if (i.test()->kind() == Expression::Kind::kBoolLiteral) {\n-                // constant if, collapse down to a single branch\n+                // Constant if: collapse down to a single branch. Keep the discarded statement\n+                // alive until optimization is complete; Variables owned by the symbol table can\n+                // still refer to VarDeclarations in the eliminated branch.\n+                std::unique_ptr<Statement> replacement;\n                 if (i.test()->as<BoolLiteral>().value()) {\n                     SkASSERT(i.ifTrue());\n-                    (*iter)->setStatement(std::move(i.ifTrue()), usage);\n+                    replacement = std::move(i.ifTrue());\n                 } else {\n                     if (i.ifFalse()) {\n-                        (*iter)->setStatement(std::move(i.ifFalse()), usage);\n+                        replacement = std::move(i.ifFalse());\n                     } else {\n-                        (*iter)->setStatement(std::make_unique<Nop>(), usage);\n+                        replacement = std::make_unique<Nop>();\n                     }\n                 }\n+\n+                // setStatement only returns the old statement when replacing it with a Nop.\n+                // Install a temporary Nop so we can retain the old IfStatement, then directly\n+                // install the selected branch, which is already accounted for in ProgramUsage.\n+                std::unique_ptr<Statement> old =\n+                        (*iter)->setStatement(std::make_unique<Nop>(), usage);\n+                *(*iter)->statement() = std::move(replacement);\n+                optimizationContext->fOwnedStatements.push_back(std::move(old));\n                 optimizationContext->fUpdated = true;\n                 optimizationContext->fNeedsRescan = true;\n                 break;\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1629879.596921365,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    }
+  ],
+  "test_patch": [
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1630577.499076587,
+      "success": true,
+      "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+    }
+  ],
+  "undo_last_patch": [],
+  "list_current_edits": []
+}

@@ -1,0 +1,788 @@
+{
+  "vuln_id": 716,
+  "crash_result": {
+    "output": "==1835==ERROR: AddressSanitizer: heap-buffer-overflow on address 0xf095e54e at pc 0x0820e947 bp 0xffffa008 sp 0xffffa000\nREAD of size 4 at 0xf095e54e thread T0\nSCARINESS: 27 (4-byte-read-heap-buffer-overflow-far-from-bounds)\n    #0 0x820e946 in sw32_ /src/c-blosc2/blosc/blosc-private.h:90:13\n    #1 0x820e946 in blosc_d /src/c-blosc2/blosc/blosc2.c:1349:14\n    #2 0x8202332 in serial_blosc /src/c-blosc2/blosc/blosc2.c:1503:16\n    #3 0x8202332 in do_job /src/c-blosc2/blosc/blosc2.c:1661:15\n    #4 0",
+    "stack": "#0 0x820e946 in sw32_ c-blosc2/blosc/blosc-private.h:90:13\n#1 0x820e946 in blosc_d c-blosc2/blosc/blosc2.c:1349:14\n#2 0x8202332 in serial_blosc c-blosc2/blosc/blosc2.c:1503:16\n#3 0x8202332 in do_job c-blosc2/blosc/blosc2.c:1661:15\n#4 0x820aadb in blosc_run_decompression_with_context c-blosc2/blosc/blosc2.c:2359:13\n#5 0x820b224 in blosc2_decompress_ctx c-blosc2/blosc/blosc2.c:2379:12\n#6 0x8251366 in frame_decompress_chunk c-blosc2/blosc/frame.c:2786:23\n#7 0x822fff5 in blosc2_schunk_decompress_chu",
+    "dedup": "sw32_--blosc_d--serial_blosc"
+  },
+  "pov_run_data": {
+    "task_uuid": "814152e2-0f17-535d-b09c-fae7faa8b72f",
+    "project_name": "c-blosc2",
+    "harness": "decompress_frame_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "sw32_--blosc_d--serial_blosc"
+  },
+  "decoded_pov": {
+    "project_name": "c-blosc2",
+    "harness": "decompress_frame_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'\\x11\\x00\\xfd#[\\n\\x00\\xff\\xff\\xff\\x00\\x00\\x00\\x00\\x87\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xb9\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x14\\n{\\x10\\xbc\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xbc\\xfb\\x9b\\x01\\x02D\\x00\\x04\\x00\\n\\x00\\x18\\xe3\\xe1\\xe3\\xe3\\xe3\\xe3\\xe31\\x00\\x05\\x00\\xf7\\xd8\\x00\\x11\\x8e\\x00\\x00\\x00\\x00\\x00\\xdb\\xff\\xdf\\xff\\xff\\xff0\\xff\\xb6\\xde\\x00\\x00\\xad\\x00\\x00#\\x00\\x00\\xbc\\x00[@1\\x08&\\x01\\x00\\x00-\\x00\\x00\\x00\\x00\\xbc\\xff`\\x00\\x00\\x00\\xa5x\\xfc\\xff\\xff\\x00\\xff\\xff\\x00b\\x00\\x00\\x00\\x00\\x00\\x000\\x08&\\x01\\x00\\x01zt\\xb2\\x00\\x94\\x00\\x00\\x00+\\x00\\x00\\x00\\x87\\x00\\x00\\x00\\x00Z\\x00\\xce\\x00\\x00\\x00\\n\\x00\\x00\\x87\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xbc\\x02\\x06\\xde\\x00\\x00\\x00'\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "sw32_--blosc_d--serial_blosc"
+  },
+  "analyzed_vuln": {
+    "function": "frame_get_lazychunk",
+    "file": "c-blosc2/blosc/frame.c",
+    "description": "In the in-memory contiguous-frame branch, `frame_get_lazychunk` checks only that `header_len + offset + BLOSC_MIN_HEADER_LENGTH` is within `frame->len`, then reads and returns the chunk header's attacker-controlled `cbytes` without verifying that `header_len + offset + cbytes` is within the actual frame buffer. `frame_decompress_chunk` consequently passes this forged size to `blosc2_decompress_ctx`. Its source-size checks trust that value, so a malicious block start can place `src` beyond the allocation and `blosc_d` performs the out-of-bounds 4-byte `sw32_` read at blosc2.c:1349.",
+    "conditions": "A fuzzer-supplied buffer must parse as an in-memory contiguous frame with at least one decompressed chunk. The chunk offset must be accepted and leave enough real bytes for a minimum Blosc header, while that header declares a `cbytes` larger than the bytes remaining in `frame->cframe`. A non-memcpy compressed chunk with attacker-controlled block-start metadata must then select an offset that is below the forged `cbytes`/`srcsize` but outside the actual input allocation. During `blosc2_schunk_decompress_chunk` -> `frame_decompress_chunk` -> `blosc2_decompress_ctx`, the false size defeats bounds checks and `blosc_d` reads a stream compressed-size word out of bounds."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 8,
+      "total_cost": 0.189315,
+      "total_input_tokens": 85338,
+      "total_output_tokens": 2241,
+      "total_cached_tokens": 67690,
+      "llm_calls": [
+        {
+          "timestamp": 1787217526.067233,
+          "model": "gpt-5.6-sol",
+          "cost": 0.02542,
+          "input_tokens": 3860,
+          "output_tokens": 204,
+          "total_tokens": 4064,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_hDvdqigPsqaE4EIRU2IMlDN3"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_bJTRaQYehLjvAj169WqTZCyS"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_IUqYIl4ZCgD9QZ53Tid4fOYq"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_opri9iTu8f1uJsFyeDGEOox5"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217562.776218,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0100085,
+          "input_tokens": 4273,
+          "output_tokens": 200,
+          "total_tokens": 4473,
+          "cached_tokens": 3857,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_bTjG9kv9c30MYtu8DdulQqzb"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_QR6UP0TnTj3hVjowaSNTL74w"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_amsxiTmipc4NUs5WphmVT6MH"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_MU7BlpD1YkypIWRmseYBtXNA"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217567.7503932,
+          "model": "gpt-5.6-sol",
+          "cost": 0.03477,
+          "input_tokens": 9345,
+          "output_tokens": 242,
+          "total_tokens": 9587,
+          "cached_tokens": 4270,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_cWEWAmHdjuJITJYKbJgjW7kM"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_9oK69paahz5SA4fx2IEory8H"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_nAkg8RllIvxzJn3mquOej29J"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_jfs1jdmuWmEz0hT9szdhimzr"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217571.4624271,
+          "model": "gpt-5.6-sol",
+          "cost": 0.012686,
+          "input_tokens": 9799,
+          "output_tokens": 191,
+          "total_tokens": 9990,
+          "cached_tokens": 9342,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_7DezKOrkkQo0Ll9AnNUfmFGa"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_52TnpUcMLO3WxwldTZTDgpxF"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_7WTpyBukjmzH7sZ6kxfIulG5"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_vtwfB6acU0CCqZfEqBolo0Uh"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217577.7018864,
+          "model": "gpt-5.6-sol",
+          "cost": 0.029358000000000002,
+          "input_tokens": 13194,
+          "output_tokens": 249,
+          "total_tokens": 13443,
+          "cached_tokens": 9796,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "debug_pov",
+              "tool_call_id": "call_ZazYXRzVK9FXKMWxSJlSIIFO"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217589.3488505,
+          "model": "gpt-5.6-sol",
+          "cost": 0.016150499999999998,
+          "input_tokens": 13398,
+          "output_tokens": 284,
+          "total_tokens": 13682,
+          "cached_tokens": 13191,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_KMjLcfLXwPDsmWLSsWTGlxmZ"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Lf1HmwSPhISYx1JcVfYStGa1"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_1LEGYtfSF5UKvgrwY87QRkkI"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_k22md2Br9QdZTL7xnNXfmSF3"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217592.5021694,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0142125,
+          "input_tokens": 13842,
+          "output_tokens": 176,
+          "total_tokens": 14018,
+          "cached_tokens": 13395,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_d7Wsc3MhfOI7d7zOCa2TXED2"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_m8kDSWuucozgK8sVeYSfvVfG"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_F15J3HSDrgBes4ERqJ23wLrY"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_eJYLQd2v8ouAdIpTTWMHMmbt"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217606.1583662,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0467095,
+          "input_tokens": 17627,
+          "output_tokens": 695,
+          "total_tokens": 18322,
+          "cached_tokens": 13839,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_BqxRiwcd2QuoT0ihlCkrBhpN"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 13,
+      "total_cost": 0.4081375,
+      "total_input_tokens": 173429,
+      "total_output_tokens": 5321,
+      "total_cached_tokens": 137475,
+      "llm_calls": [
+        {
+          "timestamp": 1787217613.0826433,
+          "model": "gpt-5.6-sol",
+          "cost": 0.03612,
+          "input_tokens": 5022,
+          "output_tokens": 367,
+          "total_tokens": 5389,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_mUSF7XLtev0hndp2XtjlbDGT"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_T3UA0zzXAo1ow0lcQ3IYrutB"
+            },
+            {
+              "tool_name": "source_questions",
+              "tool_call_id": "call_pEsT2T4R8KGAPVD3jIA5wh79"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217616.5834048,
+          "model": "gpt-5.6-sol",
+          "cost": 0.01448,
+          "input_tokens": 1546,
+          "output_tokens": 225,
+          "total_tokens": 1771,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_juc0Y3kRO3dIh9I8IpiEIb3H"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_XpiDOvihAxRWtij7kIII9noa"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_zkGlUwLOoWhCEGi4cXeqVR9j"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_X9BuZqIcDfJ9yvRBhU4vXqrr"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_bMnjGHR2PziC0YxwFPgZjYbX"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217620.8528535,
+          "model": "gpt-5.6-sol",
+          "cost": 0.027686500000000003,
+          "input_tokens": 5354,
+          "output_tokens": 262,
+          "total_tokens": 5616,
+          "cached_tokens": 1543,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_z6JbF4uw3bhwwEtsBuR3c3Vk"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_mhlKKmo9QCmnWFW9YkenGLuf"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_K73AE2o0A2LsgOT8yzF3vKFy"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_7CyjMzlZIps2oRtSyKQZ8IW4"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_3SkhH9ojRuFRVHIT4L43tMJ8"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_rCL0QMFay2ppHV3AhHhni9UK"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217624.8587348,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0499755,
+          "input_tokens": 13179,
+          "output_tokens": 272,
+          "total_tokens": 13451,
+          "cached_tokens": 5351,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_rLeiirhMH8is0wNgykTlVs3s"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_cAdSt4XS7xOvutq0Vh8oC37J"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_gtaVhObrUkGhsh8v3SMJdEtJ"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_z9t7WXPES7Fb68ONofq4SUER"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Fe3zzMFHy5Qs65pwcVkTbd2X"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_eRuretFX3v2aIpjcAUf0tD6L"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217627.2443793,
+          "model": "gpt-5.6-sol",
+          "cost": 0.032388,
+          "input_tokens": 18078,
+          "output_tokens": 43,
+          "total_tokens": 18121,
+          "cached_tokens": 13176,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_1nEyHFfXtcrqhKoBEbdI6nXF"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217638.862403,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0274425,
+          "input_tokens": 18360,
+          "output_tokens": 566,
+          "total_tokens": 18926,
+          "cached_tokens": 18075,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Ns8oeF62A5KvcYurLm0c4phv"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_OhgEjqYwVP4ho0VMUZw5DWrw"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_zvH0R1vaY8PONA8Ei8Wbx0nh"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_y12FfzeIj4nazhYOGs4UW9jX"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217640.840191,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0377085,
+          "input_tokens": 23781,
+          "output_tokens": 47,
+          "total_tokens": 23828,
+          "cached_tokens": 18357,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_qEPhks9juNsuusmtX9ipViRE"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217649.207488,
+          "model": "gpt-5.6-sol",
+          "cost": 0.027919,
+          "input_tokens": 24086,
+          "output_tokens": 483,
+          "total_tokens": 24569,
+          "cached_tokens": 23778,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_ZJsNE6lJHL4tKfhxVD6A7QWP"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_XYhanye91IQexp79tGeIe4Oj"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_DSCTz8vCVs2FKuVwoX28d4Rh"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ViUkHLnTTzR5SSLcYJOAqcUR"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217683.2640827,
+          "model": "gpt-5.6-sol",
+          "cost": 0.08186650000000001,
+          "input_tokens": 25034,
+          "output_tokens": 2169,
+          "total_tokens": 27203,
+          "cached_tokens": 24083,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_RbtqEBm347iLqI1Yw8C8S73o"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217686.635561,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0176645,
+          "input_tokens": 7162,
+          "output_tokens": 148,
+          "total_tokens": 7310,
+          "cached_tokens": 5019,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_RerEZnCaF44lB4LmP8BVdMJi"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_JcoCIpeXF5ZrZiN5YYRPbZAO"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_8S2uDZeqMPHlEtevExnQW2aU"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217694.3402977,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0375345,
+          "input_tokens": 10158,
+          "output_tokens": 632,
+          "total_tokens": 10790,
+          "cached_tokens": 7159,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_kz1jX0QIL6g4VdfBMJwMO1H6"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217695.8966448,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0086325,
+          "input_tokens": 10782,
+          "output_tokens": 14,
+          "total_tokens": 10796,
+          "cached_tokens": 10155,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_776Uyx7CIbFmhqebSq5SUOpN"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787217744.9846728,
+          "model": "gpt-5.6-sol",
+          "cost": 0.008719499999999998,
+          "input_tokens": 10887,
+          "output_tokens": 93,
+          "total_tokens": 10980,
+          "cached_tokens": 10779,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_q3c90oYCAEiZ2u7Nw2GEXkuZ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.5974524999999999,
+      "total_input_tokens": 258767,
+      "total_output_tokens": 7562,
+      "total_llm_calls": 21
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/blosc/frame.c\n+++ b/blosc/frame.c\n@@ -2018,12 +2018,29 @@\n     free(block_csizes);\n   } else {\n     // The chunk is in memory and just one pointer away\n-    *chunk = frame->cframe + header_len + offset;\n-    if ((int64_t)header_len + offset + BLOSC_MIN_HEADER_LENGTH > frame->len) {\n+    // Validate the offset before doing pointer arithmetic.  In particular, do\n+    // not let an overflowing addition make an out-of-frame offset look valid.\n+    if (header_len < 0 || (int64_t)header_len > frame->len || offset < 0 ||\n+        offset > frame->len - (int64_t)header_len) {\n       BLOSC_TRACE_ERROR(\"Cannot read the header for chunk in the (contiguous) frame.\");\n       rc = BLOSC2_ERROR_READ_BUFFER;\n     } else {\n-      rc = blosc2_cbuffer_sizes(*chunk, NULL, &lazychunk_cbytes, NULL);\n+      int64_t available = frame->len - (int64_t)header_len - offset;\n+      if (available < BLOSC_MIN_HEADER_LENGTH) {\n+        BLOSC_TRACE_ERROR(\"Cannot read the header for chunk in the (contiguous) frame.\");\n+        rc = BLOSC2_ERROR_READ_BUFFER;\n+      } else {\n+        *chunk = frame->cframe + header_len + offset;\n+        rc = blosc2_cbuffer_sizes(*chunk, NULL, &lazychunk_cbytes, NULL);\n+        if (rc >= 0 &&\n+            (lazychunk_cbytes < 0 || (int64_t)lazychunk_cbytes > available)) {\n+          // The compressed size is part of the untrusted chunk header.  The\n+          // decompressor must never receive a source size larger than the\n+          // actual bytes remaining in the contiguous frame.\n+          BLOSC_TRACE_ERROR(\"Cannot read the chunk out of the (contiguous) frame.\");\n+          rc = BLOSC2_ERROR_READ_BUFFER;\n+        }\n+      }\n     }\n   }\n \n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [
+      {
+        "tool_name": "source_questions",
+        "args": [
+          "Analyze the bounds validation in `frame_get_lazychunk` and its use by `frame_decompress_chunk` in `c-blosc2/blosc/frame.c`. What are the exact types/semantics of frame->len, header_len, chunk offsets, and cbytes in both contiguous-memory and file-backed branches, and what overflow-safe validation should be added so a returned lazy chunk always lies fully inside the actual contiguous frame buffer? Note any existing project conventions/error returns that should be followed.",
+          "The supplied ASan report shows an OOB 4-byte read in blosc_d after frame_decompress_chunk passes an attacker-forged cbytes to blosc2_decompress_ctx. The stated root cause is that the in-memory contiguous branch of frame_get_lazychunk checks only header_len + offset + BLOSC_MIN_HEADER_LENGTH against frame->len, reads cbytes from that minimum header, but does not ensure the full declared chunk is within frame->cframe. I have not edited code yet. I want to patch c-blosc2/blosc/frame.c at the root with subtraction-based bounds checks that account for signedness and arithmetic overflow while preserving file-backed behavior."
+        ],
+        "kwargs": {},
+        "timestamp": 1627071.964857258,
+        "success": true,
+        "result_summary": "Ok(SourceQuestionsResult(answer='`frame_get_lazychunk` is the correct root patch location, specifically its `frame->cframe != NULL` branch at `frame.c:2019-2027`.\\n\\n### Types and semantics\\n\\n- `fram..."
+      }
+    ],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "frame_get_lazychunk",
+          "c-blosc2/blosc/frame.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1627001.90977048,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1877 int frame_get_lazychunk(blosc2_frame_s *frame, int nchunk, uint8_t **chunk, bool *needs_free) {, extra=..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "frame_decompress_chunk",
+          "c-blosc2/blosc/frame.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1627001.911683523,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n2753 int frame_decompress_chunk(blosc2_context *dctx, blosc2_frame_s* frame, int nchunk, void *dest, int32_t..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "frame_get_lazychunk",
+          "c-blosc2/blosc/frame.c",
+          1877,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1627075.342529342,
+        "success": true,
+        "result_summary": "Ok({'contents': '1877 int frame_get_lazychunk(blosc2_frame_s *frame, int nchunk, uint8_t **chunk, bool *needs_free) {\\n1878   int32_t header_len;\\n1879   int64_t frame_len;\\n1880   int64_t nbytes;\\n18..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "get_coffset",
+          "c-blosc2/blosc/frame.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1627075.343311482,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1706 int get_coffset(blosc2_frame_s* frame, int32_t header_len, int64_t cbytes, int32_t nchunk, int64_t *off..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "frame_decompress_chunk",
+          "c-blosc2/blosc/frame.c",
+          2753,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1627075.343570928,
+        "success": true,
+        "result_summary": "Ok({'contents': '2753 int frame_decompress_chunk(blosc2_context *dctx, blosc2_frame_s* frame, int nchunk, void *dest, int32_t nbytes) {\\n2754   uint8_t* src;\\n2755   bool needs_free;\\n2756   int32_t c..."
+      }
+    ],
+    "read_source": [],
+    "find_references": [],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "c-blosc2/blosc/frame.c",
+          "@@ -2017,14 +2017,30 @@\n     memcpy(trailer_csizes, block_csizes, nblocks * sizeof(int32_t));\n     free(block_csizes);\n   } else {\n     // The chunk is in memory and just one pointer away\n-    *chunk = frame->cframe + header_len + offset;\n-    if ((int64_t)header_len + offset + BLOSC_MIN_HEADER_LENGTH > frame->len) {\n+    // Validate the offset before doing pointer arithmetic.  In particular, do\n+    // not let an overflowing addition make an out-of-frame offset look valid.\n+    if (header_len < 0 || (int64_t)header_len > frame->len || offset < 0 ||\n+        offset > frame->len - (int64_t)header_len) {\n       BLOSC_TRACE_ERROR(\"Cannot read the header for chunk in the (contiguous) frame.\");\n       rc = BLOSC2_ERROR_READ_BUFFER;\n     } else {\n-      rc = blosc2_cbuffer_sizes(*chunk, NULL, &lazychunk_cbytes, NULL);\n+      int64_t available = frame->len - (int64_t)header_len - offset;\n+      if (available < BLOSC_MIN_HEADER_LENGTH) {\n+        BLOSC_TRACE_ERROR(\"Cannot read the header for chunk in the (contiguous) frame.\");\n+        rc = BLOSC2_ERROR_READ_BUFFER;\n+      } else {\n+        *chunk = frame->cframe + header_len + offset;\n+        rc = blosc2_cbuffer_sizes(*chunk, NULL, &lazychunk_cbytes, NULL);\n+        if (rc >= 0 &&\n+            (lazychunk_cbytes < 0 || (int64_t)lazychunk_cbytes > available)) {\n+          // The compressed size is part of the untrusted chunk header.  The\n+          // decompressor must never receive a source size larger than the\n+          // actual bytes remaining in the contiguous frame.\n+          BLOSC_TRACE_ERROR(\"Cannot read the chunk out of the (contiguous) frame.\");\n+          rc = BLOSC2_ERROR_READ_BUFFER;\n+        }\n+      }\n     }\n   }\n \n   end:\n"
+        ],
+        "kwargs": {},
+        "timestamp": 1627083.074543913,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1627130.62810593,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

@@ -1,0 +1,147 @@
+{
+  "source_questions": [
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Analyze output-buffer append and growth invariants around GrowOutputBuffer, SendBuffered, and CheckAvailableSize in wolfssl/src/internal.c. Is the correct robust fix to compact pending bytes from buffer + idx and reset idx in GrowOutputBuffer, and should CheckAvailableSize's capacity test also include idx to ensure growth/compaction whenever appending at idx + length would exceed bufferSize? Identify any callers that append at buffer + length rather than buffer + idx + length and implications of nonzero idx.",
+        "The supplied ASan report shows a partial send followed by WANT_WRITE leaves outputBuffer.idx > 0 and length equal to remaining bytes. DtlsMsgPoolSend calls CheckAvailableSize, which invokes GrowOutputBuffer. Current GrowOutputBuffer allocates size + length, copies length bytes from the old base, and leaves idx unchanged, so SendBuffered later reads length bytes at new buffer + stale idx beyond allocation. I have inspected wolfssl/src/internal.c:10071-10134, 9984-10066, and 10222-10270. Current CheckAvailableSize tests bufferSize - length < size, omitting idx, while at least the epoch-0 DtlsMsgPoolSend append at lines 8963-8966 explicitly writes at buffer + idx + length. The epoch-nonzero branch around line 9007 appears to write at buffer + length. I want the minimal root-cause patch preserving all expected buffer semantics, including static-memory allocator behavior where GrowOutputBuffer may return the same pointer."
+      ],
+      "kwargs": {},
+      "timestamp": 1631744.037794161,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='Yes, the root cause is that `idx` is the physical start of the unsent region while `length` is the number of unsent bytes, but `GrowOutputBuffer()` currently treats th..."
+    }
+  ],
+  "read_definition": [
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "GrowOutputBuffer",
+        "wolfssl/src/internal.c",
+        10091,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631634.456888111,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n10071 static WC_INLINE int GrowOutputBuffer(WOLFSSL* ssl, int size), extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "SendBuffered",
+        "wolfssl/src/internal.c",
+        10006,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631634.46019143,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n9984 int SendBuffered(WOLFSSL* ssl), extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "CheckAvailableSize",
+        "wolfssl/src/internal.c",
+        10266,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631634.463218662,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n10222 int CheckAvailableSize(WOLFSSL *ssl, int size), extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "GrowOutputBuffer",
+        "wolfssl/src/internal.c",
+        10071,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631653.885152698,
+      "success": true,
+      "result_summary": "Ok({'contents': '10071 static WC_INLINE int GrowOutputBuffer(WOLFSSL* ssl, int size)\\n10072 {\\n10073     byte* tmp;\\n10074 #if WOLFSSL_GENERAL_ALIGNMENT > 0\\n10075     byte  hdrSz = ssl->options.dtls ..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "CheckAvailableSize",
+        "wolfssl/src/internal.c",
+        10222,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631653.893968944,
+      "success": true,
+      "result_summary": "Ok({'contents': '10222 int CheckAvailableSize(WOLFSSL *ssl, int size)\\n10223 {\\n10224     if (size < 0) {\\n10225         WOLFSSL_MSG(\"CheckAvailableSize() called with negative number\");\\n10226        ..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "SendBuffered",
+        "wolfssl/src/internal.c",
+        9984,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631653.896915815,
+      "success": true,
+      "result_summary": "Ok({'contents': ' 9984 int SendBuffered(WOLFSSL* ssl)\\n 9985 {\\n 9986     if (ssl->CBIOSend == NULL && !WOLFSSL_IS_QUIC(ssl)) {\\n 9987         WOLFSSL_MSG(\"Your IO Send callback is null, please set\");..."
+    }
+  ],
+  "read_source": [
+    {
+      "tool_name": "read_source",
+      "args": [
+        "wolfssl/src/internal.c",
+        8940
+      ],
+      "kwargs": {},
+      "timestamp": 1631653.875618727,
+      "success": true,
+      "result_summary": "Ok({'contents': '8841     }\\n8842     WOLFSSL_LEAVE(\"DtlsMsgPoolTimeout()\", result);\\n8843     return result;\\n8844 }\\n8845 \\n8846 \\n8847 /* DtlsMsgPoolReset() deletes the stored transmit list. */\\n88..."
+    }
+  ],
+  "find_references": [
+    {
+      "tool_name": "find_references",
+      "args": [
+        "outputBuffer.idx",
+        "wolfssl/src/internal.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1631643.458837756,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/wolfssl/src/internal.c', refs=[FileReference(line=8964, content='                        ssl->buffers.outputBuffer.idx +', enclosing_definition='N/A'), FileReference..."
+    }
+  ],
+  "apply_patch": [
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "wolfssl/src/internal.c",
+        "@@ -10103,16 +10103,20 @@\n #ifdef WOLFSSL_STATIC_MEMORY\n     /* can be from IO memory pool which does not need copy if same buffer */\n-    if (ssl->buffers.outputBuffer.length &&\n-            tmp == ssl->buffers.outputBuffer.buffer) {\n+    if (tmp == ssl->buffers.outputBuffer.buffer) {\n+        if (ssl->buffers.outputBuffer.length) {\n+            XMEMMOVE(tmp, tmp + ssl->buffers.outputBuffer.idx,\n+                     ssl->buffers.outputBuffer.length);\n+        }\n+        ssl->buffers.outputBuffer.idx = 0;\n         ssl->buffers.outputBuffer.bufferSize =\n             size + ssl->buffers.outputBuffer.length;\n         return 0;\n     }\n #endif\n \n     if (ssl->buffers.outputBuffer.length)\n-        XMEMCPY(tmp, ssl->buffers.outputBuffer.buffer,\n-               ssl->buffers.outputBuffer.length);\n+        XMEMMOVE(tmp, ssl->buffers.outputBuffer.buffer +\n+                      ssl->buffers.outputBuffer.idx,\n+                 ssl->buffers.outputBuffer.length);\n@@ -10129,6 +10133,7 @@\n         ssl->buffers.outputBuffer.offset = 0;\n \n     ssl->buffers.outputBuffer.buffer = tmp;\n+    ssl->buffers.outputBuffer.idx = 0;\n     ssl->buffers.outputBuffer.bufferSize = size +\n                                            ssl->buffers.outputBuffer.length;\n     return 0;\n@@ -10228,8 +10233,7 @@\n #ifdef WOLFSSL_DTLS\n     if (ssl->options.dtls) {\n-        if (size + ssl->buffers.outputBuffer.length -\n-            ssl->buffers.outputBuffer.idx >\n+        if (size + ssl->buffers.outputBuffer.length >\n #if defined(WOLFSSL_SCTP) || defined(WOLFSSL_DTLS_MTU)\n                 ssl->dtlsMtuSz\n #else\n@@ -10261,8 +10265,10 @@\n     }\n #endif\n \n-    if (ssl->buffers.outputBuffer.bufferSize - ssl->buffers.outputBuffer.length\n-                                             < (word32)size) {\n+    if (ssl->buffers.outputBuffer.idx != 0 ||\n+            ssl->buffers.outputBuffer.length >\n+                ssl->buffers.outputBuffer.bufferSize ||\n+            ssl->buffers.outputBuffer.bufferSize -\n+                ssl->buffers.outputBuffer.length < (word32)size) {\n         if (GrowOutputBuffer(ssl, size) < 0)\n             return MEMORY_E;\n     }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1631758.92597055,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    }
+  ],
+  "test_patch": [
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1633173.98351866,
+      "success": true,
+      "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+    }
+  ],
+  "undo_last_patch": [],
+  "list_current_edits": []
+}

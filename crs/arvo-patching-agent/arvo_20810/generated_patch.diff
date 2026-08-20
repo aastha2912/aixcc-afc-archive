@@ -1,0 +1,64 @@
+--- a/src/ua_types_encoding_json.c
++++ b/src/ua_types_encoding_json.c
+@@ -102,7 +102,8 @@
+ 
+ WRITE_JSON_ELEMENT(ObjStart) {
+     /* increase depth, save: before first key-value no comma needed. */
+-    if(ctx->depth >= UA_JSON_ENCODING_MAX_RECURSION)
++    /* commaNeeded is indexed after incrementing the depth. */
++    if(ctx->depth >= UA_JSON_ENCODING_MAX_RECURSION - 1)
+         return UA_STATUSCODE_BADENCODINGERROR;
+     ctx->depth++;
+     ctx->commaNeeded[ctx->depth] = false;
+@@ -117,7 +118,8 @@
+ 
+ WRITE_JSON_ELEMENT(ArrStart) {
+     /* increase depth, save: before first array entry no comma needed. */
+-    if(ctx->depth >= UA_JSON_ENCODING_MAX_RECURSION)
++    /* commaNeeded is indexed after incrementing the depth. */
++    if(ctx->depth >= UA_JSON_ENCODING_MAX_RECURSION - 1)
+         return UA_STATUSCODE_BADENCODINGERROR;
+     ctx->depth++;
+     ctx->commaNeeded[ctx->depth] = false;
+@@ -1329,7 +1331,9 @@
+         return writeJsonNull(ctx); /*no element present, encode as null.*/
+     }
+     
+-    ret |= writeJsonObjStart(ctx);
++    ret = writeJsonObjStart(ctx);
++    if(ret != UA_STATUSCODE_GOOD)
++        return ret;
+     
+     if(src->hasSymbolicId) {
+         ret |= writeJsonKey(ctx, UA_JSONKEY_SYMBOLICID);
+@@ -1375,7 +1379,6 @@
+ 
+     if(src->hasInnerDiagnosticInfo && src->innerDiagnosticInfo) {
+         ret |= writeJsonKey(ctx, UA_JSONKEY_INNERDIAGNOSTICINFO);
+-        /* Check recursion depth in encodeJsonInternal */
+         ret |= encodeJsonInternal(src->innerDiagnosticInfo, &UA_TYPES[UA_TYPES_DIAGNOSTICINFO], ctx);
+         if(ret != UA_STATUSCODE_GOOD)
+             return ret;
+@@ -3031,12 +3034,21 @@
+ status
+ DiagnosticInfoInner_decodeJson(void* dst, const UA_DataType* type, 
+                                CtxJson* ctx, ParseCtx* parseCtx, UA_Boolean moveToken) {
++    /* DiagnosticInfo is recursively decoded outside decodeJsonStructure, so
++     * account for this recursion explicitly. */
++    if(ctx->depth >= UA_JSON_ENCODING_MAX_RECURSION)
++        return UA_STATUSCODE_BADDECODINGERROR;
++    ctx->depth++;
++
+     UA_DiagnosticInfo *inner = (UA_DiagnosticInfo*)UA_calloc(1, sizeof(UA_DiagnosticInfo));
+     if(inner == NULL) {
++        ctx->depth--;
+         return UA_STATUSCODE_BADOUTOFMEMORY;
+     }
+     memcpy(dst, &inner, sizeof(UA_DiagnosticInfo*)); /* Copy new Pointer do dest */
+-    return DiagnosticInfo_decodeJson(inner, type, ctx, parseCtx, moveToken);
++    status ret = DiagnosticInfo_decodeJson(inner, type, ctx, parseCtx, moveToken);
++    ctx->depth--;
++    return ret;
+ }
+ 
+ status 

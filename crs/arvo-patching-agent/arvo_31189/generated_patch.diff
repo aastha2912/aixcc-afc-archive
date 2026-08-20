@@ -1,0 +1,26 @@
+--- a/blosc/frame.c
++++ b/blosc/frame.c
+@@ -1681,7 +1681,22 @@
+   int rc = blosc_getitem(coffsets, nchunk, 1, offset);
+   if (rc < 0) {
+     BLOSC_TRACE_ERROR("Problems retrieving a chunk offset.");
+-  } else if (*offset > frame->len) {
++  }
++  else if (!frame->sframe && *offset >= 0) {
++    /* Offsets in a contiguous frame are relative to the end of its header.
++     * Validate using subtraction so that adding the header, offset and field
++     * size cannot overflow before callers read the chunk's cbytes field. */
++    const int64_t cbytes_field_end = BLOSC2_CHUNK_CBYTES + (int64_t)sizeof(int32_t);
++    if (header_len < 0 || frame->len < header_len ||
++        *offset > frame->len - header_len ||
++        cbytes_field_end > frame->len - header_len - *offset) {
++      BLOSC_TRACE_ERROR("Cannot read chunk %d outside of frame boundary.", nchunk);
++      rc = BLOSC2_ERROR_READ_BUFFER;
++    }
++  }
++  else if (*offset > frame->len) {
++    /* Sparse-frame offsets identify chunk files.  Preserve the existing
++     * index-range validation; they are not relative to header_len. */
+     BLOSC_TRACE_ERROR("Cannot read chunk %d outside of frame boundary.", nchunk);
+     rc = BLOSC2_ERROR_READ_BUFFER;
+   }

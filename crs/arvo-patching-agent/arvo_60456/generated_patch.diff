@@ -1,0 +1,43 @@
+--- a/Packet++/src/SSLLayer.cpp
++++ b/Packet++/src/SSLLayer.cpp
+@@ -120,22 +120,35 @@
+ 	SSLHandshakeLayer::SSLHandshakeLayer(uint8_t* data, size_t dataLen, Layer* prevLayer, Packet* packet)
+ 	    : SSLLayer(data, dataLen, prevLayer, packet)
+ 	{
++	if (m_DataLen < sizeof(ssl_tls_record_layer))
++		return;
++
+ 		uint8_t* curPos = m_Data + sizeof(ssl_tls_record_layer);
+ 		size_t recordDataLen = be16toh(getRecordLayer()->length);
+ 		if (recordDataLen > m_DataLen - sizeof(ssl_tls_record_layer))
+ 			recordDataLen = m_DataLen - sizeof(ssl_tls_record_layer);
+ 
+ 		size_t curPosIndex = 0;
+-		while (true)
++	while (curPosIndex < recordDataLen)
+ 		{
+-			SSLHandshakeMessage* message =
+-			    SSLHandshakeMessage::createHandshakeMessage(curPos, recordDataLen - curPosIndex, this);
++		const size_t remainingDataLen = recordDataLen - curPosIndex;
++		if (remainingDataLen < sizeof(ssl_tls_handshake_layer))
++			break;
++
++		SSLHandshakeMessage* message = SSLHandshakeMessage::createHandshakeMessage(curPos, remainingDataLen, this);
+ 			if (message == nullptr)
+ 				break;
+ 
++		const size_t messageLen = message->getMessageLength();
++		if (messageLen == 0 || messageLen > remainingDataLen)
++		{
++			delete message;
++			break;
++		}
++
+ 			m_MessageList.pushBack(message);
+-			curPos += message->getMessageLength();
+-			curPosIndex += message->getMessageLength();
++		curPos += messageLen;
++		curPosIndex += messageLen;
+ 		}
+ 	}
+ 

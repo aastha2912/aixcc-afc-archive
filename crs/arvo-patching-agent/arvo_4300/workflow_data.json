@@ -1,0 +1,983 @@
+{
+  "vuln_id": 637,
+  "crash_result": {
+    "output": "==424==ERROR: AddressSanitizer: heap-use-after-free on address 0x612000000940 at pc 0x00000051259d bp 0x7ffc2fede2d0 sp 0x7ffc2fedda80\nREAD of size 258 at 0x612000000940 thread T0\nSCARINESS: 54 (multi-byte-read-heap-use-after-free)\n    #0 0x51259c in __asan_memcpy /src/llvm/projects/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cc:23\n    #1 0x56732e in UA_Array_copy /src/open62541/src/ua_types.c:1048:9\n    #2 0x56adeb in copy_noInit /src/open62541/src/ua_types.c:925:23\n    #3 0x56ba5d in ",
+    "stack": "#0 0x51259c in __asan_memcpy llvm/projects/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cc:23\n#1 0x56732e in UA_Array_copy open62541/src/ua_types.c:1048:9\n#2 0x56adeb in copy_noInit open62541/src/ua_types.c:925:23\n#3 0x56ba5d in UA_copy open62541/src/ua_types.c:940:28\n#4 0x56ba5d in UA_String_copy /work/open62541/src_generated/ua_types_generated_handling.h:308\n#5 0x56ba5d in NodeId_copy open62541/src/ua_types.c:226\n#6 0x56c13b in ExtensionObject_copy open62541/src/ua_types.c:364:18\n#7 0x",
+    "dedup": "__asan_memcpy--UA_Array_copy--copy_noInit"
+  },
+  "pov_run_data": {
+    "task_uuid": "7561f721-f888-5e74-a1c0-a6d6568d99b5",
+    "project_name": "open62541",
+    "harness": "fuzz_binary_decode",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "__asan_memcpy--UA_Array_copy--copy_noInit"
+  },
+  "decoded_pov": {
+    "project_name": "open62541",
+    "harness": "fuzz_binary_decode",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'\\x15\\x00\\x01\\x00\\xc2\\x02\\x01\\xc5;\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x00\\x00V\\x03\\x00\\xc2\\x02\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x01O\\x01\\x00\\x00\\x00\\x00V\\x01\\xd3\\x00\\xc2\\x02\\x01\\x00\\x00\\x00\\x00\\x17\\x00XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\xbb\\xff\\x18\\x18\\x18\\x18XXXXXXX;\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x00\\x00V\\x02\\x00\\x00\\x00V\\x01\\x00\\xc2\\x02\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00V\\x01\\xd3\\x00\\xc2\\x02\\x01XXX\\x18XXXXX\\xff\\x18\\x18\\x18\\x18\\x18\\x18\\x17XXXXXXXX\\xff\\x18\\x18\\x18\\x18\\x18\\x18XX\\xff\\x18\\x18\\x18\\x18\\x18\\x18XXXXXXX;\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x00\\x00V\\x01\\x00\\xc2\\x02\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x01O\\x00\\x00\\x00\\x00\\x00V\\x01\\xd3\\x00\\xc2\\x02\\x01\\x00\\x00\\x00\\x00\\x17XXXXXXXX\\xff\\x18\\x18\\x18\\x18\\x18\\x18XXXXXX;\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x00\\x00V\\x01\\x00\\xc2\\x02\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00V\\x01\\xd3\\x00\\xc2\\x02\\x01XXX\\x18'\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "__asan_memcpy--UA_Array_copy--copy_noInit"
+  },
+  "analyzed_vuln": {
+    "function": "ExtensionObject_decodeBinaryContent",
+    "file": "open62541/src/ua_types_encoding_binary.c",
+    "description": "In the unknown-type path, `dst->content.encoded.typeId = *typeId` performs a shallow copy of a NodeId that may own a dynamically allocated string/ByteString identifier. After this helper returns, `ExtensionObject_decodeBinary` unconditionally calls `UA_NodeId_deleteMembers(&binTypeId)`, freeing that identifier while the decoded ExtensionObject still points to it. A later `UA_copy` reaches `ExtensionObject_copy`/`NodeId_copy` and reads the freed identifier in `UA_Array_copy`/`memcpy`, causing the heap-use-after-free. The unknown-type branch must move ownership without subsequently freeing the source, or deep-copy the NodeId and handle copy failure.",
+    "conditions": "The fuzz input selects a type containing ExtensionObjects and supplies a binary ExtensionObject whose type NodeId is not found by `UA_findDataTypeByBinaryInternal`, whose NodeId identifier is a heap-owning string or ByteString, and whose encoded body is otherwise valid so decoding returns `UA_STATUSCODE_GOOD`. The harness then calls `UA_copy` on the decoded object; the retained encoded typeId references memory freed when the temporary `binTypeId` was destroyed at line 947, triggering the UAF during NodeId string copying."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 9,
+      "total_cost": 0.251577,
+      "total_input_tokens": 105267,
+      "total_output_tokens": 3157,
+      "total_cached_tokens": 82104,
+      "llm_calls": [
+        {
+          "timestamp": 1787173794.8168328,
+          "model": "gpt-5.6-sol",
+          "cost": 0.02764,
+          "input_tokens": 4322,
+          "output_tokens": 201,
+          "total_tokens": 4523,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_D0e1LA01ccRoBbComITWz798"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_y2gsj0bnlcmcoNFdDAWBs5d7"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_AfgmevdmS7IMkFfPXLyyL7i3"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_1aecKUrws175iBLd7UpoBSef"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_BkEiKxnKmdN1UX6PaHEiGp3r"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174192.8228588,
+          "model": "gpt-5.6-sol",
+          "cost": 0.015519500000000002,
+          "input_tokens": 5473,
+          "output_tokens": 253,
+          "total_tokens": 5726,
+          "cached_tokens": 4319,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_7To1EhUhxFQUvhLJJS2UJ7fg"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_c2cAIbc9JXQmskLs2aNKCXyC"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_eFa01NdotsZEz6HevxKveoNd"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_gU2YqlgPB5JgGTHkDQUumFeZ"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_B0hupwrxJjeDvIxmBNepZ3YB"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_QHH06hDK9g1nyQolaK0ilIBN"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174294.062809,
+          "model": "gpt-5.6-sol",
+          "cost": 0.01304,
+          "input_tokens": 6013,
+          "output_tokens": 253,
+          "total_tokens": 6266,
+          "cached_tokens": 5470,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_sZlE2HzacRGJftqZG33O2tzE"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_HU8eOYrRwusBhBShSJJsLiBA"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_AtWyPR5ynwxAceAxCiaem8oK"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_6mUUdDvJiK6MdGvCblVM2Lul"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_tKSeyMAqan50VUiW3zDmNlUT"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_EfxPCzgUrJd8o2cFO8ArEnw6"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174376.6235673,
+          "model": "gpt-5.6-sol",
+          "cost": 0.02013,
+          "input_tokens": 7899,
+          "output_tokens": 256,
+          "total_tokens": 8155,
+          "cached_tokens": 6010,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_Zlj96ln1CDmm4VuvZ6CSsyB0"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_nEt3VDTdC8PJ3iWrmdxo0xHA"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Qf4QOGOFqhAv2jB93aTPdj8m"
+            },
+            {
+              "tool_name": "debug_pov",
+              "tool_call_id": "call_irSQbhi69t5qrmzgIUQej8yX"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174432.0470626,
+          "model": "gpt-5.6-sol",
+          "cost": 0.014243,
+          "input_tokens": 8755,
+          "output_tokens": 200,
+          "total_tokens": 8955,
+          "cached_tokens": 7896,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_1sgE9v7sjgstTdPKyCO74aCb"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_rHCiFpkP5wbDzXiveQBpc1To"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_wt5NXQYiV1Zy2OnOrXzJxtD3"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_smVs8eoB2Rt90AJcv7570BX6"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_TOvsDNBhZJPY57X5gusgkDMb"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174499.7804842,
+          "model": "gpt-5.6-sol",
+          "cost": 0.03979100000000001,
+          "input_tokens": 14293,
+          "output_tokens": 257,
+          "total_tokens": 14550,
+          "cached_tokens": 8752,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_fkgG0uYDEYh0nbNh4LGiOBzj"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_lP11S3ZlJ644lM07KN444Xvm"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_kRfctzIoVzubs1mB4bxqgDRo"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_WOBGrTOh9ihfUF3KjkH7xyxh"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_D1Kp9FIDrwAUkHBmSE9RzUsi"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174565.9540677,
+          "model": "gpt-5.6-sol",
+          "cost": 0.024415,
+          "input_tokens": 15254,
+          "output_tokens": 415,
+          "total_tokens": 15669,
+          "cached_tokens": 14290,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_UfhCVQYHSvwzi5H9qdkoj6bf"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_2GywWRBI6KB6vfDx9ETCxeSN"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_YmNBCC6HSa818v4kObbU16eD"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_cTC6E8TJtFW4BVzBSyEWGhhI"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_oUXeoYXU18OvaNKhCVvuJUJu"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_eYtbS3pQChyNjSlrvBW71RYG"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174622.7483897,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0362855,
+          "input_tokens": 20119,
+          "output_tokens": 144,
+          "total_tokens": 20263,
+          "cached_tokens": 15251,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_pOgw1naOABSgG6LsVESirit7"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_jsOUm4qWNjnB7tn3fCrGL2aA"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_KA1pColOCumuUYMZr1jtGYYi"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_04VZx8Q9YmRJBTEsdLRcWX5U"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174648.8208058,
+          "model": "gpt-5.6-sol",
+          "cost": 0.060513000000000004,
+          "input_tokens": 23139,
+          "output_tokens": 1178,
+          "total_tokens": 24317,
+          "cached_tokens": 20116,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_eE2VrvDtuNdXSaGsxpt8nr2f"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 14,
+      "total_cost": 0.41743850000000005,
+      "total_input_tokens": 193321,
+      "total_output_tokens": 3585,
+      "total_cached_tokens": 145937,
+      "llm_calls": [
+        {
+          "timestamp": 1787174652.7369351,
+          "model": "gpt-5.6-sol",
+          "cost": 0.033575,
+          "input_tokens": 5437,
+          "output_tokens": 213,
+          "total_tokens": 5650,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_66bNmlb4BrhpH1d1KksdNeny"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_wlU3mPDIVqPVaqwtjZee2h0W"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_oevf8y3PVBBRmE4C6Q5rmbbg"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_NYVmVR4L16CmGafpbMAr9O8O"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174687.9617157,
+          "model": "gpt-5.6-sol",
+          "cost": 0.005712,
+          "input_tokens": 5775,
+          "output_tokens": 43,
+          "total_tokens": 5818,
+          "cached_tokens": 5434,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_CpEEspuh3jHa33rnIutmaqBO"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174695.482965,
+          "model": "gpt-5.6-sol",
+          "cost": 0.029071,
+          "input_tokens": 8345,
+          "output_tokens": 444,
+          "total_tokens": 8789,
+          "cached_tokens": 5772,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_8fYEhwBNpQ9umurVxzYOv72I"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_huIchtB2TZe43itLhP8ELSf7"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_b9g5hFncsal30IuwOr5KUzaR"
+            },
+            {
+              "tool_name": "source_questions",
+              "tool_call_id": "call_IEIbDcAZHNwuIGx9x2llsy4x"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174700.3203413,
+          "model": "gpt-5.6-sol",
+          "cost": 0.014335,
+          "input_tokens": 1517,
+          "output_tokens": 225,
+          "total_tokens": 1742,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_2MHNVHukJJBFdveHDo0sl7PX"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_n6ClGx8nj8RcsW9u259GOg1A"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_BK7TmhGB842DZP4GAg1rI5I2"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_7YnFjzzqgDJPzD6nVSJGAupN"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_XNOPyIRrrh9mDY2HBXhWfAph"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174754.2326026,
+          "model": "gpt-5.6-sol",
+          "cost": 0.012317,
+          "input_tokens": 2188,
+          "output_tokens": 273,
+          "total_tokens": 2461,
+          "cached_tokens": 1514,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 7,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_yK1GQ4lCnJOZRpTKSYrVzOLR"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_DU4YbYH1L9xNxfb84irATiUR"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_huFwRTIgVHYYJ2rkRZSLQkkh"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_isDPvTCb5mXfypuinSxgvw6p"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_hLSvGsPwZ1PQsnipEvWDmI3M"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_2bxQukzsYQvZEv2CKmU12BFk"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_L0qtdAHmfUBz5vSdMpknViQ5"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174853.476677,
+          "model": "gpt-5.6-sol",
+          "cost": 0.04625750000000001,
+          "input_tokens": 9784,
+          "output_tokens": 239,
+          "total_tokens": 10023,
+          "cached_tokens": 2185,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Y2zgwyECNNvXgyfyjNJWa3N2"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_3QkUGQKKYl0jybxR8uiK9YNK"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_5fqtyMEbCWGQt8wbGHqqcVK7"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_5tARiJ3jRVhiQMcOZa35QrZz"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_F6zXnhTgZNExi3ljGbvc4Daj"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_S3LYdQvfMOM9cjdHvwoZToJa"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787174903.4882634,
+          "model": "gpt-5.6-sol",
+          "cost": 0.020050500000000002,
+          "input_tokens": 11301,
+          "output_tokens": 252,
+          "total_tokens": 11553,
+          "cached_tokens": 9781,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 7,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_siUYofJY0LGqtioy8qqc0kaD"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_UlrdwC4G3rSBGySfmgfQhXy9"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_gvRQ3GSyjGKlb3vrt0HXBOLn"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_OeQMF0L2YxShDKfprEglR6cH"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_1hhhndlEfT8qJYiDnFGvEoEt"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Z3e0iZ6nvYGnLHdrhmgaZEls"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_985rVFUkMpDKWHUHBE8jQddN"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175360.4920132,
+          "model": "gpt-5.6-sol",
+          "cost": 0.067904,
+          "input_tokens": 22381,
+          "output_tokens": 228,
+          "total_tokens": 22609,
+          "cached_tokens": 11298,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_qTBxaT6aopqVZUA6MyCBqFx5"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_E7wqCxPDVHjDid3QCvZgimlH"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_0QhjWsnfBz789viFqpOevo3p"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_yTHRZ7zff90GqGJNVp8pMqyz"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_lgFD4NOIdSxVwVcvbDAd01u6"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_aoftYTQnHrGZR4XbC4f5uBFc"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175369.226141,
+          "model": "gpt-5.6-sol",
+          "cost": 0.046374,
+          "input_tokens": 28305,
+          "output_tokens": 185,
+          "total_tokens": 28490,
+          "cached_tokens": 22378,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_iYv2ssKeJMVDJurlAZI6gfn7"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_CfempLIbHdlUb0rc7DoJG711"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_cb153iGaYyDq2nrab1sccjfB"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_pqXij215HGIZin0tK9yAfRyu"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_jGsxQex8qN1J6CKpyG1c46Ly"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175436.9120445,
+          "model": "gpt-5.6-sol",
+          "cost": 0.031966,
+          "input_tokens": 31241,
+          "output_tokens": 104,
+          "total_tokens": 31345,
+          "cached_tokens": 28302,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Lzs4inDPhvWlvSekfgZMeoE5"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_SwrOZoT1d0fYmmMtvWb5y6Oq"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_teqK5OewHmpq5udyizmn92YV"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175460.872045,
+          "model": "gpt-5.6-sol",
+          "cost": 0.079614,
+          "input_tokens": 37269,
+          "output_tokens": 1128,
+          "total_tokens": 38397,
+          "cached_tokens": 31238,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_6FUqIF7YgAsHZ6YkFIWJUM9l"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175466.8380446,
+          "model": "gpt-5.6-sol",
+          "cost": 0.017506,
+          "input_tokens": 9725,
+          "output_tokens": 214,
+          "total_tokens": 9939,
+          "cached_tokens": 8342,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_vJ8LSWOMVviTrv8guyoGatli"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175468.3763149,
+          "model": "gpt-5.6-sol",
+          "cost": 0.006541,
+          "input_tokens": 9974,
+          "output_tokens": 14,
+          "total_tokens": 9988,
+          "cached_tokens": 9722,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_2v4yRtewNcIrymMcopepeMnu"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787175529.2833772,
+          "model": "gpt-5.6-sol",
+          "cost": 0.006215499999999999,
+          "input_tokens": 10079,
+          "output_tokens": 23,
+          "total_tokens": 10102,
+          "cached_tokens": 9971,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_L6wANBwVaaU0kbJDp8tEUAbE"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.6690155,
+      "total_input_tokens": 298588,
+      "total_output_tokens": 6742,
+      "total_llm_calls": 23
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/src/ua_types_encoding_binary.c\n+++ b/src/ua_types_encoding_binary.c\n@@ -907,7 +907,9 @@\n     /* Unknown type, just take the binary content */\n     if(!type) {\n         dst->encoding = UA_EXTENSIONOBJECT_ENCODED_BYTESTRING;\n-        dst->content.encoded.typeId = *typeId;\n+        status ret = UA_NodeId_copy(typeId, &dst->content.encoded.typeId);\n+        if(ret != UA_STATUSCODE_GOOD)\n+            return ret;\n         return DECODE_DIRECT(&dst->content.encoded.body, String); /* ByteString */\n     }\n \n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [
+      {
+        "tool_name": "source_questions",
+        "args": [
+          "In open62541/src/ua_types_encoding_binary.c, what is the safest minimal ownership fix for the shallow assignment at ExtensionObject_decodeBinaryContent line 910, given ExtensionObject_decodeBinary deletes binTypeId at line 947? Please assess deep-copy error cleanup and whether destination is initialized/cleaned by decode callers.",
+          "The sanitizer report shows a UAF after decoding an unknown binary ExtensionObject with a heap-owning string NodeId. ExtensionObject_decodeBinaryContent currently assigns dst->content.encoded.typeId = *typeId and decodes the body, while its caller unconditionally invokes UA_NodeId_deleteMembers(&binTypeId). I am considering replacing the assignment with UA_NodeId_copy and returning allocation failure before body decode. I need to ensure failure cleanup follows existing decoding conventions and does not leak the copied NodeId if body decoding fails."
+        ],
+        "kwargs": {},
+        "timestamp": 1584849.572328848,
+        "success": true,
+        "result_summary": "Ok(SourceQuestionsResult(answer='The safest minimal fix is to deep-copy the temporary `binTypeId` into the encoded ExtensionObject and let the existing top-level decode cleanup own all failure cleanup..."
+      }
+    ],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "UA_NodeId_deleteMembers",
+          "",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584054.934559208,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "ExtensionObject_decodeBinaryContent",
+          "open62541/src/ua_types_encoding_binary.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584062.352270025,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n903 ExtensionObject_decodeBinaryContent(UA_ExtensionObject *dst, const UA_NodeId *typeId, Ctx *ctx) {, extra..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "ExtensionObject_decodeBinary",
+          "open62541/src/ua_types_encoding_binary.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584071.361545824,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "NodeId_copy",
+          "open62541/src/ua_types.c",
+          226,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584093.113978672,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n219 NodeId_copy(UA_NodeId const *src, UA_NodeId *dst, const UA_DataType *_) {, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "ExtensionObject_deleteMembers",
+          "open62541/src/ua_types.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1584103.776253235,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n338 ExtensionObject_deleteMembers(UA_ExtensionObject *p, const UA_DataType *_) {, extra=None))"
+      }
+    ],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "open62541/src/ua_types_encoding_binary.c",
+          900
+        ],
+        "kwargs": {},
+        "timestamp": 1584076.70232446,
+        "success": true,
+        "result_summary": "Ok({'contents': ' 801     /* Decode the content */\\n 802     if(encoding & UA_LOCALIZEDTEXT_ENCODINGMASKTYPE_LOCALE)\\n 803         ret |= DECODE_DIRECT(&dst->locale, String);\\n 804     if(encoding & U..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "ExtensionObject_decodeBinaryContent",
+          "open62541/src/ua_types_encoding_binary.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1584074.917596034,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='open62541/src/ua_types_encoding_binary.c', refs=[FileReference(line=946, content='        ret = ExtensionObject_decodeBinaryContent(dst, &binTypeId, ctx);', enclosing_def..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "UA_NodeId_copy",
+          "open62541/src/ua_types_encoding_binary.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1584084.304538491,
+        "success": true,
+        "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: open62541/src/client/ua_client_highlevel.c, open62541/src/server/ua_services_subscription.c, open62541/src/server..."
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "open62541/src/ua_types_encoding_binary.c",
+          "@@ -906,9 +906,12 @@\n \n     /* Unknown type, just take the binary content */\n     if(!type) {\n         dst->encoding = UA_EXTENSIONOBJECT_ENCODED_BYTESTRING;\n-        dst->content.encoded.typeId = *typeId;\n+        status ret = UA_NodeId_copy(typeId, &dst->content.encoded.typeId);\n+        if(ret != UA_STATUSCODE_GOOD)\n+            return ret;\n         return DECODE_DIRECT(&dst->content.encoded.body, String); /* ByteString */\n     }\n*** End Patch"
+        ],
+        "kwargs": {},
+        "timestamp": 1584855.561007616,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1584916.104700204,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

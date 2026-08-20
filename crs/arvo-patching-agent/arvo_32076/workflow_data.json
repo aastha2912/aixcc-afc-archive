@@ -1,0 +1,705 @@
+{
+  "vuln_id": 765,
+  "crash_result": {
+    "output": "==2724==ERROR: AddressSanitizer: heap-use-after-free on address 0x62b000006cc0 at pc 0x00000049de77 bp 0x7fff3ca31290 sp 0x7fff3ca30a58\nREAD of size 24 at 0x62b000006cc0 thread T0\nSCARINESS: 54 (multi-byte-read-heap-use-after-free)\n    #0 0x49de76 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n    #1 0x9da9f8 in ZSTD_freeDDict /src/c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_ddict.c:215:44\n    #2 0x4e651b in blosc2_free_ctx /src/c-blosc",
+    "stack": "#0 0x49de76 in __asan_memcpy llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:22:3\n#1 0x9da9f8 in ZSTD_freeDDict c-blosc2/internal-complibs/zstd-1.4.9/decompress/zstd_ddict.c:215:44\n#2 0x4e651b in blosc2_free_ctx c-blosc2/blosc/blosc2.c:3581:5\n#3 0x517482 in blosc2_schunk_free c-blosc2/blosc/schunk.c:420:5\n#4 0x4d244e in LLVMFuzzerTestOneInput c-blosc2/tests/fuzz/fuzz_decompress_frame.c\n#5 0x4d27fc in ExecuteFilesOnyByOne aflplusplus/utils/aflpp_driver/aflpp_driver.c:185:7\n#",
+    "dedup": "__asan_memcpy--ZSTD_freeDDict--blosc2_free_ctx"
+  },
+  "pov_run_data": {
+    "task_uuid": "814152e2-0f17-535d-b09c-fae7faa8b72f",
+    "project_name": "c-blosc2",
+    "harness": "decompress_frame_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "__asan_memcpy--ZSTD_freeDDict--blosc2_free_ctx"
+  },
+  "decoded_pov": {
+    "project_name": "c-blosc2",
+    "harness": "decompress_frame_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'[\\xed\\x05\\xff\\xeb\\xe5\\x00\\x00d\\xbc\\x00\\x00\\x00\\x00^\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xba\\x00\\xcb\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00X\\x91\\x15\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x01\\x10@\\x0e\\x00\\xe8\\x03\\x00\\x00W:\\x1b\\x00\\x00!\\x00\\xff\\x80\\x00\\x00\\x10\\x00\\x0b\\x00\\x00\\xc0\\xa7$\\x10&\\x00\\x00\\x00@\\xe8\\x03\\x08\\x00\\xce\\x00\\x00 \\xde@\\xea\\xde\\x00\\x00\\x01\\x00E-\\x01 \\x00\\x00\\x00 \\x00\\x00\\x00V\\x00\\x00\\x00\\x00\\x00\\x00\\x04\\x02\\x00\\x00R\\x91\\x15\\x00\\x00\\xff\\xff\\t\\x03 \\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x00V\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x16\\x00\\x00\\x00\\x00\\x00\\x07Z\\xe7\\xce\\x00\\x00\\x00\\nZ\\x1e\\xff\\x80\\xff\\xff\\xfe\\xff\\xf0\\x00\\xbc\\x00\\x00\\x10\\xde\\x00\\x00\\x10'\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "__asan_memcpy--ZSTD_freeDDict--blosc2_free_ctx"
+  },
+  "analyzed_vuln": {
+    "function": "initialize_context_decompression",
+    "file": "c-blosc2/blosc/blosc2.c",
+    "description": "When processing a dictionary-bearing chunk, this function frees an existing `context->dict_ddict` at lines 2070-2072 but does not clear the pointer. It then validates the new dictionary metadata and can return early at lines 2075-2088 before assigning a replacement at line 2093. The context consequently retains a dangling non-NULL `dict_ddict`; later `blosc2_schunk_free` calls `blosc2_free_ctx`, which passes that stale pointer to `ZSTD_freeDDict` again, causing the reported heap-use-after-free/double-free behavior. The root fix is to clear the pointer immediately after freeing it, or validate/create the replacement before destroying the old dictionary.",
+    "conditions": "The attacker-controlled frame must contain at least two chunks that are decompressed using the same super-chunk decompression context. An earlier chunk with `BLOSC2_USEDICT` must contain a sufficiently valid dictionary so `ZSTD_createDDict` stores a non-NULL `context->dict_ddict`. A later chunk must also set `BLOSC2_USEDICT`, causing the old dictionary to be freed, but must have malformed/truncated dictionary metadata\u2014fewer than 4 bytes for the size, an invalid size, or fewer dictionary bytes than the declared size\u2014so initialization returns before replacing the pointer. The fuzzer then exits its decompression loop and frees the super-chunk/context, triggering the second `ZSTD_freeDDict` on the stale pointer in `blosc2_free_ctx`."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 6,
+      "total_cost": 0.13544,
+      "total_input_tokens": 45451,
+      "total_output_tokens": 2035,
+      "total_cached_tokens": 33970,
+      "llm_calls": [
+        {
+          "timestamp": 1787226632.0197399,
+          "model": "gpt-5.6-sol",
+          "cost": 0.02951,
+          "input_tokens": 4558,
+          "output_tokens": 224,
+          "total_tokens": 4782,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_AG2SWuWdnFz0VxdskVtNk2pS"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_TwZzGumG4F3IFkb2t4PRpivu"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_wNeqQt40H3ovxjMWOmIOrDCK"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_bUDwctif7QtM6J9OD1fnhN3a"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_OtuWleWlU2vpBOZ7oXohnDIe"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227057.575722,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0120375,
+          "input_tokens": 5049,
+          "output_tokens": 243,
+          "total_tokens": 5292,
+          "cached_tokens": 4555,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_WViS9pKu1KPlFlOTuwFNK04V"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_dp7CfwDjkn2eBQ8svr9ESS2Q"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_DoHzABemjOUs9ECHkDi2nMU2"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_570vOugfIq0lkxBepEZQC4La"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_9KLc5CYlXQDbva9vUByWh3Gm"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227068.3410342,
+          "model": "gpt-5.6-sol",
+          "cost": 0.012063,
+          "input_tokens": 5574,
+          "output_tokens": 230,
+          "total_tokens": 5804,
+          "cached_tokens": 5046,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_nNIEFtRzMoIKcSv6VZrVk4HX"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_uoVr8s6WSpY4gOEoDyVXDBEc"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_YxIkpgOdwg6BoNLfUL5IEvr9"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_nVUt4cEGZjzrW32isUmoKXGS"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_HSqKDbSLtCVuzX2XkYdqbqbJ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227078.5295377,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0320005,
+          "input_tokens": 9068,
+          "output_tokens": 391,
+          "total_tokens": 9459,
+          "cached_tokens": 5571,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "debug_pov",
+              "tool_call_id": "call_M5HN6KUgDAxrwK8oNlBAgawM"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_wOAYPKcPMFWwJZbKecUJvmGP"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ljruKuD3fhw4u2XSpDisDT8g"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_3t4Fo8tsWNXvMC9HsnXiQd5Z"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227081.9178798,
+          "model": "gpt-5.6-sol",
+          "cost": 0.012927500000000001,
+          "input_tokens": 9736,
+          "output_tokens": 168,
+          "total_tokens": 9904,
+          "cached_tokens": 9065,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_xqocoWHTyxMttq0NRZXT6huc"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_9z2YzsoUuHH1YzA49skyMF1H"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_dBDBcsqGfjuXxw2LWDv0NfTK"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_ZLzDyBvbqoR7qFYv42BWJEaP"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227094.7419226,
+          "model": "gpt-5.6-sol",
+          "cost": 0.036901500000000004,
+          "input_tokens": 11466,
+          "output_tokens": 779,
+          "total_tokens": 12245,
+          "cached_tokens": 9733,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_QQbshpdzIyNKsqHhTq7b9APU"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 12,
+      "total_cost": 0.2833145,
+      "total_input_tokens": 102682,
+      "total_output_tokens": 3817,
+      "total_cached_tokens": 76579,
+      "llm_calls": [
+        {
+          "timestamp": 1787227097.2158017,
+          "model": "gpt-5.6-sol",
+          "cost": 0.03355,
+          "input_tokens": 5786,
+          "output_tokens": 154,
+          "total_tokens": 5940,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ef3IAN8Ftcl4v12SiXgGa6dd"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_tqtv2bZljsF1tKWRaQ4mHYxV"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_qkTrdqZrbTiypHfgG4jHQWej"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227101.6161773,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0151815,
+          "input_tokens": 6279,
+          "output_tokens": 327,
+          "total_tokens": 6606,
+          "cached_tokens": 5783,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_8UMV0wvYKDO21CFt1eu4lTWt"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_jZD9ImWE2xEx4cBV9FzHWJ5Y"
+            },
+            {
+              "tool_name": "source_questions",
+              "tool_call_id": "call_8EfQhemuoZYa4LvBGAckI6lj"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227105.0938132,
+          "model": "gpt-5.6-sol",
+          "cost": 0.012095000000000002,
+          "input_tokens": 1513,
+          "output_tokens": 151,
+          "total_tokens": 1664,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_vFXVg6pY1xAY2pjeKWjD240m"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_q9G4YVaQUaS1andHFRbTUsj0"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_430fQu2zQu88uiMKuENZrByl"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227108.7887542,
+          "model": "gpt-5.6-sol",
+          "cost": 0.010950000000000001,
+          "input_tokens": 2385,
+          "output_tokens": 194,
+          "total_tokens": 2579,
+          "cached_tokens": 1510,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_5IMj6u4QCDMv1EX50Tvkfx3w"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_umqyOvgYSwzGZPgR8wEGKYT8"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_UE4v4aDAQiVVGmhSH46mwi8F"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_kG5m2Yh5OlD7xyTB0lUT1inw"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227113.420941,
+          "model": "gpt-5.6-sol",
+          "cost": 0.030251000000000004,
+          "input_tokens": 6580,
+          "output_tokens": 269,
+          "total_tokens": 6849,
+          "cached_tokens": 2382,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_4Sqt1RzdeVKg535pcpDmwtEh"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_YECawPSurOCipItCWgpql0Dv"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_Z7hvLbpK59rXT2zoZxckasFx"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_87Nue0pFIBNaf3bgj1T928Pf"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_cLv46sQjveuZ5bOSR2THDYQp"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_5jW5jnZbkvVTzbJ7K2KjvVfz"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227116.5384486,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0185485,
+          "input_tokens": 8357,
+          "output_tokens": 212,
+          "total_tokens": 8569,
+          "cached_tokens": 6577,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_L9x8PFfVJLYvXvRaMFZSMVNb"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_gicZHix2FiW2aqhtQXSBmoc3"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Z1KGRt4YwhpcPt7AGLFsSXAE"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_6IuoJdfDBcx4fJhf24BUAmI7"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227119.516172,
+          "model": "gpt-5.6-sol",
+          "cost": 0.032872000000000005,
+          "input_tokens": 13235,
+          "output_tokens": 143,
+          "total_tokens": 13378,
+          "cached_tokens": 8354,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_qRlwL7N0KrtUbpkdQEQdXgod"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_c6NNZjfU4FQYi3dSh5yIFPko"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_Z8WO09pTsySCbFEOfDrDV6hj"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227131.469745,
+          "model": "gpt-5.6-sol",
+          "cost": 0.030931,
+          "input_tokens": 14333,
+          "output_tokens": 627,
+          "total_tokens": 14960,
+          "cached_tokens": 13232,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_9ix5yXWNzs1nSWWjxhWzvVut"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227156.6052976,
+          "model": "gpt-5.6-sol",
+          "cost": 0.064265,
+          "input_tokens": 16786,
+          "output_tokens": 1494,
+          "total_tokens": 18280,
+          "cached_tokens": 14330,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_ph0yU0d0RHWRYCiyoD1KottK"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227159.7231915,
+          "model": "gpt-5.6-sol",
+          "cost": 0.022373000000000004,
+          "input_tokens": 8959,
+          "output_tokens": 194,
+          "total_tokens": 9153,
+          "cached_tokens": 6276,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_JqnIL2aHR7JUjqPMMFMsyQP1"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227161.0643375,
+          "model": "gpt-5.6-sol",
+          "cost": 0.006028,
+          "input_tokens": 9182,
+          "output_tokens": 14,
+          "total_tokens": 9196,
+          "cached_tokens": 8956,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_rVX6GwaWNmvvMC6VCMCPLsQT"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227549.1477013,
+          "model": "gpt-5.6-sol",
+          "cost": 0.006269499999999999,
+          "input_tokens": 9287,
+          "output_tokens": 38,
+          "total_tokens": 9325,
+          "cached_tokens": 9179,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_ZGISaeZBjvR59PhdlkOfwHvg"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.41875450000000003,
+      "total_input_tokens": 148133,
+      "total_output_tokens": 5852,
+      "total_llm_calls": 18
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/blosc/blosc2.c\n+++ b/blosc/blosc2.c\n@@ -2070,6 +2070,7 @@\n     if (context->dict_ddict != NULL) {\n       // Free the existing dictionary (probably from another chunk)\n       ZSTD_freeDDict(context->dict_ddict);\n+      context->dict_ddict = NULL;\n     }\n     // The trained dictionary is after the bstarts block\n     if (srcsize < (signed)sizeof(int32_t)) {\n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [
+      {
+        "tool_name": "source_questions",
+        "args": [
+          "Inspect `initialize_context_decompression` in `c-blosc2/blosc/blosc2.c`, especially dictionary lifecycle around lines 2070-2093. What is the narrow root-cause fix for stale `context->dict_ddict` on malformed dictionary metadata, and are there related dictionary-pointer lifecycle issues in this file that should be addressed without broad unrelated edits?",
+          "The supplied ASan report shows a prior valid BLOSC2_USEDICT chunk creates context->dict_ddict, then a later malformed dictionary-bearing chunk frees it in initialize_context_decompression and returns during metadata validation before replacement, leaving the stale non-NULL pointer. blosc2_schunk_free later invokes blosc2_free_ctx and ZSTD_freeDDict a second time. I am considering setting context->dict_ddict = NULL immediately after ZSTD_freeDDict as the minimal ownership-state repair, while also checking whether failed ZSTD_createDDict needs explicit handling or whether any other path similarly frees without clearing."
+        ],
+        "kwargs": {},
+        "timestamp": 1636545.306418211,
+        "success": true,
+        "result_summary": "Ok(SourceQuestionsResult(answer='The ASan diagnosis matches the code. In `initialize_context_decompression()`, lines 2070\u20132073 free the old `context->dict_ddict` but leave its value non-NULL. Any retu..."
+      }
+    ],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "initialize_context_decompression",
+          "c-blosc2/blosc/blosc2.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1636485.926405183,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n2005 static int initialize_context_decompression(blosc2_context* context, blosc_header* header, const void* ..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "blosc2_free_ctx",
+          "c-blosc2/blosc/blosc2.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1636485.928091005,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n3569 void blosc2_free_ctx(blosc2_context* context) {, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "initialize_context_decompression",
+          "c-blosc2/blosc/blosc2.c",
+          2005,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1636490.402698279,
+        "success": true,
+        "result_summary": "Ok({'contents': '2005 static int initialize_context_decompression(blosc2_context* context, blosc_header* header, const void* src,\\n2006                                             int32_t srcsize, voi..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "blosc2_free_ctx",
+          "c-blosc2/blosc/blosc2.c",
+          3569,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1636490.403974354,
+        "success": true,
+        "result_summary": "Ok({'contents': '3569 void blosc2_free_ctx(blosc2_context* context) {\\n3570   release_threadpool(context);\\n3571   if (context->serial_context != NULL) {\\n3572     free_thread_context(context->serial_..."
+      }
+    ],
+    "read_source": [],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "dict_ddict",
+          "c-blosc2/blosc/blosc2.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1636485.995221446,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/blosc2.c', refs=[FileReference(line=509, content='    assert(context->dict_ddict != NULL);', enclosing_definition='zstd_wrap_decompress'), FileReference(li..."
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "c-blosc2/blosc/blosc2.c",
+          "@@ -2069,7 +2069,8 @@\n     context->use_dict = 1;\n     if (context->dict_ddict != NULL) {\n       // Free the existing dictionary (probably from another chunk)\n       ZSTD_freeDDict(context->dict_ddict);\n+      context->dict_ddict = NULL;\n     }\n     // The trained dictionary is after the bstarts block\n     if (srcsize < (signed)sizeof(int32_t)) {\n"
+        ],
+        "kwargs": {},
+        "timestamp": 1636548.468755754,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1636936.386656589,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

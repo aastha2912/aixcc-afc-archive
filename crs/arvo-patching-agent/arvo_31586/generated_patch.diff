@@ -1,0 +1,49 @@
+--- a/blosc/frame.c
++++ b/blosc/frame.c
+@@ -2015,20 +2015,37 @@
+     free(block_csizes);
+   } else {
+     // The chunk is in memory and just one pointer away
++    // Constrain reads by both the actual buffer size and the length declared in
++    // the frame header.  Use subtraction for the checks to avoid overflowing
++    // when processing untrusted offsets and sizes.
++    int64_t frame_bound = frame->len < frame_len ? frame->len : frame_len;
++    if (offset > frame_bound - header_len) {
++      BLOSC_TRACE_ERROR("Cannot read the header for chunk in the (contiguous) frame.");
++      rc = BLOSC2_ERROR_READ_BUFFER;
++      goto end;
++    }
++
+     int64_t chunk_header_offset = header_len + offset;
+-    int64_t chunk_cbytes_offset = chunk_header_offset + BLOSC_MIN_HEADER_LENGTH;
++    if (chunk_header_offset > frame_bound ||
++        BLOSC_MIN_HEADER_LENGTH > frame_bound - chunk_header_offset) {
++      BLOSC_TRACE_ERROR("Cannot read the header for chunk in the (contiguous) frame.");
++      rc = BLOSC2_ERROR_READ_BUFFER;
++      goto end;
++    }
+ 
+     *chunk = frame->cframe + chunk_header_offset;
++    rc = blosc2_cbuffer_sizes(*chunk, NULL, &lazychunk_cbytes, NULL);
++    if (rc < 0) {
++      goto end;
++    }
+ 
+-    if (chunk_cbytes_offset > frame->len) {
+-      BLOSC_TRACE_ERROR("Cannot read the header for chunk in the (contiguous) frame.");
++    // lazychunk_cbytes is the size of the complete chunk, including its
++    // header, so measure it from chunk_header_offset.
++    if (lazychunk_cbytes < BLOSC_MIN_HEADER_LENGTH ||
++        lazychunk_cbytes > frame_bound - chunk_header_offset) {
++      BLOSC_TRACE_ERROR("Compressed bytes exceed beyond frame length.");
+       rc = BLOSC2_ERROR_READ_BUFFER;
+-    } else {
+-      rc = blosc2_cbuffer_sizes(*chunk, NULL, &lazychunk_cbytes, NULL);
+-      if (rc && chunk_cbytes_offset + lazychunk_cbytes > frame_len) {
+-        BLOSC_TRACE_ERROR("Compressed bytes exceed beyond frame length.");
+-        rc = BLOSC2_ERROR_READ_BUFFER;
+-      }
++      goto end;
+     }
+   }
+ 

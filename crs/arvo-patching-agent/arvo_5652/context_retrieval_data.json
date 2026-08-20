@@ -1,0 +1,807 @@
+{
+  "source_questions": [
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "In open62541/src/server/ua_services_session.c Service_ActivateSession and open62541/src/server/ua_session.c UA_Session_attachToSecureChannel, what is the safest minimal root-cause fix for repeated activation on the same channel? Should Service_ActivateSession skip attach when session->header.channel == channel, or should UA_Session_attachToSecureChannel itself be made idempotent (and perhaps handle migration)? Identify expected invariants and all callers.",
+        "The supplied ASan report demonstrates that a second successful ActivateSession for the same UA_Session on the same UA_SecureChannel calls UA_Session_attachToSecureChannel twice. The intrusive UA_SessionHeader list entry is inserted twice, corrupting the channel sessions list. Session removal detaches once, delayed destruction frees the session, and later UA_SecureChannel_deleteMembersCleanup traverses the stale list entry and causes a heap-use-after-free. I have observed Service_ActivateSession lines 267-275 only detach when the existing channel differs and then unconditionally attach. A reference search found the attach function is only called from Service_ActivateSession, but I want to preserve valid reactivation and channel transfer semantics and choose the strongest invariant-enforcing location."
+      ],
+      "kwargs": {},
+      "timestamp": 1631939.197223728,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='The safest root-cause fix is to enforce the invariant in `UA_Session_attachToSecureChannel`, not only in `Service_ActivateSession`.\\n\\nRecommended implementation:\\n\\n`..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Why might the supplied PoV still produce the identical UA_SecureChannel_deleteMembersCleanup UAF after adding `if(session->header.channel == channel) return;` at the start of UA_Session_attachToSecureChannel in open62541/src/server/ua_session.c? Analyze the exact repeated CreateSession/ActivateSession/CLO traffic and lifecycle, including whether a session's `header.channel` can disagree with intrusive-list membership, whether a different session/token is involved, or whether cleanup/removal logic leaves stale entries. Suggest a robust minimal patch in open62541 C/C++ source.",
+        "The supplied vulnerability says repeated successful ActivateSession on the same channel inserts one intrusive node twice. I patched UA_Session_attachToSecureChannel at lines 83-86 to no-op if `session->header.channel == channel`, preserving the service's lifetime/activation behavior. test_patch nevertheless reports the same dedup stack in UA_SecureChannel_deleteMembersCleanup after removeSessionCallback frees the session. Service_ActivateSession only calls attach after detaching if an existing channel differs. processMSG first searches channel->sessions then the global manager, and fuzz mode replaces request tokens. Need determine if list lookup on an already self-linked list, channel close ordering, or semantics of repeated CreateSession mean the guard isn't sufficient or isn't reached as expected."
+      ],
+      "kwargs": {},
+      "timestamp": 1632115.780489035,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='The guard should prevent the originally described same-session/same-channel double insertion on a clean run. In this tree there is only one insertion site: `UA_Session..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Trace every way in this exact open62541 tree that UA_SessionManager_removeSession/removeSession can be invoked for an attached session, and every delayed callback/channel-close ordering that could cause the same session to be freed before UA_SecureChannel_deleteMembersCleanup. Look especially for duplicate removeSession scheduling, malformed list behavior, CloseSession handling, SecureChannel close, and shutdown ordering. Identify another root cause compatible with a UAF remaining even after both Service_ActivateSession skips attach when `session->header.channel == channel` and UA_Session_attachToSecureChannel itself has the same idempotence guard.",
+        "I implemented two prevention layers in open62541: ua_session.c's attach helper returns immediately if already attached to the passed channel, and ua_services_session.c now calls attach only in a `session->header.channel != channel` branch while preserving activation and lifetime refresh. Yet test_patch twice reports the supplied PoV still crashes with the exact dedup UA_SecureChannel_deleteMembersCleanup -> manager cleanup -> server delete, with the session freed by removeSessionCallback during shutdown. The PoV includes HEL/OPN, Create/Activate, then additional Create/Activate-looking traffic and CLO. We need identify why a stale channel list pointer survives one detach despite duplicate insertion now prevented, or whether another insertion/build source exists."
+      ],
+      "kwargs": {},
+      "timestamp": 1632308.793447742,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='There is only one channel-list insertion path in this tree, and no second hidden builder:\\n\\n- `UA_SessionManager_createSession` only inserts the new `session_list_ent..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Design a concrete safe recovery implementation for UA_Session_detachFromSecureChannel in open62541/src/server/ua_session.c that removes a session header from channel->sessions even when duplicate intrusive insertion corrupted pointers, including lists containing multiple different sessions. Also inspect whether the supplied duplicate insertion necessarily gives LIST_NEXT(session)==session under this project's deps/queue.h macros. Could session->header.channel already be NULL when removeSession runs while the stale list remains? Explain exact pointer assignments and propose compilable code.",
+        "Both attach guards did not satisfy test_patch. I added a detach recovery checking LIST_NEXT(header)==header, setting channel list empty if it is the first element, and clearing entry links. The same ASan dedup remains. This suggests either the malformed shape differs, channel backpointer is unexpectedly NULL, or test compilation behavior is surprising. Need a robust structural solution rather than one self-loop check, preserving unrelated sessions and avoiding dereference of already freed memory. Only C/C++ under open62541 can be changed."
+      ],
+      "kwargs": {},
+      "timestamp": 1632484.307788729,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer=\"`LIST_NEXT(session) == session` is **not guaranteed** by this `queue.h`. The exact `LIST_INSERT_HEAD` expansion (`deps/queue.h:226-230`) is:\\n\\n```c\\nelm->le_next = he..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Evaluate three alternate fixes for the repeated ActivateSession intrusive-list corruption in open62541/src/server/ua_services_session.c: (1) on every successful activation, detach whenever session->header.channel is non-NULL (including the same channel), then unconditionally attach; (2) skip attach for same-channel activation; (3) replace intrusive membership with a separate allocated channel-list record or add explicit membership state. Which is most compatible with this old open62541 code and likely root-cause fix? Analyze whether detach-then-reattach on the same channel is safe and preserves ordering/semantics.",
+        "The supplied vulnerability explicitly identifies Service_ActivateSession's condition `session->header.channel && session->header.channel != channel` as the defect because attach is unconditional. I tried making attach idempotent, also skipping attach in the service, and defensive cycle repair in detach, but the test system continues reporting the original UAF. I now suspect the intended and most direct correction is to change Service_ActivateSession so any existing attachment is detached before the existing unconditional attach. This guarantees the intrusive entry is removed and reinserted exactly once for both same-channel reactivation and migration, without changing successful activation, access-control callback, lifetime refresh, or logging."
+      ],
+      "kwargs": {},
+      "timestamp": 1632614.437075569,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='**Fix (1) is the most compatible root-cause fix for this old code:** on every successful activation, detach if `session->header.channel` is non-NULL, then perform the ..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Consider three alternate architectural fixes for the UAF in open62541/src/ua_securechannel.c cleanup: (1) make UA_SecureChannel_deleteMembersCleanup simply LIST_INIT channel->sessions without dereferencing entries; (2) in UA_SecureChannelManager_deleteMembers, scan the authoritative UA_SessionManager list and clear/detach sessions bound to each channel before freeing channels, then clear channel list without traversal; (3) redesign channel->sessions as separately allocated non-intrusive membership records. Which is safest and what exact structs/function signatures permit implementation? Account for normal runtime channel closure and later session reactivation, not just server shutdown.",
+        "Multiple direct activation and detach fixes continue to trigger the same test dedup, so I need an alternate ownership solution that prevents channel cleanup from ever dereferencing potentially freed intrusive entries. A bare LIST_INIT avoids the ASan read but can leave live sessions' header.channel dangling after normal channel closure. The session manager is authoritative for live sessions, so scanning it by channel identity before channel destruction could clear backpointers without following the corrupted channel list. Need determine whether UA_SecureChannelManager has access to UA_Server/sessionManager and whether removeSecureChannelCallback can perform the same authoritative scan."
+      ],
+      "kwargs": {},
+      "timestamp": 1632883.77414461,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer=\"**Best concrete fix for this tree is (2): use the session manager as the authority, detach by channel identity, and make channel cleanup abandon the intrusive list wit..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Could this open62541 repository build fuzz_binary_message from an amalgamated source copy rather than open62541/src/*.c? Locate all amalgamation/generated copies of Service_ActivateSession and UA_SecureChannel_deleteMembersCleanup and determine CMake source selection for tests/fuzz/fuzz_binary_message.cc. The repeated validator dedup appears unaffected even after removing the dangerous traversal from src/ua_securechannel.c.",
+        "I replaced UA_SecureChannel_deleteMembersCleanup's traversal of channel->sessions with LIST_INIT, and added session-manager authoritative detachment before cleanup in ua_securechannel_manager.c. Yet test_patch reports exactly the old dedup. Earlier activation changes likewise seemed ineffective. This strongly suggests the fuzz target may compile an amalgamated open62541.c or another source copy. Need exact paths, build options, and which editable source should receive the patch."
+      ],
+      "kwargs": {},
+      "timestamp": 1633013.468661013,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer=\"Yes\u2014`fuzz_binary_message` **can** be built from a generated amalgamated `open62541.c`, depending on the cached CMake option `UA_ENABLE_AMALGAMATION`.\\n\\n### Copies of ..."
+    }
+  ],
+  "read_definition": [
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_Session_detachFromSecureChannel",
+        "open62541/src/ua_session.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631878.868981865,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: open62541/src/server/ua_session.c, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_Session_attachToSecureChannel",
+        "open62541/src/ua_session.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631878.869565124,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: open62541/src/server/ua_session.c, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "Service_ActivateSession",
+        "open62541/src/server/ua_services_session.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631878.869961692,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n242 Service_ActivateSession(UA_Server *server, UA_SecureChannel *channel,, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "Service_ActivateSession",
+        "open62541/src/server/ua_services_session.c",
+        242,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631882.597950818,
+      "success": true,
+      "result_summary": "Ok({'contents': '241 void\\n242 Service_ActivateSession(UA_Server *server, UA_SecureChannel *channel,\\n243                         UA_Session *session, const UA_ActivateSessionRequest *request,\\n244   ..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_Session_detachFromSecureChannel",
+        "open62541/src/server/ua_session.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631882.598461589,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n88 void UA_Session_detachFromSecureChannel(UA_Session *session) {, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_Session_attachToSecureChannel",
+        "open62541/src/server/ua_session.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631882.598863234,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n83 void UA_Session_attachToSecureChannel(UA_Session *session, UA_SecureChannel *channel) {, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_Session_detachFromSecureChannel",
+        "open62541/src/server/ua_session.c",
+        88,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631888.8823453,
+      "success": true,
+      "result_summary": "Ok({'contents': '88 void UA_Session_detachFromSecureChannel(UA_Session *session) {\\n89     if(!session->header.channel)\\n90         return;\\n91     session->header.channel = NULL;\\n92     LIST_REMOVE(..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_Session_attachToSecureChannel",
+        "open62541/src/server/ua_session.c",
+        83,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631888.883342369,
+      "success": true,
+      "result_summary": "Ok({'contents': '83 void UA_Session_attachToSecureChannel(UA_Session *session, UA_SecureChannel *channel) {\\n84     LIST_INSERT_HEAD(&channel->sessions, &session->header, pointers);\\n85     session->h..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_SecureChannel_deleteMembersCleanup",
+        "open62541/src/ua_securechannel.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631986.630309542,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n83 UA_SecureChannel_deleteMembersCleanup(UA_SecureChannel *channel) {, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_SecureChannel_getSession",
+        "open62541/src/ua_securechannel.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631986.631634938,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n182 UA_SecureChannel_getSession(UA_SecureChannel *channel,, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_SecureChannel_getSession",
+        "open62541/src/ua_securechannel.c",
+        182,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1632003.920095146,
+      "success": true,
+      "result_summary": "Ok({'contents': '181 UA_SessionHeader *\\n182 UA_SecureChannel_getSession(UA_SecureChannel *channel,\\n183                             const UA_NodeId *authenticationToken) {\\n184     struct UA_SessionH..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_SecureChannel_deleteMembersCleanup",
+        "open62541/src/ua_securechannel.c",
+        83,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1632003.921315361,
+      "success": true,
+      "result_summary": "Ok({'contents': ' 82 void\\n 83 UA_SecureChannel_deleteMembersCleanup(UA_SecureChannel *channel) {\\n 84     /* Delete members */\\n 85     UA_ByteString_deleteMembers(&channel->remoteCertificate);\\n 86 ..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "processDelayedCallbacks",
+        "open62541/src/server/ua_server_worker.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1632397.210195699,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n192 processDelayedCallbacks(UA_Server *server) {, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_Server_run_shutdown",
+        "open62541/src/server/ua_server_worker.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1632397.211215397,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n387 UA_Server_run_shutdown(UA_Server *server) {, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_Server_delete",
+        "open62541/src/server/ua_server.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1632397.211909317,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n102 void UA_Server_delete(UA_Server *server) {, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_Server_delete",
+        "open62541/src/server/ua_server.c",
+        102,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1632488.965022444,
+      "success": true,
+      "result_summary": "Ok({'contents': '102 void UA_Server_delete(UA_Server *server) {\\n103     /* Delete all internal data */\\n104     UA_SecureChannelManager_deleteMembers(&server->secureChannelManager);\\n105     UA_Sessi..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "processDelayedCallbacks",
+        "open62541/src/server/ua_server_worker.c",
+        192,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1632488.965949606,
+      "success": true,
+      "result_summary": "Ok({'contents': '191 static void\\n192 processDelayedCallbacks(UA_Server *server) {\\n193     UA_DelayedCallback *dc, *dc_tmp;\\n194     SLIST_FOREACH_SAFE(dc, &server->delayedCallbacks, next, dc_tmp) {\\..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "removeSecureChannel",
+        "open62541/src/server/ua_securechannel_manager.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1632488.966218444,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n49 removeSecureChannel(UA_SecureChannelManager *cm, channel_list_entry *entry) {, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_Server_run_shutdown",
+        "open62541/src/server/ua_server_worker.c",
+        387,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1632488.967448194,
+      "success": true,
+      "result_summary": "Ok({'contents': '386 UA_StatusCode\\n387 UA_Server_run_shutdown(UA_Server *server) {\\n388     /* Stop the netowrk layer */\\n389     for(size_t i = 0; i < server->config.networkLayersSize; ++i) {\\n390  ..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_SecureChannelManager_deleteMembers",
+        "open62541/src/server/ua_securechannel_manager.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1632761.567823685,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n32 void UA_SecureChannelManager_deleteMembers(UA_SecureChannelManager* cm) {, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "UA_SecureChannelManager_deleteMembers",
+        "open62541/src/server/ua_securechannel_manager.c",
+        32,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1632767.718709319,
+      "success": true,
+      "result_summary": "Ok({'contents': '32 void UA_SecureChannelManager_deleteMembers(UA_SecureChannelManager* cm) {\\n33     channel_list_entry *entry, *temp;\\n34     LIST_FOREACH_SAFE(entry, &cm->channels, pointers, temp) ..."
+    }
+  ],
+  "read_source": [
+    {
+      "tool_name": "read_source",
+      "args": [
+        "open62541/src/server/ua_session.h",
+        55
+      ],
+      "kwargs": {},
+      "timestamp": 1631882.595095912,
+      "success": true,
+      "result_summary": "Ok({'contents': '  1 /* This Source Code Form is subject to the terms of the Mozilla Public\\n  2  * License, v. 2.0. If a copy of the MPL was not distributed with this\\n  3  * file, You can obtain one..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "open62541/src/server/ua_session_manager.c",
+        20
+      ],
+      "kwargs": {},
+      "timestamp": 1631993.655407116,
+      "success": true,
+      "result_summary": "Ok({'contents': '  1 /* This Source Code Form is subject to the terms of the Mozilla Public\\n  2  * License, v. 2.0. If a copy of the MPL was not distributed with this\\n  3  * file, You can obtain one..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "open62541/src/server/ua_server_binary.c",
+        430
+      ],
+      "kwargs": {},
+      "timestamp": 1631993.656546108,
+      "success": true,
+      "result_summary": "Ok({'contents': '331 }\\n332 \\n333 /* OPN -> Open up/renew the securechannel */\\n334 static UA_StatusCode\\n335 processOPN(UA_Server *server, UA_SecureChannel *channel,\\n336            const UA_UInt32 r..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "open62541/src/server/ua_session.c",
+        40
+      ],
+      "kwargs": {},
+      "timestamp": 1632166.550502335,
+      "success": true,
+      "result_summary": "Ok({'contents': '  1 /* This Source Code Form is subject to the terms of the Mozilla Public\\n  2  * License, v. 2.0. If a copy of the MPL was not distributed with this\\n  3  * file, You can obtain one..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "open62541/deps/queue.h",
+        200
+      ],
+      "kwargs": {},
+      "timestamp": 1632404.512553509,
+      "success": true,
+      "result_summary": "Ok({'contents': '101 \\n102 /* Fix redefinition of SLIST_ENTRY on mingw winnt.h */\\n103 # ifdef SLIST_ENTRY\\n104 #  undef SLIST_ENTRY\\n105 # endif\\n106 \\n107 #define SLIST_ENTRY(type)\\t\\t\\t\\t\\t\\t\\\\\\n10..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "open62541/src/server/ua_securechannel_manager.c",
+        1
+      ],
+      "kwargs": {},
+      "timestamp": 1632815.252087037,
+      "success": true,
+      "result_summary": "Ok({'contents': '  1 /* This Source Code Form is subject to the terms of the Mozilla Public\\n  2  * License, v. 2.0. If a copy of the MPL was not distributed with this\\n  3  * file, You can obtain one..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "open62541/src/server/ua_securechannel_manager.h",
+        1
+      ],
+      "kwargs": {},
+      "timestamp": 1632815.252799323,
+      "success": true,
+      "result_summary": "Ok({'contents': ' 1 /* This Source Code Form is subject to the terms of the Mozilla Public\\n 2  * License, v. 2.0. If a copy of the MPL was not distributed with this\\n 3  * file, You can obtain one at..."
+    }
+  ],
+  "find_references": [
+    {
+      "tool_name": "find_references",
+      "args": [
+        "UA_Session_attachToSecureChannel",
+        "",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1631878.971877692,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='open62541/src/server/ua_services_session.c', refs=[FileReference(line=275, content='    UA_Session_attachToSecureChannel(session, channel);', enclosing_definition='Servic..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "header.channel",
+        "open62541/src/server/ua_services_session.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1631891.807534443,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/open62541/src/server/ua_services_session.c', refs=[FileReference(line=268, content='    if(session->header.channel && session->header.channel != channel) {', enclosi..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "UA_SessionHeader",
+        "",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1632004.083915453,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='open62541/src/ua_securechannel.h', refs=[FileReference(line=40, content='struct UA_SessionHeader;', enclosing_definition='UA_SECURE_MESSAGE_HEADER_LENGTH'), FileReference..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "Service_ActivateSession",
+        "",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1632163.782812132,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='open62541/src/server/ua_services.h', refs=[FileReference(line=159, content='void Service_ActivateSession(UA_Server *server, UA_SecureChannel *channel,', enclosing_definit..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "LIST_INSERT_HEAD(&channel->sessions",
+        "",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1632166.159370162,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/open62541/src/server/ua_session.c', refs=[FileReference(line=84, content='    LIST_INSERT_HEAD(&channel->sessions, &session->header, pointers);', enclosing_definitio..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "void UA_Session_attachToSecureChannel",
+        "",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1632166.167011974,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/open62541/src/server/ua_session.h', refs=[FileReference(line=76, content='void UA_Session_attachToSecureChannel(UA_Session *session, UA_SecureChannel *channel);', en..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "Service_ActivateSession(UA_Server",
+        "",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1632959.169768963,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/open62541/src/server/ua_services_session.c', refs=[FileReference(line=242, content='Service_ActivateSession(UA_Server *server, UA_SecureChannel *channel,', enclosing..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "LIST_FOREACH_SAFE(sh, &channel->sessions",
+        "",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1632959.174380455,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/open62541/src/ua_securechannel.c', refs=[FileReference(line=105, content='    LIST_FOREACH_SAFE(sh, &channel->sessions, pointers, temp) {', enclosing_definition='N/A..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "UA_SecureChannel_deleteMembersCleanup(UA_SecureChannel",
+        "",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1632959.181312917,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/open62541/src/ua_securechannel.c', refs=[FileReference(line=83, content='UA_SecureChannel_deleteMembersCleanup(UA_SecureChannel *channel) {', enclosing_definition='N..."
+    }
+  ],
+  "apply_patch": [
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "open62541/src/server/ua_session.c",
+        "@@ -80,7 +80,13 @@\n }\n \n void UA_Session_attachToSecureChannel(UA_Session *session, UA_SecureChannel *channel) {\n+    /* A session header is an intrusive list entry and must not be inserted\n+     * into the same channel list more than once. Re-activating an already\n+     * attached session on its channel is valid and does not change the list. */\n+    if(session->header.channel == channel)\n+        return;\n+\n     LIST_INSERT_HEAD(&channel->sessions, &session->header, pointers);\n     session->header.channel = channel;\n }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1631949.510910085,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "open62541/src/server/ua_services_session.c",
+        "@@ -264,15 +264,16 @@\n     if(response->responseHeader.serviceResult != UA_STATUSCODE_GOOD)\n         return;\n \n-    /* Detach the old SecureChannel */\n-    if(session->header.channel && session->header.channel != channel) {\n-        UA_LOG_INFO_SESSION(server->config.logger, session,\n-                            \"ActivateSession: Detach from old channel\");\n-        UA_Session_detachFromSecureChannel(session);\n+    /* Attach to the SecureChannel. Re-activation on the currently attached\n+     * channel must not insert the intrusive session header a second time. */\n+    if(session->header.channel != channel) {\n+        if(session->header.channel) {\n+            UA_LOG_INFO_SESSION(server->config.logger, session,\n+                                \"ActivateSession: Detach from old channel\");\n+            UA_Session_detachFromSecureChannel(session);\n+        }\n+        UA_Session_attachToSecureChannel(session, channel);\n     }\n \n-    /* Attach to the SecureChannel and activate */\n-    UA_Session_attachToSecureChannel(session, channel);\n+    /* Activate the session */\n     session->activated = true;\n     UA_Session_updateLifetime(session);\n     UA_LOG_INFO_SESSION(server->config.logger, session,\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1632127.27817791,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "open62541/src/server/ua_session.c",
+        "@@ -92,10 +92,24 @@\n }\n \n void UA_Session_detachFromSecureChannel(UA_Session *session) {\n-    if(!session->header.channel)\n+    UA_SecureChannel *channel = session->header.channel;\n+    if(!channel)\n         return;\n+\n     session->header.channel = NULL;\n+\n+    /* Inserting an intrusive entry twice makes its next pointer refer to\n+     * itself. Recover from such a malformed entry here so that removing the\n+     * session cannot leave the channel head pointing at memory that is about\n+     * to be freed. New duplicate insertions are prevented by attach above. */\n+    if(LIST_NEXT(&session->header, pointers) == &session->header) {\n+        if(LIST_FIRST(&channel->sessions) == &session->header)\n+            LIST_INIT(&channel->sessions);\n+        session->header.pointers.le_next = NULL;\n+        session->header.pointers.le_prev = NULL;\n+        return;\n+    }\n+\n     LIST_REMOVE(&session->header, pointers);\n+    session->header.pointers.le_next = NULL;\n+    session->header.pointers.le_prev = NULL;\n }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1632322.753944793,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "open62541/src/server/ua_session.c",
+        "@@ -92,26 +92,47 @@\n }\n \n void UA_Session_detachFromSecureChannel(UA_Session *session) {\n+    UA_SessionHeader *target = &session->header;\n     UA_SecureChannel *channel = session->header.channel;\n     if(!channel)\n         return;\n \n-    session->header.channel = NULL;\n-\n-    /* Inserting an intrusive entry twice makes its next pointer refer to\n-     * itself. Recover from such a malformed entry here so that removing the\n-     * session cannot leave the channel head pointing at memory that is about\n-     * to be freed. New duplicate insertions are prevented by attach above. */\n-    if(LIST_NEXT(&session->header, pointers) == &session->header) {\n-        if(LIST_FIRST(&channel->sessions) == &session->header)\n-            LIST_INIT(&channel->sessions);\n-        session->header.pointers.le_next = NULL;\n-        session->header.pointers.le_prev = NULL;\n-        return;\n+    /* Remove via the list head instead of trusting le_prev. A historical\n+     * duplicate insertion can form a cycle target -> ... -> target. Cut that\n+     * cycle as well, otherwise one occurrence remains after the session is\n+     * freed. */\n+    UA_SessionHeader **link = &channel->sessions.lh_first;\n+    UA_SessionHeader *current = *link;\n+    while(current && current != target) {\n+        current->pointers.le_prev = link;\n+        link = &current->pointers.le_next;\n+        current = *link;\n     }\n \n-    LIST_REMOVE(&session->header, pointers);\n-    session->header.pointers.le_next = NULL;\n-    session->header.pointers.le_prev = NULL;\n+    if(current == target) {\n+        UA_SessionHeader *next = target->pointers.le_next;\n+        if(next == target) {\n+            *link = NULL;\n+        } else {\n+            *link = next;\n+            if(next)\n+                next->pointers.le_prev = link;\n+\n+            /* A second occurrence is represented by a back-edge to target.\n+             * Retain the unrelated entries between the two occurrences. */\n+            UA_SessionHeader **scanLink = link;\n+            UA_SessionHeader *scan = next;\n+            while(scan && scan != target) {\n+                scan->pointers.le_prev = scanLink;\n+                scanLink = &scan->pointers.le_next;\n+                scan = *scanLink;\n+            }\n+            if(scan == target)\n+                *scanLink = NULL;\n+        }\n+    }\n+\n+    target->pointers.le_next = NULL;\n+    target->pointers.le_prev = NULL;\n+    target->channel = NULL;\n }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1632507.302372953,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 4 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "open62541/src/server/ua_services_session.c",
+        "@@ -264,12 +264,12 @@\n     if(response->responseHeader.serviceResult != UA_STATUSCODE_GOOD)\n         return;\n \n-    /* Detach the old SecureChannel */\n-    if(session->header.channel && session->header.channel != channel) {\n-        UA_LOG_INFO_SESSION(server->config.logger, session,\n-                            \"ActivateSession: Detach from old channel\");\n+    /* Detach before attaching below. This also applies when re-activating on\n+     * the same SecureChannel, since the session header is an intrusive list\n+     * entry and must not be inserted into the channel list twice. */\n+    if(session->header.channel) {\n+        if(session->header.channel != channel)\n+            UA_LOG_INFO_SESSION(server->config.logger, session,\n+                                \"ActivateSession: Detach from old channel\");\n         UA_Session_detachFromSecureChannel(session);\n     }\n \n"
+      ],
+      "kwargs": {},
+      "timestamp": 1632635.059144678,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "open62541/src/server/ua_session.c",
+        "@@ -80,12 +80,19 @@\n }\n \n void UA_Session_attachToSecureChannel(UA_Session *session, UA_SecureChannel *channel) {\n+    /* Keep this low-level operation safe for all callers. An intrusive list\n+     * entry can only belong to one list once. */\n+    if(session->header.channel)\n+        UA_Session_detachFromSecureChannel(session);\n     LIST_INSERT_HEAD(&channel->sessions, &session->header, pointers);\n     session->header.channel = channel;\n }\n \n void UA_Session_detachFromSecureChannel(UA_Session *session) {\n     if(!session->header.channel)\n         return;\n-    session->header.channel = NULL;\n     LIST_REMOVE(&session->header, pointers);\n+    session->header.pointers.le_next = NULL;\n+    session->header.pointers.le_prev = NULL;\n+    session->header.channel = NULL;\n }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1632684.963670005,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "open62541/src/server/ua_server_worker.c",
+        "@@ -391,6 +391,12 @@\n         nl->stop(nl, server);\n     }\n \n+    /* Detach sessions from all remaining channels before delayed callbacks\n+     * are allowed to destroy session storage. UA_Server_delete can safely\n+     * invoke this a second time because the manager list is then empty. */\n+    UA_SecureChannelManager_deleteMembers(&server->secureChannelManager);\n+\n #ifndef UA_ENABLE_MULTITHREADING\n     /* Process remaining delayed callbacks */\n     processDelayedCallbacks(server);\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1632732.278618326,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "open62541/src/server/ua_session.c",
+        "@@ -92,10 +92,25 @@\n }\n \n void UA_Session_detachFromSecureChannel(UA_Session *session) {\n-    if(!session->header.channel)\n+    UA_SecureChannel *channel = session->header.channel;\n+    if(!channel)\n         return;\n-    LIST_REMOVE(&session->header, pointers);\n+\n+    /* Unlink through the owning list head instead of trusting the entry's\n+     * links. This also cuts the cycle left by older duplicate insertions. */\n+    UA_SessionHeader **link = &channel->sessions.lh_first;\n+    while(*link && *link != &session->header)\n+        link = &(*link)->pointers.le_next;\n+    if(*link == &session->header) {\n+        UA_SessionHeader *next = session->header.pointers.le_next;\n+        *link = (next == &session->header) ? NULL : next;\n+        UA_SessionHeader **scan = link;\n+        while(*scan && *scan != &session->header)\n+            scan = &(*scan)->pointers.le_next;\n+        if(*scan == &session->header)\n+            *scan = NULL;\n+        if(*link)\n+            (*link)->pointers.le_prev = link;\n+    }\n     session->header.pointers.le_next = NULL;\n     session->header.pointers.le_prev = NULL;\n     session->header.channel = NULL;\n }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1632772.525993592,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 4 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "open62541/src/ua_securechannel.c",
+        "@@ -99,13 +99,10 @@\n         UA_Connection_detachSecureChannel(channel->connection);\n     }\n \n-    /* Remove session pointers (not the sessions) and NULL the pointers back to\n-     * the SecureChannel in the Session */\n-    UA_SessionHeader *sh, *temp;\n-    LIST_FOREACH_SAFE(sh, &channel->sessions, pointers, temp) {\n-        sh->channel = NULL;\n-        LIST_REMOVE(sh, pointers);\n-    }\n+    /* Session back-pointers are cleared by the server-side channel manager,\n+     * using its authoritative live-session list. Do not dereference this\n+     * non-owning intrusive list during destruction: a session may already\n+     * have been released by a delayed callback. */\n+    LIST_INIT(&channel->sessions);\n \n     /* Remove the buffered chunks */\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1632899.208985297,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "open62541/src/server/ua_securechannel_manager.c",
+        "@@ -29,10 +29,26 @@\n     return UA_STATUSCODE_GOOD;\n }\n \n+/* The session manager owns the live sessions and is therefore the safe source\n+ * for clearing channel back-pointers. The channel-side intrusive list can be\n+ * malformed and may contain storage already queued for destruction. */\n+static void\n+detachSessionsByChannel(UA_Server *server, UA_SecureChannel *channel) {\n+    session_list_entry *sentry;\n+    LIST_FOREACH(sentry, &server->sessionManager.sessions, pointers) {\n+        UA_SessionHeader *header = &sentry->session.header;\n+        if(header->channel != channel)\n+            continue;\n+        header->channel = NULL;\n+        header->pointers.le_next = NULL;\n+        header->pointers.le_prev = NULL;\n+    }\n+    LIST_INIT(&channel->sessions);\n+}\n+\n void UA_SecureChannelManager_deleteMembers(UA_SecureChannelManager* cm) {\n     channel_list_entry *entry, *temp;\n     LIST_FOREACH_SAFE(entry, &cm->channels, pointers, temp) {\n         LIST_REMOVE(entry, pointers);\n+        detachSessionsByChannel(cm->server, &entry->channel);\n         UA_SecureChannel_deleteMembersCleanup(&entry->channel);\n         UA_free(entry);\n     }\n@@ -41,6 +57,7 @@\n static void\n removeSecureChannelCallback(UA_Server *server, void *entry) {\n     channel_list_entry *centry = (channel_list_entry*)entry;\n+    detachSessionsByChannel(server, &centry->channel);\n     UA_SecureChannel_deleteMembersCleanup(&centry->channel);\n     UA_free(entry);\n }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1632911.743841202,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    }
+  ],
+  "test_patch": [
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1631978.947115367,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_binary_message', 'dedup': 'UA_SecureChannel_deleteMembersCleanup--UA_SecureChannelMana..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632152.83504511,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_binary_message', 'dedup': 'UA_SecureChannel_deleteMembersCleanup--UA_SecureChannelMana..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632377.04995694,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_binary_message', 'dedup': 'UA_SecureChannel_deleteMembersCleanup--UA_SecureChannelMana..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632542.689479868,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_binary_message', 'dedup': 'UA_SecureChannel_deleteMembersCleanup--UA_SecureChannelMana..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632663.667885582,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_binary_message', 'dedup': 'UA_SecureChannel_deleteMembersCleanup--UA_SecureChannelMana..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632714.300205376,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_binary_message', 'dedup': 'UA_SecureChannel_deleteMembersCleanup--UA_SecureChannelMana..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632759.466207824,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_binary_message', 'dedup': 'UA_SecureChannel_deleteMembersCleanup--UA_SecureChannelMana..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632799.336440983,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_binary_message', 'dedup': 'UA_SecureChannel_deleteMembersCleanup--UA_SecureChannelMana..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632945.047930176,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_binary_message', 'dedup': 'UA_SecureChannel_deleteMembersCleanup--UA_SecureChannelMana..."
+    }
+  ],
+  "undo_last_patch": [
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632616.235602416,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 3})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632620.525742376,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 2})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632622.163210713,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 1})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632624.318729689,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 0})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632887.102912955,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 3})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632889.889927931,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 2})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1632891.921448262,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 1})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1633024.649184152,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 2})"
+    }
+  ],
+  "list_current_edits": [
+    {
+      "tool_name": "list_current_edits",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1631986.501734406,
+      "success": true,
+      "result_summary": "Ok({'edits': ['@@ -80,7 +80,13 @@\\n }\\n \\n void UA_Session_attachToSecureChannel(UA_Session *session, UA_SecureChannel *channel) {\\n+    /* A session header is an intrusive list entry and must not be ..."
+    }
+  ]
+}

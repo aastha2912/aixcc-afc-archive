@@ -1,0 +1,29 @@
+--- a/ffmpeg/libavcodec/bink.c
++++ b/ffmpeg/libavcodec/bink.c
+@@ -1037,6 +1037,12 @@
+     int width = c->avctx->width >> is_chroma;
+     int height = c->avctx->height >> is_chroma;
+ 
++    /* Scaled blocks are represented by 2x2 groups in the block map.  A map
++     * with an odd extent cannot represent the continuation slots at its right
++     * or bottom edge safely. */
++    if ((bw | bh) & 1)
++        return AVERROR_INVALIDDATA;
++
+     if (c->version == 'k' && get_bits1(gb)) {
+         int fill = get_bits(gb, 8);
+ 
+@@ -1087,6 +1093,13 @@
+                                          : frame->data[plane_idx]) + 8*by*stride;
+         for (bx = 0; bx < bw; bx++, dst += 8, prev += 8) {
+             blk = get_value(c, BINK_SRC_BLOCK_TYPES);
++
++            /* Every scaled-block marker belongs to a complete 2x2 group.
++             * Check this before handling continuation markers as well, so a
++             * truncated group at either plane edge is never accepted. */
++            if (blk == SCALED_BLOCK && (bx + 1 >= bw || by + 1 >= bh))
++                return AVERROR_INVALIDDATA;
++
+             // 16x16 block type on odd line means part of the already decoded block, so skip it
+             if (((by & 1) || (bx & 1)) && blk == SCALED_BLOCK) {
+                 bx++;

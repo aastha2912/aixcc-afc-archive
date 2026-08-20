@@ -1,0 +1,43 @@
+--- a/arrow/cpp/src/arrow/ipc/dictionary.cc
++++ b/arrow/cpp/src/arrow/ipc/dictionary.cc
+@@ -199,12 +199,39 @@
+   return Status::OK();
+ }
+ 
++namespace {
++
++// MakeArray assumes that dictionary data has already been resolved and the
++// DictionaryArray constructor enforces this with a fatal check.  Dictionary
++// batches, however, may temporarily contain unresolved nested dictionaries,
++// so inspect the ArrayData tree before boxing it.
++Status CheckDictionariesResolved(const std::shared_ptr<ArrayData>& data) {
++  if (data == nullptr || data->type == nullptr) {
++    return Status::Invalid("Dictionary delta contains null array data");
++  }
++  if (data->type->layout().has_dictionary && data->dictionary == nullptr) {
++    return Status::Invalid("Dictionary delta contains an unresolved dictionary of type ",
++                           data->type->ToString());
++  }
++  for (const auto& child : data->child_data) {
++    RETURN_NOT_OK(CheckDictionariesResolved(child));
++  }
++  if (data->dictionary != nullptr) {
++    RETURN_NOT_OK(CheckDictionariesResolved(data->dictionary));
++  }
++  return Status::OK();
++}
++
++}  // namespace
++
+ Status DictionaryMemo::AddDictionaryDelta(int64_t id,
+                                           const std::shared_ptr<ArrayData>& dictionary,
+                                           MemoryPool* pool) {
+   ARROW_ASSIGN_OR_RAISE(auto original_dict, GetDictionary(id));
+ 
+-  // XXX This won't work if there is an unresolved nested dictionary.
++  RETURN_NOT_OK(CheckDictionariesResolved(original_dict));
++  RETURN_NOT_OK(CheckDictionariesResolved(dictionary));
++
+   // We could expose a ArrayData concatenation API, but then we wouldn't be able
+   // to validate below.
+   ArrayVector to_combine{MakeArray(original_dict), MakeArray(dictionary)};

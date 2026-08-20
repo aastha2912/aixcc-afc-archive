@@ -1,0 +1,61 @@
+--- a/src/internal.c
++++ b/src/internal.c
+@@ -10102,8 +10102,12 @@
+ 
+ #ifdef WOLFSSL_STATIC_MEMORY
+     /* can be from IO memory pool which does not need copy if same buffer */
+-    if (ssl->buffers.outputBuffer.length &&
+-            tmp == ssl->buffers.outputBuffer.buffer) {
++    if (tmp == ssl->buffers.outputBuffer.buffer) {
++        if (ssl->buffers.outputBuffer.length) {
++            XMEMMOVE(tmp, tmp + ssl->buffers.outputBuffer.idx,
++                     ssl->buffers.outputBuffer.length);
++        }
++        ssl->buffers.outputBuffer.idx = 0;
+         ssl->buffers.outputBuffer.bufferSize =
+             size + ssl->buffers.outputBuffer.length;
+         return 0;
+@@ -10111,8 +10115,9 @@
+ #endif
+ 
+     if (ssl->buffers.outputBuffer.length)
+-        XMEMCPY(tmp, ssl->buffers.outputBuffer.buffer,
+-               ssl->buffers.outputBuffer.length);
++        XMEMMOVE(tmp, ssl->buffers.outputBuffer.buffer +
++                      ssl->buffers.outputBuffer.idx,
++                 ssl->buffers.outputBuffer.length);
+ 
+     if (ssl->buffers.outputBuffer.dynamicFlag) {
+         XFREE(ssl->buffers.outputBuffer.buffer -
+@@ -10129,6 +10134,7 @@
+         ssl->buffers.outputBuffer.offset = 0;
+ 
+     ssl->buffers.outputBuffer.buffer = tmp;
++    ssl->buffers.outputBuffer.idx = 0;
+     ssl->buffers.outputBuffer.bufferSize = size +
+                                            ssl->buffers.outputBuffer.length;
+     return 0;
+@@ -10228,8 +10234,7 @@
+ 
+ #ifdef WOLFSSL_DTLS
+     if (ssl->options.dtls) {
+-        if (size + ssl->buffers.outputBuffer.length -
+-            ssl->buffers.outputBuffer.idx >
++        if (size + ssl->buffers.outputBuffer.length >
+ #if defined(WOLFSSL_SCTP) || defined(WOLFSSL_DTLS_MTU)
+                 ssl->dtlsMtuSz
+ #else
+@@ -10261,8 +10266,11 @@
+     }
+ #endif
+ 
+-    if (ssl->buffers.outputBuffer.bufferSize - ssl->buffers.outputBuffer.length
+-                                             < (word32)size) {
++    if (ssl->buffers.outputBuffer.idx != 0 ||
++            ssl->buffers.outputBuffer.length >
++                ssl->buffers.outputBuffer.bufferSize ||
++            ssl->buffers.outputBuffer.bufferSize -
++                ssl->buffers.outputBuffer.length < (word32)size) {
+         if (GrowOutputBuffer(ssl, size) < 0)
+             return MEMORY_E;
+     }

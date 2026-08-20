@@ -1,0 +1,1306 @@
+{
+  "vuln_id": 761,
+  "crash_result": {
+    "output": "==85935==ERROR: AddressSanitizer: heap-buffer-overflow on address 0xe8103bd0 at pc 0x08138eed bp 0xffc73998 sp 0xffc73578\nREAD of size 160 at 0xe8103bd0 thread T0\nSCARINESS: 26 (multi-byte-read-heap-buffer-overflow)\n    #0 0x8138eec in __interceptor_fwrite /src/llvm-project/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc:1157:16\n    #1 0x81e3b18 in memory_test /src/wolf-ssl-ssh-fuzzers/oss-fuzz/projects/wolf-ssl-ssh/fuzzers/include/fuzzers/shared.h:239:5\n    #2 0x81e3b",
+    "stack": "#0 0x8138eec in __interceptor_fwrite llvm-project/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc:1157:16\n#1 0x81e3b18 in memory_test wolf-ssl-ssh-fuzzers/oss-fuzz/projects/wolf-ssl-ssh/fuzzers/include/fuzzers/shared.h:239:5\n#2 0x81e3b18 in fuzzer_send wolf-ssl-ssh-fuzzers/oss-fuzz/projects/wolf-ssl-ssh/fuzzers/include/fuzzers/shared.h:257:13\n#3 0x85177f0 in SendBuffered wolf-ssl-ssh-fuzzers/oss-fuzz/projects/wolf-ssl-ssh/fuzzers/wolfssl/wolfssl/src/internal.c:10013:20",
+    "dedup": "__interceptor_fwrite--memory_test--fuzzer_send"
+  },
+  "pov_run_data": {
+    "task_uuid": "4c3d086f-84dd-58cb-9832-d524a9432b35",
+    "project_name": "wolfssl",
+    "harness": "fuzzer-wolfssl-client-randomize",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "__interceptor_fwrite--memory_test--fuzzer_send"
+  },
+  "decoded_pov": {
+    "project_name": "wolfssl",
+    "harness": "fuzzer-wolfssl-client-randomize",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff \\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff     \\xff\\xff\\x04\\x00\\x00\\x00\\x03   \\xff\\x04\\xff \\xff\\x00\\x00\\x00\\x01\\x05'\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "__interceptor_fwrite--memory_test--fuzzer_send"
+  },
+  "analyzed_vuln": {
+    "function": "GrowOutputBuffer",
+    "file": "wolfssl/src/internal.c",
+    "description": "GrowOutputBuffer mishandles an output buffer after a partial send. In this state, outputBuffer.idx is nonzero and outputBuffer.length is the number of unsent bytes. The function allocates only `size + length`, copies `length` bytes from `buffer` instead of `buffer + idx`, and leaves `idx` unchanged. The newly allocated buffer therefore does not validly contain `length` bytes starting at the retained offset. A later SendBuffered passes `buffer + idx` with `length` to the send callback, causing the callback's fwrite-based memory check to read past the heap allocation. The correct growth operation must compact the remaining bytes from `buffer + idx` and reset idx to zero (or otherwise allocate and maintain consistent offset/capacity accounting).",
+    "conditions": "The randomized send callback must first report a partial write, leaving outputBuffer.idx > 0 with unsent output. The PoV then drives DTLS 1.3 receive timeout/retransmission handling through wolfSSLReceive -> Dtls13RtxTimeout -> Dtls13RtxSendBuffered. CheckAvailableSize grows the partially consumed output buffer, invoking the faulty GrowOutputBuffer state transition. Subsequent malformed-input processing sends a fatal alert; SendAlert_ex appends it and calls SendBuffered, which requests 160 bytes from the stale nonzero offset and triggers the heap-buffer-overflow in fuzzer_send/memory_test. Allocation and I/O randomization bytes in the fuzz input are required to produce the successful growth and partial-send sequence."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 6,
+      "total_cost": 0.197937,
+      "total_input_tokens": 73809,
+      "total_output_tokens": 2424,
+      "total_cached_tokens": 54184,
+      "llm_calls": [
+        {
+          "timestamp": 1787225039.1457922,
+          "model": "gpt-5.6-sol",
+          "cost": 0.03648,
+          "input_tokens": 5238,
+          "output_tokens": 343,
+          "total_tokens": 5581,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_wDngm9RFWCytPR9fH9Cj9WHT"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_rNCtDa2iQUAq1XLxQprZU6Cz"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_6YEP8g6i0zmTyenR0Wkg7Ahj"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_cw4YxpPU0LKVYwHPvCGgynhg"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Z7TzuxAjv9SxL3yN435GgXeW"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225061.6451087,
+          "model": "gpt-5.6-sol",
+          "cost": 0.021042500000000002,
+          "input_tokens": 7450,
+          "output_tokens": 245,
+          "total_tokens": 7695,
+          "cached_tokens": 5235,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_y8cKYX1wa1kly7ue0lZebXIJ"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_8BVZ6B9eRIIsOACKY2cvKL7W"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_cuFtUwTE0BMOHSigPwIw1pXi"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ZJxnmVImqMog2kUJPaPYRLB6"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_YJZdnX7kQAWYhRDNliite2l3"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_ZIhQ7g4lrCD0sVu70BebSGHu"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225065.4909666,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0237635,
+          "input_tokens": 10225,
+          "output_tokens": 205,
+          "total_tokens": 10430,
+          "cached_tokens": 7447,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_D6aprcYj5NFyKh0biiyjcDnL"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_nrewGVn3YG4FJ86fml1FQH0Z"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ZDpLyYpb4zqU5y5KxWveqlQn"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_XZ8HHbAH1gABNhuc7eNJENcC"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_UzM6XKJPNcn5zI8cjX3G4mqp"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225074.1692421,
+          "model": "gpt-5.6-sol",
+          "cost": 0.041406000000000005,
+          "input_tokens": 15225,
+          "output_tokens": 376,
+          "total_tokens": 15601,
+          "cached_tokens": 10222,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "debug_pov",
+              "tool_call_id": "call_rKINbSjckH2SBX64vbE0wutR"
+            },
+            {
+              "tool_name": "debug_pov",
+              "tool_call_id": "call_nTBDHuRHOZYHKwU6aUOfu2PS"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Gx1LTSCTRcHBKUkaUj2EU36J"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_PBBZM9gWVCJFfyY171OLE4Qu"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_UyvAerhbqs7sH0jnFMrd6iQ7"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225088.1046734,
+          "model": "gpt-5.6-sol",
+          "cost": 0.017356,
+          "input_tokens": 16061,
+          "output_tokens": 185,
+          "total_tokens": 16246,
+          "cached_tokens": 15222,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_2s5GvfSSU4Kbhdmzn8q6QSnI"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_JuQO2icuTUUYaxK3JBpmhIOv"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_irZoe4LBOZM0tGTGnd88jDbC"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_eI9bmh1Sa99j0VY07SzziJVi"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_0tnZdxKqhJFFHuJZOJMLVG1X"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225107.6801572,
+          "model": "gpt-5.6-sol",
+          "cost": 0.057889,
+          "input_tokens": 19610,
+          "output_tokens": 1070,
+          "total_tokens": 20680,
+          "cached_tokens": 16058,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_vKjwM5oV74XeNO6sKT8sK2tk"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 25,
+      "total_cost": 0.8967025000000001,
+      "total_input_tokens": 387062,
+      "total_output_tokens": 9923,
+      "total_cached_tokens": 296955,
+      "llm_calls": [
+        {
+          "timestamp": 1787225118.2378106,
+          "model": "gpt-5.6-sol",
+          "cost": 0.031986,
+          "input_tokens": 6417,
+          "output_tokens": 366,
+          "total_tokens": 6783,
+          "cached_tokens": 2462,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_JsIeXdvnTlRy51KLZDc86hea"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_WR8L92S0Vp9VQhFwkQHmcUCB"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_H01K1TIJmCQYWbPP6jXXq8P1"
+            },
+            {
+              "tool_name": "source_questions",
+              "tool_call_id": "call_meXK9Ye4pPmAcnyeajFDprm3"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225121.7554922,
+          "model": "gpt-5.6-sol",
+          "cost": 0.015035,
+          "input_tokens": 1567,
+          "output_tokens": 240,
+          "total_tokens": 1807,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 7,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_lfmkyKaKhFuewAoPKjTs8GSn"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_KCxrozRErfwXpzTaVwailcIF"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Fda8E6agfZpxzWNuAQMoQ9kZ"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_09KbcksKoXI6xfay8bIh3pgr"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_E0EdulR15KeqkqAE4a5vT5dO"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_NzsLvvGnFd6mCjRvyyLnTj1O"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_lFtmaSmcKESUbvLF3oJXabez"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225130.9324236,
+          "model": "gpt-5.6-sol",
+          "cost": 0.035457,
+          "input_tokens": 6813,
+          "output_tokens": 281,
+          "total_tokens": 7094,
+          "cached_tokens": 1564,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 7,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_45kDDzO84G4bK7rveR2ZLmv8"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_oLw9sJRtxm2QxYEx2egoTnNw"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_STYRFIZzTbPsRP8aCNiHLY1E"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_RtJggLEtlXHrAjPtArn6NrGF"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_6vmQ8JpVjaTOp205IymZIoGf"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_mnhEGWNQZr9kIPZzBy8149JO"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_vxLML7PuSAeloc6mAfS38wxJ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225136.4698787,
+          "model": "gpt-5.6-sol",
+          "cost": 0.025785000000000002,
+          "input_tokens": 10020,
+          "output_tokens": 211,
+          "total_tokens": 10231,
+          "cached_tokens": 6810,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_TuygcXKpW5UYN43KMBA1NyBr"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_AMQnm0xh5D2Usic2TBSrLthB"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_4P1EEBiBOZgDUzFXlJLhXKvU"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_0rvHVL1UC2hDPXNJ0ampn2JX"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_tb8hAK5EAm15zLlZTnKDwNng"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_pZ5lmUQkcISRoqSAq43jacqg"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225178.7166588,
+          "model": "gpt-5.6-sol",
+          "cost": 0.046443500000000006,
+          "input_tokens": 16150,
+          "output_tokens": 359,
+          "total_tokens": 16509,
+          "cached_tokens": 10017,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Y9GlNt5po2NTqwmWOnfUEOeR"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_IFFCrN4RyKtOldmjbT4i4CyF"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_VQh2U2YqwXWNNwY1M0398nzG"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_SwKBHTvA86KIYClQSOpKSmMV"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_3zLBoh6XYEZV4BkhmxS1cV5u"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_3Vw3l8NY9t9habRDOCGH82Rl"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225197.5220487,
+          "model": "gpt-5.6-sol",
+          "cost": 0.08969350000000001,
+          "input_tokens": 26801,
+          "output_tokens": 945,
+          "total_tokens": 27746,
+          "cached_tokens": 16147,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_qCVMB8KXv9eUC4uqcZ4C5VWM"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_lGlJtngz4N6cVC7gLYN7a5n1"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_dXW5Us1XqtuOWctGm3E708la"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_26XqX1J0WDZetv3h3MClUZ8V"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225249.1612766,
+          "model": "gpt-5.6-sol",
+          "cost": 0.085474,
+          "input_tokens": 29489,
+          "output_tokens": 1954,
+          "total_tokens": 31443,
+          "cached_tokens": 26798,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_WmhBwdvy8nwfNNtdUkDEDn8D"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225252.547506,
+          "model": "gpt-5.6-sol",
+          "cost": 0.016282,
+          "input_tokens": 8027,
+          "output_tokens": 167,
+          "total_tokens": 8194,
+          "cached_tokens": 6414,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_aqwvo1btYNkpFK4vca36peBh"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_1foFl2TaJGYe1d41NHBLfMcP"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_vZCJm1zEH4M8gf0I4NQjy9cf"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_2I2MAZW6JllDYDV1U3kHDPxO"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225258.001347,
+          "model": "gpt-5.6-sol",
+          "cost": 0.023172,
+          "input_tokens": 10428,
+          "output_tokens": 238,
+          "total_tokens": 10666,
+          "cached_tokens": 8024,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_fAJNC0RBtSp1n5ZztxqnnCCF"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_wMXAElJmquAk2K5mCFRWcVgj"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_WHTNspw47c7bWJefT1jfCsDZ"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_TMN1utd5L8Hxa4shNwjCtPsK"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225291.242902,
+          "model": "gpt-5.6-sol",
+          "cost": 0.033392500000000006,
+          "input_tokens": 13169,
+          "output_tokens": 482,
+          "total_tokens": 13651,
+          "cached_tokens": 10425,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_js78GVNmOFmfmSHT59jkzw3Y"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787225293.5090468,
+          "model": "gpt-5.6-sol",
+          "cost": 0.009078,
+          "input_tokens": 13581,
+          "output_tokens": 14,
+          "total_tokens": 13595,
+          "cached_tokens": 13166,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_v71Rt461Owh3OxGAuySTavlk"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227658.76781,
+          "model": "gpt-5.6-sol",
+          "cost": 0.07594500000000001,
+          "input_tokens": 13731,
+          "output_tokens": 243,
+          "total_tokens": 13974,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "source_questions",
+              "tool_call_id": "call_4jePXaOSRe0ylnmXcaCYHO8M"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227662.4484482,
+          "model": "gpt-5.6-sol",
+          "cost": 0.013275,
+          "input_tokens": 1551,
+          "output_tokens": 184,
+          "total_tokens": 1735,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_JhCP5xQRQUTD3KdkbTayAw6q"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ThfJLdbLNPuOw5K4eQ2gfuw0"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_wPrK8hIjxDvT2Jrnwe41mp0j"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_uaoBS3LiY4lXbilxEzVVnRSD"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227666.7559505,
+          "model": "gpt-5.6-sol",
+          "cost": 0.012294,
+          "input_tokens": 2640,
+          "output_tokens": 202,
+          "total_tokens": 2842,
+          "cached_tokens": 1548,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_q5c2hsT3pEgISuUL6rbs9ufN"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_eVVd6DArjToQpTmvmHsX3Mpn"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_qQBVb6ttuG6JQRSx56xyrYZL"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_xjpR4oOgBntV4peVjhRwcPXG"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_SsByQNmWf0AscCzUtWWJISbp"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227678.7175608,
+          "model": "gpt-5.6-sol",
+          "cost": 0.017608500000000003,
+          "input_tokens": 4443,
+          "output_tokens": 242,
+          "total_tokens": 4685,
+          "cached_tokens": 2637,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_N3KCf8VditV9wg9TuYx301kI"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Z2ORPsSSSLFWWl6xWOZGjEuD"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_wuvcykvgKCJxGtmX7bB7aOeR"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_6qh8dKYGginY4H1JOhPjtUcA"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_y6zlr8416hszEt2JeabJXexm"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_lC6NQhVaLJRtB8ncdskQWOut"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227698.285061,
+          "model": "gpt-5.6-sol",
+          "cost": 0.07097500000000001,
+          "input_tokens": 16547,
+          "output_tokens": 274,
+          "total_tokens": 16821,
+          "cached_tokens": 4440,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_f5j4MCxNNpDXBswXUOSapp14"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_UEJ57S1oRFLtvnGgPM2kHZ7u"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_GxBu5Ilb5hpQmR1OIs9YNHnb"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_UvaVVkJcgh3xsAGs2lbV4UkY"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_tUlBiAIVq8xszRLDlCyt6zVF"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_LVVAEygh0uMU1ikZNJt6dQ6X"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227711.507641,
+          "model": "gpt-5.6-sol",
+          "cost": 0.027772,
+          "input_tokens": 18674,
+          "output_tokens": 295,
+          "total_tokens": 18969,
+          "cached_tokens": 16544,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_gaWmmR2uifLPsdeKTlDmD46t"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_OzGnSYBvAv7qs4vPfrTsaNGz"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_vbZVnHJvrsdiEWUgx3f05Vst"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_NMDpkrk5r4EBxbCNujwrtQvw"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_XZoJiEfpLzWsHWNkRIeD50Mo"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_XndyYhIT3CtyIqWYxQJiM6Lv"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227743.3766189,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0389455,
+          "input_tokens": 22115,
+          "output_tokens": 413,
+          "total_tokens": 22528,
+          "cached_tokens": 18671,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_0P4zpTXl1rrtZUfprsjn9Gb8"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_mNK7OnqbHoYE9tAS3l3WIL49"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_Od1RtwX3DIoMIpmGnZDVmL6l"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_VEXlCiBLQccaaagxGUI0Igmk"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_kDTmhsdHK5C8uu2jDFGx73GC"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_VoSPSKhN6SJc0b6Ap7uoon8P"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227757.7794225,
+          "model": "gpt-5.6-sol",
+          "cost": 0.049296000000000006,
+          "input_tokens": 27006,
+          "output_tokens": 459,
+          "total_tokens": 27465,
+          "cached_tokens": 22112,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_NFnGPoqf3Fa1xsK2T6FiTSB2"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_ucBUK48hHbWpvDGiA60VDTol"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_6yegI9F6q4dzJ3X7CmcR8Al8"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_6Eg94s2oxfWNiziTzLX6Zch6"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_KXGrmriz7pSbS33EixVsWMhU"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_pyYwKsD70fc3pvWLkrqg0sn5"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227772.3357356,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0301165,
+          "input_tokens": 28892,
+          "output_tokens": 239,
+          "total_tokens": 29131,
+          "cached_tokens": 27003,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_uugaWTgvT2lCULojij4GBSmw"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_TO5w2KrOAYaiypsitfNqoynq"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_HLlEshUh7GLgN6osbq1sFIul"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_kprT1Hx6P61uatA0Ua1y20Ch"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_bC848sKOUcHYM77piHcv0E7K"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227794.813587,
+          "model": "gpt-5.6-sol",
+          "cost": 0.029629499999999996,
+          "input_tokens": 29670,
+          "output_tokens": 376,
+          "total_tokens": 30046,
+          "cached_tokens": 28889,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 3,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_3xyvk4B4OcBrjhwzLZLnuqDd"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_8ui99sbR9MlgjcovJacta9y5"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_X1qfgHjDwttm7rfWNhpWBK2r"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227816.1206207,
+          "model": "gpt-5.6-sol",
+          "cost": 0.07718349999999999,
+          "input_tokens": 34193,
+          "output_tokens": 1324,
+          "total_tokens": 35517,
+          "cached_tokens": 29667,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_2PgjSsFrAPLn657sTzQY5Iix"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227821.2131982,
+          "model": "gpt-5.6-sol",
+          "cost": 0.022899,
+          "input_tokens": 14757,
+          "output_tokens": 363,
+          "total_tokens": 15120,
+          "cached_tokens": 13728,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_iZxvY4nxZ90PBjWHSlBHbC7E"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787227825.2944293,
+          "model": "gpt-5.6-sol",
+          "cost": 0.009717,
+          "input_tokens": 15138,
+          "output_tokens": 14,
+          "total_tokens": 15152,
+          "cached_tokens": 14754,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_2nQgPz7gkfBS3SG1trPdfrvD"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787229581.8218002,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0092475,
+          "input_tokens": 15243,
+          "output_tokens": 38,
+          "total_tokens": 15281,
+          "cached_tokens": 15135,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_MBoyR6AYUju2H6oNWud4gvcI"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 1.0946395,
+      "total_input_tokens": 460871,
+      "total_output_tokens": 12347,
+      "total_llm_calls": 31
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/src/internal.c\n+++ b/src/internal.c\n@@ -10078,6 +10078,9 @@\n static WC_INLINE int GrowOutputBuffer(WOLFSSL* ssl, int size)\n {\n     byte* tmp;\n+#ifdef WOLFSSL_STATIC_MEMORY\n+    word32 i;\n+#endif\n #if WOLFSSL_GENERAL_ALIGNMENT > 0\n     byte  hdrSz = ssl->options.dtls ? DTLS_RECORD_HEADER_SZ :\n                                       RECORD_HEADER_SZ;\n@@ -10111,14 +10114,19 @@\n     /* can be from IO memory pool which does not need copy if same buffer */\n     if (ssl->buffers.outputBuffer.length &&\n             tmp == ssl->buffers.outputBuffer.buffer) {\n+        /* Copy forwards because destination precedes overlapping source. */\n+        for (i = 0; i < ssl->buffers.outputBuffer.length; i++)\n+            tmp[i] = tmp[ssl->buffers.outputBuffer.idx + i];\n         ssl->buffers.outputBuffer.bufferSize =\n             size + ssl->buffers.outputBuffer.length;\n+        ssl->buffers.outputBuffer.idx = 0;\n         return 0;\n     }\n #endif\n \n     if (ssl->buffers.outputBuffer.length)\n-        XMEMCPY(tmp, ssl->buffers.outputBuffer.buffer,\n+        XMEMCPY(tmp, ssl->buffers.outputBuffer.buffer +\n+                     ssl->buffers.outputBuffer.idx,\n                ssl->buffers.outputBuffer.length);\n \n     if (ssl->buffers.outputBuffer.dynamicFlag) {\n@@ -10136,6 +10144,7 @@\n         ssl->buffers.outputBuffer.offset = 0;\n \n     ssl->buffers.outputBuffer.buffer = tmp;\n+    ssl->buffers.outputBuffer.idx = 0;\n     ssl->buffers.outputBuffer.bufferSize = size +\n                                            ssl->buffers.outputBuffer.length;\n     return 0;\n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [
+      {
+        "tool_name": "source_questions",
+        "args": [
+          "Analyze the outputBuffer invariants and GrowOutputBuffer bug in wolfssl/src/internal.c, particularly around GrowOutputBuffer, SendBuffered, and CheckAvailableSize. What do length, idx, and bufferSize represent after partial sends, and are there any callers that require preserving a nonzero idx rather than compacting it? Recommend the smallest root-cause fix and note overflow or aliasing concerns.",
+          "The provided ASan report shows GrowOutputBuffer at wolfssl/src/internal.c around line 10098 allocating size + outputBuffer.length after a partial send, while outputBuffer.idx is nonzero. The vulnerability description says it copies length bytes from buffer rather than buffer + idx and leaves idx unchanged, after which SendBuffered passes buffer + idx and length to a callback, reading beyond the new allocation. The triggering path is DTLS 1.3 retransmission via CheckAvailableSize. I am considering compacting unsent bytes from buffer + idx into the replacement allocation and setting idx to zero, but want to verify project-wide buffer invariants and whether additional integer-overflow validation is appropriate."
+        ],
+        "kwargs": {},
+        "timestamp": 1634637.867380349,
+        "success": true,
+        "result_summary": "Ok(SourceQuestionsResult(answer='`bufferStatic` documents `length` as bytes used and `idx` as the consumed offset (`internal.h:2217-2224`), but `SendBuffered()` makes the runtime meaning precise:\\n\\n-..."
+      },
+      {
+        "tool_name": "source_questions",
+        "args": [
+          "Please inspect /src/wolfssl/compile_error.txt and report the exact compiler errors caused by the current patch to wolfssl/src/internal.c in GrowOutputBuffer. Also inspect the relevant macro definitions (especially XMEMMOVE) and build configuration to explain why the patch failed and recommend a compile-compatible correction.",
+          "I patched GrowOutputBuffer in wolfssl/src/internal.c around lines 10110-10142 to compact pending bytes after a partial send. In the WOLFSSL_STATIC_MEMORY same-allocation branch I added `XMEMMOVE(tmp, tmp + ssl->buffers.outputBuffer.idx, ssl->buffers.outputBuffer.length);` and reset idx. In the ordinary replacement-buffer path I changed XMEMCPY's source to `outputBuffer.buffer + outputBuffer.idx` and reset idx after assigning the new buffer. The validation tool reports only that the project failed to build and says exact errors are in /src/wolfssl/compile_error.txt. I need the precise diagnostics before revising the source."
+        ],
+        "kwargs": {},
+        "timestamp": 1637204.821316848,
+        "success": true,
+        "result_summary": "Ok(SourceQuestionsResult(answer=\"`/src/wolfssl/compile_error.txt` is not present in the source tree exposed by the tools, so I cannot honestly quote the file byte-for-byte. The diagnostic implied by t..."
+      }
+    ],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "GrowOutputBuffer",
+          "wolfssl/src/internal.c",
+          10098,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1634507.225223255,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n10078 static WC_INLINE int GrowOutputBuffer(WOLFSSL* ssl, int size), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "SendBuffered",
+          "wolfssl/src/internal.c",
+          10013,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1634507.231616331,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n9991 int SendBuffered(WOLFSSL* ssl), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "CheckAvailableSize",
+          "wolfssl/src/internal.c",
+          10273,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1634507.325644639,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n10229 int CheckAvailableSize(WOLFSSL *ssl, int size), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "SendBuffered",
+          "wolfssl/src/internal.c",
+          9991,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1634641.332589298,
+        "success": true,
+        "result_summary": "Ok({'contents': ' 9991 int SendBuffered(WOLFSSL* ssl)\\n 9992 {\\n 9993     if (ssl->CBIOSend == NULL && !WOLFSSL_IS_QUIC(ssl)) {\\n 9994         WOLFSSL_MSG(\"Your IO Send callback is null, please set\");..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "GrowOutputBuffer",
+          "wolfssl/src/internal.c",
+          10078,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1634641.350485311,
+        "success": true,
+        "result_summary": "Ok({'contents': '10078 static WC_INLINE int GrowOutputBuffer(WOLFSSL* ssl, int size)\\n10079 {\\n10080     byte* tmp;\\n10081 #if WOLFSSL_GENERAL_ALIGNMENT > 0\\n10082     byte  hdrSz = ssl->options.dtls ..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "CheckAvailableSize",
+          "wolfssl/src/internal.c",
+          10229,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1634641.361681691,
+        "success": true,
+        "result_summary": "Ok({'contents': '10229 int CheckAvailableSize(WOLFSSL *ssl, int size)\\n10230 {\\n10231     if (size < 0) {\\n10232         WOLFSSL_MSG(\"CheckAvailableSize() called with negative number\");\\n10233        ..."
+      }
+    ],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "wolfssl/src/internal.c",
+          10140
+        ],
+        "kwargs": {},
+        "timestamp": 1634646.708870645,
+        "success": true,
+        "result_summary": "Ok({'contents': '10041                                 WOLFSSL_MSG(\"Got our timeout\");\\n10042                                 return WANT_WRITE;\\n10043                             }\\n10044            ..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "GrowOutputBuffer",
+          "wolfssl/src/internal.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1634641.303677627,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='wolfssl/src/internal.c', refs=[FileReference(line=10273, content='        if (GrowOutputBuffer(ssl, size) < 0)', enclosing_definition='CheckAvailableSize')])])"
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "XMEMMOVE",
+          "wolfssl/src/internal.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1634646.752785954,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='wolfssl/src/internal.c', refs=[FileReference(line=8475, content='        XMEMMOVE(newBucket->buf + (next->m.m.offset - newOffset), next->buf,', enclosing_definition='Dtls..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "outputBuffer.idx",
+          "wolfssl/src/internal.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1634670.799746079,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='/src/wolfssl/src/internal.c', refs=[FileReference(line=8971, content='                        ssl->buffers.outputBuffer.idx +', enclosing_definition='N/A'), FileReference..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "MAX_WORD32",
+          "wolfssl/src/internal.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1634670.8032068,
+        "success": true,
+        "result_summary": "Err(CRSError(no results found, extra=None))"
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "wolfssl/src/internal.c",
+          "@@ -10110,16 +10110,21 @@\n #ifdef WOLFSSL_STATIC_MEMORY\n     /* can be from IO memory pool which does not need copy if same buffer */\n     if (ssl->buffers.outputBuffer.length &&\n             tmp == ssl->buffers.outputBuffer.buffer) {\n+        XMEMMOVE(tmp, tmp + ssl->buffers.outputBuffer.idx,\n+                 ssl->buffers.outputBuffer.length);\n         ssl->buffers.outputBuffer.bufferSize =\n             size + ssl->buffers.outputBuffer.length;\n+        ssl->buffers.outputBuffer.idx = 0;\n         return 0;\n     }\n #endif\n \n     if (ssl->buffers.outputBuffer.length)\n-        XMEMCPY(tmp, ssl->buffers.outputBuffer.buffer,\n+        XMEMCPY(tmp, ssl->buffers.outputBuffer.buffer +\n+                     ssl->buffers.outputBuffer.idx,\n                 ssl->buffers.outputBuffer.length);\n \n     if (ssl->buffers.outputBuffer.dynamicFlag) {\n@@ -10136,6 +10141,7 @@\n         ssl->buffers.outputBuffer.offset = 0;\n \n     ssl->buffers.outputBuffer.buffer = tmp;\n+    ssl->buffers.outputBuffer.idx = 0;\n     ssl->buffers.outputBuffer.bufferSize = size +\n                                            ssl->buffers.outputBuffer.length;\n     return 0;\n"
+        ],
+        "kwargs": {},
+        "timestamp": 1634680.367664902,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      },
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "wolfssl/src/internal.c",
+          "@@ -10078,6 +10078,9 @@\n static WC_INLINE int GrowOutputBuffer(WOLFSSL* ssl, int size)\n {\n     byte* tmp;\n+#ifdef WOLFSSL_STATIC_MEMORY\n+    word32 i;\n+#endif\n #if WOLFSSL_GENERAL_ALIGNMENT > 0\n     byte  hdrSz = ssl->options.dtls ? DTLS_RECORD_HEADER_SZ :\n                                       RECORD_HEADER_SZ;\n@@ -10111,8 +10114,9 @@\n     /* can be from IO memory pool which does not need copy if same buffer */\n     if (ssl->buffers.outputBuffer.length &&\n             tmp == ssl->buffers.outputBuffer.buffer) {\n-        XMEMMOVE(tmp, tmp + ssl->buffers.outputBuffer.idx,\n-                 ssl->buffers.outputBuffer.length);\n+        /* Copy forwards because destination precedes overlapping source. */\n+        for (i = 0; i < ssl->buffers.outputBuffer.length; i++)\n+            tmp[i] = tmp[ssl->buffers.outputBuffer.idx + i];\n         ssl->buffers.outputBuffer.bufferSize =\n             size + ssl->buffers.outputBuffer.length;\n         ssl->buffers.outputBuffer.idx = 0;\n"
+        ],
+        "kwargs": {},
+        "timestamp": 1637210.271575182,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1637039.401601111,
+        "success": true,
+        "result_summary": "Err(CRSError(the code failed to build, extra={'validation_status': 'build_failed', 'build_error': '\\nBuild failed. Errors are in `/src/wolfssl/compile_error.txt`; no compiler error details were provid..."
+      },
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1638967.85709355,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

@@ -1,0 +1,1335 @@
+{
+  "vuln_id": 753,
+  "crash_result": {
+    "output": "==2553==ERROR: AddressSanitizer: heap-buffer-overflow on address 0xe51cb883 at pc 0x085e86f4 bp 0xffcfe658 sp 0xffcfe650\nWRITE of size 2 at 0xe51cb883 thread T0\nSCARINESS: 43 (2-byte-write-heap-buffer-overflow-far-from-bounds)\n    #0 0x85e86f3 in bshuf_shuffle_bit_eightelem_sse2 /src/c-blosc2/blosc/bitshuffle-sse2.c:445:29\n    #1 0x85f6545 in bshuf_shuffle_bit_eightelem_avx2 /src/c-blosc2/blosc/bitshuffle-avx2.c:216:12\n    #2 0x85f6545 in bshuf_untrans_bit_elem_avx2 /src/c-blosc2/blosc/bitshuffl",
+    "stack": "#0 0x85e86f3 in bshuf_shuffle_bit_eightelem_sse2 c-blosc2/blosc/bitshuffle-sse2.c:445:29\n#1 0x85f6545 in bshuf_shuffle_bit_eightelem_avx2 c-blosc2/blosc/bitshuffle-avx2.c:216:12\n#2 0x85f6545 in bshuf_untrans_bit_elem_avx2 c-blosc2/blosc/bitshuffle-avx2.c:245:11\n#3 0x821db03 in bitunshuffle c-blosc2/blosc/shuffle.c:454:23\n#4 0x81af58a in pipeline_d c-blosc2/blosc/blosc2.c:1161:13\n#5 0x81c38c3 in blosc_d c-blosc2/blosc/blosc2.c:1628:19\n#6 0x81c1216 in _blosc_getitem c-blosc2/blosc/blosc2.c:2672:14",
+    "dedup": "bshuf_shuffle_bit_eightelem_sse2--bshuf_shuffle_bit_eightelem_avx2--bshuf_untrans_bit_elem_avx2"
+  },
+  "pov_run_data": {
+    "task_uuid": "814152e2-0f17-535d-b09c-fae7faa8b72f",
+    "project_name": "c-blosc2",
+    "harness": "decompress_frame_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "bshuf_shuffle_bit_eightelem_sse2--bshuf_shuffle_bit_eightelem_avx2--bshuf_untrans_bit_elem_avx2"
+  },
+  "decoded_pov": {
+    "project_name": "c-blosc2",
+    "harness": "decompress_frame_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'\\x11\\xff\\xbc\\x00\\x00\\x00\\xff\\xff\\xbb.\\x00\\x00\\x00\\x00\\x87\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xbc\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00#\\x00\\xbc\\xbc\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00#\\xc3\\x00\\xbc\\x04\\xff;\\x00\\x00\\x00\\x00\\x00\\x00\\xd5\\xf6\\x94\\xa8D$\\t\\x00\\xfa\\x02\\x00\\x10\\x00\\x9b\\xceh\\x00\\xa0\\x00\\x00\\x1b\\x00\\x00\\xff\\xff\\xff\\xcf\\xf8I\\xff\\x00\\xde\\x00\\x00\\xad\\x00A\\x00\\xce\\x00\\x08\\x17\\n\\x00\\x00\\x87\\x00\\x00\\x08\\x00\\xd3\\x87\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\"\\xff\\x03\\x00\\x87\\xaa\\xfe\\xf8(\\xe2\\x01z\\x00\\x80\\x02\\x004\\x06\\r\\x00\\x00`\\x01\\x00\\x00W2\\x00\\x00\\x00+\\x00\\x00\\x00-\\x00\\x00\\x00\\x00\\x00\\x00\\xf9Z\\x00\\xce\\x00\\x00\\x00\\n\\x00\\x00\\x87\\n\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xde\\x00\\x00\\x00'\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "bshuf_shuffle_bit_eightelem_sse2--bshuf_shuffle_bit_eightelem_avx2--bshuf_untrans_bit_elem_avx2"
+  },
+  "analyzed_vuln": {
+    "function": "init_thread_context",
+    "file": "c-blosc2/blosc/blosc2.c",
+    "description": "Temporary-buffer sizing is not checked for size_t overflow. `ebsize` is computed from attacker-controlled chunk `blocksize` and `typesize`, then `thread_context->tmp_nbytes = (size_t)4 * ebsize` wraps on the 32-bit build. The allocation is consequently much smaller than the four `ebsize` regions assumed when deriving `tmp2`, `tmp3`, and `tmp4`. Bit-unshuffle later writes a full block through one of these invalid/undersized regions, crashing at `bshuf_shuffle_bit_eightelem_sse2` line 445. The root is the unchecked allocation arithmetic and buffer partitioning in `init_thread_context`, not the SIMD write itself.",
+    "conditions": "A crafted frame must make `get_coffset` call `blosc2_getitem` on a malicious compressed offsets chunk whose otherwise accepted Blosc header requests an enormous block and enables bitshuffle. In this PoV the embedded header has version 2, flags 0x34, typesize 6, nbytes 0x6000000d, and blocksize 0x57000001. Thus `ebsize` is 0x57000019, while four times that wraps a 32-bit `size_t` to 0x5c000064. `blosc_read_header` accepts these values because blocksize is positive and no larger than nbytes; decompression reaches the bitshuffle pipeline, which treats the logical temporary region as blocksize-sized and performs the out-of-bounds 2-byte write."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 9,
+      "total_cost": 0.37394900000000003,
+      "total_input_tokens": 149431,
+      "total_output_tokens": 5357,
+      "total_cached_tokens": 118648,
+      "llm_calls": [
+        {
+          "timestamp": 1787224262.5014653,
+          "model": "gpt-5.6-sol",
+          "cost": 0.032510000000000004,
+          "input_tokens": 4504,
+          "output_tokens": 333,
+          "total_tokens": 4837,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_KubEFVkZMsGIP7R5TUYiWNub"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_sc8oHuTJPObc44qtv0QUf5wC"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_0gknUZDZJe8HwhFwZNfmTnaQ"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_TU4HxONAmdJtodw5vfEZbX4t"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_E9LjxCvscUE2WNgvwegdSTPi"
+            },
+            {
+              "tool_name": "debug_pov",
+              "tool_call_id": "call_2mhBkBgqncomnoOrSVitURq9"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224304.1900713,
+          "model": "gpt-5.6-sol",
+          "cost": 0.013815500000000001,
+          "input_tokens": 5056,
+          "output_tokens": 293,
+          "total_tokens": 5349,
+          "cached_tokens": 4501,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_GwegmoBUgsIkBcYSoTZN1eWF"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Y4K0JT27lWKZKLBgkambg3ar"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_y2XFZtWQhcGxhc9XQ655e295"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_pDiWzG40eVdaYeN7deF4pj8b"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_KN6ETGH3TF8nM8XUkXxAKe93"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_XfoDDN2itMsFsmKHaHXjOGQ7"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224310.4012723,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0141365,
+          "input_tokens": 5713,
+          "output_tokens": 277,
+          "total_tokens": 5990,
+          "cached_tokens": 5053,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_QFXcVE4wZuBgwVqvreh8IXZv"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ZrytU2g8AnfZzeGGUV6UoHBm"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_dKR6TW51dlDRu0jjC5Uf65QL"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_xTYQiZ2n96LfnECM339vv297"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_8T3ctCcrIMJm8pe8J2Sn6ewb"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_0leBvWN4VKg1QyEVrLZp1MKx"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224316.5656748,
+          "model": "gpt-5.6-sol",
+          "cost": 0.029585000000000004,
+          "input_tokens": 9154,
+          "output_tokens": 317,
+          "total_tokens": 9471,
+          "cached_tokens": 5710,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 7,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_IXa9xkiqJ54fF7LRJdlM8EHm"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Fa6E7PEmnRRLhyhECQKkB8Uv"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_wm6QeoTREeiCQfTGt0MlPHAh"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_r87EFEdkme5Fbm9tlakGqhoA"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_gobyLW0uNCMuMaXYEp0lbc8P"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_gOytEensMKyyNU72KyVbKGeH"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_l59XJsgQzIrFt0egRxKo3gYK"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224324.4865725,
+          "model": "gpt-5.6-sol",
+          "cost": 0.05647050000000001,
+          "input_tokens": 17406,
+          "output_tokens": 354,
+          "total_tokens": 17760,
+          "cached_tokens": 9151,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 7,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_tf7ozc6H1d6McR0JdYpCUW0i"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_KYZT1QDUBA4p0IgcDOj2yvfC"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_07ElJNe7uwJFHhrODjIKUJQh"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_vTDbneTdDmpw8Z8lsF6LPtM8"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_wBM2fhJAVNKvrjOVEpLJUtJh"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_MCfh6mm0ThxuoEiprKemwQ2Y"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_VamAR4yV6NFqisINSxkTeDXp"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224329.2027133,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0289265,
+          "input_tokens": 19960,
+          "output_tokens": 248,
+          "total_tokens": 20208,
+          "cached_tokens": 17403,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_5MPgMdKa0AV8TXp2W0JV8qly"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_bJt7AHRpKTM7a9oXc0wkY8cq"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_R1BZ18ugLOrasT9O0TGD0BA1"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_NK2XrkgkstK7dWAyuSRKshiI"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_Ff5cMqFiuceM1phoB3c823NM"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_zHh0jsMqtb9TfN578qtUrVFt"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224335.674369,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0541735,
+          "input_tokens": 26894,
+          "output_tokens": 317,
+          "total_tokens": 27211,
+          "cached_tokens": 19957,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_GZRXniFMXBqQZM9P8s6hUzpY"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_8eBo4uZop4dPDE8kHJJRpqai"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_1knRsROj3PdaRYdVvgJHEf8D"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_VC7lG4wCMIiYFKp7ZGya1nTW"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_k3Rs3lCpV3W7FWoBwnImBYaf"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224347.3982973,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0465255,
+          "input_tokens": 29985,
+          "output_tokens": 587,
+          "total_tokens": 30572,
+          "cached_tokens": 26891,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_UCGaOzS5nsrQXilD9oP2xY85"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_4WAC0ScTvCqbE3vFqxcmTCJB"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_CSqejSX4gd1D9WyPBPXCXqu2"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_N8KZqyhXOZF8cCm52Vml0MJv"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_ub4bkCLj8WNiG3GXADFTbESu"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224397.4275305,
+          "model": "gpt-5.6-sol",
+          "cost": 0.097806,
+          "input_tokens": 30759,
+          "output_tokens": 2631,
+          "total_tokens": 33390,
+          "cached_tokens": 29982,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_c2OGud8ZaAPAMDORK3zPR3lW"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 19,
+      "total_cost": 0.783865,
+      "total_input_tokens": 407144,
+      "total_output_tokens": 9360,
+      "total_cached_tokens": 340590,
+      "llm_calls": [
+        {
+          "timestamp": 1787224400.2609704,
+          "model": "gpt-5.6-sol",
+          "cost": 0.034185,
+          "input_tokens": 5751,
+          "output_tokens": 181,
+          "total_tokens": 5932,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_6BfTcxe5wbWnUWz3A9NW4U4T"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_vJRr3yXdMca1QpeuJSi9TZAg"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_4Cg1JWFf7Nx6ruP5je4GWcnH"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_4FqfdQ0igUNv99uSlHzUcmIY"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224403.4693425,
+          "model": "gpt-5.6-sol",
+          "cost": 0.016264,
+          "input_tokens": 7070,
+          "output_tokens": 226,
+          "total_tokens": 7296,
+          "cached_tokens": 5748,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_NixDOQaZTAkSWCzSJ9UroNdO"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Xcolal7sbORo9QsuN19oufjO"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_fa7D7Wl4bU7o2EtColOqOoAu"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_Byd4spCwXUBm5C5fHJZKmx0O"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_22iXNR0jNdHfvCL5QNreOerd"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224409.595155,
+          "model": "gpt-5.6-sol",
+          "cost": 0.030613500000000002,
+          "input_tokens": 9957,
+          "output_tokens": 421,
+          "total_tokens": 10378,
+          "cached_tokens": 7067,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_oXAVX3i78sje3fFGuOUou0cl"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_QZ0kjDBYx6gzfrvz3bLjUNIy"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_1LQT12aIEh6ConWO2GBWrzht"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_HWYTpxoO5PHhNluwKgHSXIYB"
+            },
+            {
+              "tool_name": "source_questions",
+              "tool_call_id": "call_qd1a5sSXyY7D46DlRaX3YRJe"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224414.4074216,
+          "model": "gpt-5.6-sol",
+          "cost": 0.014770000000000002,
+          "input_tokens": 1556,
+          "output_tokens": 233,
+          "total_tokens": 1789,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_yvA0jJI6tSKn8YZE9ZzKC1R3"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ISgdyTMaewLfkEpYiETQAuU4"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Q5gAHMgWvgQDnSKukZd5MWnc"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_CIep2qcq2gv6zWjXe8SRCFmh"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_uSFXYF3DG2ZNl5TSMfLbo4F3"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224419.5515811,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0264865,
+          "input_tokens": 4547,
+          "output_tokens": 358,
+          "total_tokens": 4905,
+          "cached_tokens": 1553,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 8,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_9g3bV31bkRhT3vycEp7uNiMh"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_aRKeeSAjIg2RXgoZdpIW8lMM"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_5a2xpMVkIBzuSgMoGGAP5393"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ZPgCJTgwsL1eXJJbtZMT5CLK"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_6YJSASLh9GQHyLF0KhBFgwbe"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_a4q9nFU97U4lMMpoKB4pRJoY"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_bJcCouByHUaVvgy0aHLMlnRA"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_fIMI56qeyjx3G6i86iL5eTur"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224424.9474688,
+          "model": "gpt-5.6-sol",
+          "cost": 0.044972,
+          "input_tokens": 10822,
+          "output_tokens": 377,
+          "total_tokens": 11199,
+          "cached_tokens": 4544,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 9,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_mvjhkfdUpYohP6HGckSV7U9s"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_VMhEJPipXSdZtg6R8A7kYn5o"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_cKG3rOe8NoOIxcRJRvcU4DVu"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Efa5e0n8j6fvfNNj3JMnGf2y"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ReBD4rlyprVTeI8PaEVRQBam"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_Nud8XAo8vVTmZsFJEvNv12xe"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_G4MbYbzRHurexLfICgsfXTXW"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_q0mbrCkKjaTWYbKM3tx4zxEo"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_FhE2pF6LEGtapfDMrFtQ2704"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224429.3009057,
+          "model": "gpt-5.6-sol",
+          "cost": 0.054789500000000005,
+          "input_tokens": 18931,
+          "output_tokens": 294,
+          "total_tokens": 19225,
+          "cached_tokens": 10819,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 7,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_H5k4Qf5wxlwiJlqvkdxgZhK2"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Al4XRCHk4vsGdtmIta3b0MDz"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_uFeHciC51drpZinr6MU0EHeX"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_RI8Q9fWFXq4rPMCWGNSKkc9e"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_m0JB87Lq6aGmlsU8HaQgWfNB"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_QuYfD3oU8QPNle9oOEM2H4yG"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Hlw97ypGNRSuEYa43QptMoJo"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224434.2532814,
+          "model": "gpt-5.6-sol",
+          "cost": 0.040844000000000005,
+          "input_tokens": 23464,
+          "output_tokens": 290,
+          "total_tokens": 23754,
+          "cached_tokens": 18928,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 7,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_tGexehtO5kh6Wwy14yHjwSW1"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_wpyeJLIW9XMT3QTfnuemdXrp"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_uruD5brXGjPTwmA3n3cg2BIJ"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_wxHvQ9oPAuPg4beLto7wJFzH"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_yON5FwWi3uJLtsR1JnviPjla"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_FfbXQ5DsOQotZ0rcvXMaQpdJ"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_LGaNbPgLLkgcOD6VEaICWfBq"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224443.8175755,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0421155,
+          "input_tokens": 27210,
+          "output_tokens": 388,
+          "total_tokens": 27598,
+          "cached_tokens": 23461,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_CEeEwJL8U0f9dLaLFDwpQleU"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_hr0Z9hOGjwFqM7U01Q9AMotc"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_PewQTNPXUc6MFkw2PDpGVn0p"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_zYF5z7wfK98nJLE6lmhfWPjV"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_1Q5rrgrimlsPZuA0befVz9BB"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_sN5s732Xe488UIbyztE2t4Xn"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224448.728691,
+          "model": "gpt-5.6-sol",
+          "cost": 0.024738499999999997,
+          "input_tokens": 27892,
+          "output_tokens": 257,
+          "total_tokens": 28149,
+          "cached_tokens": 27207,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 6,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_yMScIupqSyhYPla4PwUVCYCs"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_RhItTG5Vj0gQKK9pdfZw1vZC"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_YbMJolTA98peDTB8p1kNfCAh"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_0LLjw6p6uDSLoOWT9vyAuTEc"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_XUK3VccW2IQvGBOWyqQA17Vl"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_x6UTcuunTl2paqYV3q9ZQaRt"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224451.975495,
+          "model": "gpt-5.6-sol",
+          "cost": 0.046454499999999996,
+          "input_tokens": 33287,
+          "output_tokens": 184,
+          "total_tokens": 33471,
+          "cached_tokens": 27889,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_jDTcDiGK7PVVztsIk2tEfGRU"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_VkBwhZpOHJ9A43pSmWZOzSBe"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_hTLUn1b0i7hDuSzJYM9cfC35"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_DvQZ4lbkjClttPdOI5fjfQjo"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224462.9467595,
+          "model": "gpt-5.6-sol",
+          "cost": 0.028367000000000003,
+          "input_tokens": 34021,
+          "output_tokens": 268,
+          "total_tokens": 34289,
+          "cached_tokens": 33284,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_mrmbkhFRybfzt5TPI7yy6IR8"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_awnJI6MEhZdnCJkhVMAgK3hj"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_J9SVPi3LOdgq7oEH4J3MfziY"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_lq5psBZQ0rSbLIUyxRRcNnuO"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224466.0236163,
+          "model": "gpt-5.6-sol",
+          "cost": 0.031584,
+          "input_tokens": 35877,
+          "output_tokens": 176,
+          "total_tokens": 36053,
+          "cached_tokens": 34018,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_YFcUk4YQPGNQRJ2gRRbXYpwr"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_YbkSiUsbsLe0U2YOlaKjOSLw"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_w0E0SGfhhWD6fAgDbblkEMxW"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_asY9nDffIBEuaFX2GUczP9h6"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224496.2841876,
+          "model": "gpt-5.6-sol",
+          "cost": 0.086757,
+          "input_tokens": 37320,
+          "output_tokens": 2053,
+          "total_tokens": 39373,
+          "cached_tokens": 35874,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_HYBgfpTiCRpWOHrOMw5aWlAk"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224503.840423,
+          "model": "gpt-5.6-sol",
+          "cost": 0.06611700000000001,
+          "input_tokens": 19644,
+          "output_tokens": 423,
+          "total_tokens": 20067,
+          "cached_tokens": 9954,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_H8Ly3EGsNaweGCPGJ6mV26YG"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_oRcxxofLixqryIYlSrdfD5TC"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_gUROL5xNry0qNO9tQukPcPDb"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_qaIx2oyCH1fQhvfck5k5wjKO"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224514.1099613,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0472105,
+          "input_tokens": 24629,
+          "output_tokens": 415,
+          "total_tokens": 25044,
+          "cached_tokens": 19641,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_aSoSe0mtCV7Xw65GDAlghLL0"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224550.843387,
+          "model": "gpt-5.6-sol",
+          "cost": 0.10524800000000001,
+          "input_tokens": 26905,
+          "output_tokens": 2718,
+          "total_tokens": 29623,
+          "cached_tokens": 24626,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_2OJ0gEniINw1oJYeavSLN5ME"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224553.165257,
+          "model": "gpt-5.6-sol",
+          "cost": 0.024751,
+          "input_tokens": 29078,
+          "output_tokens": 14,
+          "total_tokens": 29092,
+          "cached_tokens": 26902,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_a2FPjRwWMi2krj1kbyezFnzX"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787224594.7655532,
+          "model": "gpt-5.6-sol",
+          "cost": 0.017597500000000002,
+          "input_tokens": 29183,
+          "output_tokens": 84,
+          "total_tokens": 29267,
+          "cached_tokens": 29075,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_owRh5MOAepnv6WsKb0wIfWyL"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 1.1578140000000001,
+      "total_input_tokens": 556575,
+      "total_output_tokens": 14717,
+      "total_llm_calls": 28
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/blosc/blosc2.c\n+++ b/blosc/blosc2.c\n@@ -184,6 +184,29 @@\n }\n \n \n+/* Compute the size of the four temporary regions without overflowing either\n+ * the region size used by the codecs or the allocation size. */\n+static int calculate_tmp_sizes(int32_t blocksize, int32_t typesize,\n+                               size_t* ebsize, size_t* tmp_nbytes) {\n+  const size_t size_max = (size_t)-1;\n+\n+  if (blocksize <= 0 || typesize <= 0) {\n+    return BLOSC2_ERROR_INVALID_PARAM;\n+  }\n+\n+  size_t padding = (size_t)typesize * sizeof(int32_t);\n+  if ((size_t)blocksize > size_max - padding) {\n+    return BLOSC2_ERROR_INVALID_PARAM;\n+  }\n+  *ebsize = (size_t)blocksize + padding;\n+  if (*ebsize > size_max / 4 || *ebsize > INT32_MAX) {\n+    return BLOSC2_ERROR_INVALID_PARAM;\n+  }\n+  *tmp_nbytes = *ebsize * 4;\n+  return 0;\n+}\n+\n+\n /* Release memory booked by my_malloc */\n static void my_free(void* block) {\n #if defined(_WIN32)\n@@ -700,6 +723,13 @@\n     BLOSC_TRACE_ERROR(\"`typesize` is zero or greater than max allowed.\");\n     return BLOSC2_ERROR_INVALID_HEADER;\n   }\n+  size_t ebsize;\n+  size_t tmp_nbytes;\n+  if (calculate_tmp_sizes(header->blocksize, header->typesize,\n+                          &ebsize, &tmp_nbytes) < 0) {\n+    BLOSC_TRACE_ERROR(\"Temporary buffer size in header is not representable.\");\n+    return BLOSC2_ERROR_INVALID_HEADER;\n+  }\n \n   /* Read extended header if it is wanted */\n   if ((extended_header) && (header->flags & BLOSC_DOSHUFFLE) && (header->flags & BLOSC_DOBITSHUFFLE)) {\n@@ -1728,13 +1758,18 @@\n /* initialize a thread_context that has already been allocated */\n static int init_thread_context(struct thread_context* thread_context, blosc2_context* context, int32_t tid)\n {\n-  int32_t ebsize;\n+  size_t ebsize;\n+  size_t tmp_nbytes;\n \n   thread_context->parent_context = context;\n   thread_context->tid = tid;\n \n-  ebsize = context->blocksize + context->typesize * (signed)sizeof(int32_t);\n-  thread_context->tmp_nbytes = (size_t)4 * ebsize;\n+  int rc = calculate_tmp_sizes(context->blocksize, context->typesize,\n+                               &ebsize, &tmp_nbytes);\n+  if (rc < 0) {\n+    return rc;\n+  }\n+  thread_context->tmp_nbytes = tmp_nbytes;\n   thread_context->tmp = my_malloc(thread_context->tmp_nbytes);\n   BLOSC_ERROR_NULL(thread_context->tmp, BLOSC2_ERROR_MEMORY_ALLOC);\n   thread_context->tmp2 = thread_context->tmp + ebsize;\n@@ -1772,6 +1807,7 @@\n   BLOSC_ERROR_NULL(thread_context, NULL);\n   int rc = init_thread_context(thread_context, context, tid);\n   if (rc < 0) {\n+    my_free(thread_context);\n     return NULL;\n   }\n   return thread_context;\n@@ -2572,7 +2608,8 @@\n                    int start, int nitems, void* dest, int32_t destsize) {\n   uint8_t* _src = (uint8_t*)(src);  /* current pos for source buffer */\n   int32_t ntbytes = 0;              /* the number of uncompressed bytes */\n-  int32_t bsize, bsize2, ebsize, leftoverblock;\n+  int32_t bsize, bsize2, leftoverblock;\n+  size_t ebsize, tmp_nbytes;\n   int32_t cbytes;\n   int32_t startb, stopb;\n   int32_t stop = start + nitems;\n@@ -2605,7 +2642,11 @@\n     return BLOSC2_ERROR_READ_BUFFER;\n   }\n \n-  ebsize = header->blocksize + header->typesize * (signed)sizeof(int32_t);\n+  rc = calculate_tmp_sizes(header->blocksize, header->typesize,\n+                           &ebsize, &tmp_nbytes);\n+  if (rc < 0) {\n+    return BLOSC2_ERROR_INVALID_HEADER;\n+  }\n \n   for (j = 0; j < context->nblocks; j++) {\n     bsize = header->blocksize;\n@@ -2638,10 +2679,11 @@\n \n     /* Resize the temporaries in serial context if needed */\n     if (header->blocksize > scontext->tmp_blocksize) {\n+      uint8_t* new_tmp = my_malloc(tmp_nbytes);\n+      BLOSC_ERROR_NULL(new_tmp, BLOSC2_ERROR_MEMORY_ALLOC);\n       my_free(scontext->tmp);\n-      scontext->tmp_nbytes = (size_t)4 * ebsize;\n-      scontext->tmp = my_malloc(scontext->tmp_nbytes);\n-      BLOSC_ERROR_NULL(scontext->tmp, BLOSC2_ERROR_MEMORY_ALLOC);\n+      scontext->tmp = new_tmp;\n+      scontext->tmp_nbytes = tmp_nbytes;\n       scontext->tmp2 = scontext->tmp + ebsize;\n       scontext->tmp3 = scontext->tmp2 + ebsize;\n       scontext->tmp4 = scontext->tmp3 + ebsize;\n@@ -2752,6 +2794,7 @@\n   /* Parameters for threads */\n   int32_t blocksize;\n   int32_t ebsize;\n+  size_t region_size, tmp_nbytes;\n   int32_t srcsize;\n   bool compress = context->do_compress != 0;\n   int32_t maxbytes;\n@@ -2767,7 +2810,14 @@\n \n   /* Get parameters for this thread before entering the main loop */\n   blocksize = context->blocksize;\n-  ebsize = blocksize + context->typesize * sizeof(int32_t);\n+  if (calculate_tmp_sizes(blocksize, context->typesize,\n+                          &region_size, &tmp_nbytes) < 0) {\n+    pthread_mutex_lock(&context->count_mutex);\n+    context->thread_giveup_code = BLOSC2_ERROR_INVALID_PARAM;\n+    pthread_mutex_unlock(&context->count_mutex);\n+    return;\n+  }\n+  ebsize = (int32_t)region_size;\n   maxbytes = context->destsize;\n   nblocks = context->nblocks;\n   leftover = context->leftover;\n@@ -2778,12 +2828,19 @@\n \n   /* Resize the temporaries if needed */\n   if (blocksize > thcontext->tmp_blocksize) {\n+    uint8_t* new_tmp = my_malloc(tmp_nbytes);\n+    if (new_tmp == NULL) {\n+      pthread_mutex_lock(&context->count_mutex);\n+      context->thread_giveup_code = BLOSC2_ERROR_MEMORY_ALLOC;\n+      pthread_mutex_unlock(&context->count_mutex);\n+      return;\n+    }\n     my_free(thcontext->tmp);\n-    thcontext->tmp_nbytes = (size_t) 4 * ebsize;\n-    thcontext->tmp = my_malloc(thcontext->tmp_nbytes);\n-    thcontext->tmp2 = thcontext->tmp + ebsize;\n-    thcontext->tmp3 = thcontext->tmp2 + ebsize;\n-    thcontext->tmp4 = thcontext->tmp3 + ebsize;\n+    thcontext->tmp = new_tmp;\n+    thcontext->tmp_nbytes = tmp_nbytes;\n+    thcontext->tmp2 = thcontext->tmp + region_size;\n+    thcontext->tmp3 = thcontext->tmp2 + region_size;\n+    thcontext->tmp4 = thcontext->tmp3 + region_size;\n     thcontext->tmp_blocksize = blocksize;\n   }\n \n@@ -2983,11 +3040,23 @@\n \n   if (threads_callback) {\n       /* Create thread contexts to store data for callback threads */\n+    if ((size_t)context->nthreads > (size_t)-1 / sizeof(struct thread_context)) {\n+      return BLOSC2_ERROR_MEMORY_ALLOC;\n+    }\n     context->thread_contexts = (struct thread_context *)my_malloc(\n-            context->nthreads * sizeof(struct thread_context));\n+            (size_t)context->nthreads * sizeof(struct thread_context));\n     BLOSC_ERROR_NULL(context->thread_contexts, BLOSC2_ERROR_MEMORY_ALLOC);\n-    for (tid = 0; tid < context->nthreads; tid++)\n-      init_thread_context(context->thread_contexts + tid, context, tid);\n+    for (tid = 0; tid < context->nthreads; tid++) {\n+      int rc = init_thread_context(context->thread_contexts + tid, context, tid);\n+      if (rc < 0) {\n+        while (--tid >= 0) {\n+          destroy_thread_context(context->thread_contexts + tid);\n+        }\n+        my_free(context->thread_contexts);\n+        context->thread_contexts = NULL;\n+        return rc;\n+      }\n+    }\n   }\n   else {\n     #if !defined(_WIN32)\n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [
+      {
+        "tool_name": "source_questions",
+        "args": [
+          "In c-blosc2/blosc/blosc2.c, analyze every allocation/partitioning path for thread_context tmp/tmp2/tmp3/tmp4 buffers, especially init_thread_context, _blosc_getitem, and t_blosc_do_job. What validations and return/error conventions should a root-cause overflow fix use, and are blocksize/typesize guaranteed positive at these points?",
+          "The supplied 32-bit ASan reproducer uses a malicious compressed header with blocksize 0x57000001 and typesize 6. init_thread_context computes signed int32_t ebsize = blocksize + typesize * sizeof(int32_t), then size_t tmp_nbytes = 4 * ebsize; on 32-bit this wraps and tmp2/tmp3/tmp4 are partitioned as though the full allocation existed. Bitunshuffle then writes out of bounds. I have observed identical unchecked arithmetic at lines around 2608/2642 in _blosc_getitem and around 2770/2782 in t_blosc_do_job, so the fix likely ought to harden all buffer creation/reallocation sites rather than only the known call path. Please clarify lifecycle/error handling and suitable existing error codes."
+        ],
+        "kwargs": {},
+        "timestamp": 1633884.986157103,
+        "success": true,
+        "result_summary": "Ok(SourceQuestionsResult(answer='There are exactly three `thread_context` temporary-buffer allocation/partitioning sites in `blosc2.c`:\\n\\n1. **Initial allocation \u2014 `init_thread_context` (1729\u20131743)**..."
+      }
+    ],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "create_thread_context",
+          "c-blosc2/blosc/blosc2.c",
+          1770,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1633788.973039571,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1769 create_thread_context(blosc2_context* context, int32_t tid) {, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "init_thread_context",
+          "c-blosc2/blosc/blosc2.c",
+          1730,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1633788.975147382,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1729 static int init_thread_context(struct thread_context* thread_context, blosc2_context* context, int32_t ..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "_blosc_getitem",
+          "c-blosc2/blosc/blosc2.c",
+          2570,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1633792.219477199,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n2571 int _blosc_getitem(blosc2_context* context, blosc_header* header, const void* src, int32_t srcsize,, ex..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "init_thread_context",
+          "c-blosc2/blosc/blosc2.c",
+          1729,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1633792.223126105,
+        "success": true,
+        "result_summary": "Ok({'contents': '1729 static int init_thread_context(struct thread_context* thread_context, blosc2_context* context, int32_t tid)', 'line_start': 1729, 'line_end': 1730, 'file': 'c-blosc2/blosc/blosc2..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "t_blosc_do_job",
+          "c-blosc2/blosc/blosc2.c",
+          2750,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1633792.224061619,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n2741 static void t_blosc_do_job(void *ctxt), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "blosc_read_header",
+          "c-blosc2/blosc/blosc2.c",
+          650,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1633892.547910072,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n668 int blosc_read_header(const uint8_t* src, int32_t srcsize, bool extended_header, blosc_header* header), ..."
+      }
+    ],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "c-blosc2/blosc/blosc2.c",
+          1
+        ],
+        "kwargs": {},
+        "timestamp": 1633792.210190392,
+        "success": true,
+        "result_summary": "Ok({'contents': '  1 /*********************************************************************\\n  2   Blosc - Blocked Shuffling and Compression Library\\n  3 \\n  4   Author: The Blosc Developers <blosc@bl..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "c-blosc2/blosc/blosc2.c",
+          1729
+        ],
+        "kwargs": {},
+        "timestamp": 1633798.296850329,
+        "success": true,
+        "result_summary": "Ok({'contents': '1630 \\n1631 \\n1632 /* Serial version for compression/decompression */\\n1633 static int serial_blosc(struct thread_context* thread_context) {\\n1634   blosc2_context* context = thread_c..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "c-blosc2/blosc/blosc2.c",
+          2571
+        ],
+        "kwargs": {},
+        "timestamp": 1633798.366397198,
+        "success": true,
+        "result_summary": "Ok({'contents': '2472   }\\n2473 \\n2474   if (header.nbytes > destsize) {\\n2475     // Not enough space for writing into the destination\\n2476     return BLOSC2_ERROR_WRITE_BUFFER;\\n2477   }\\n2478 \\n24..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "c-blosc2/blosc/blosc2.c",
+          2741
+        ],
+        "kwargs": {},
+        "timestamp": 1633798.368551579,
+        "success": true,
+        "result_summary": "Ok({'contents': \"2642       scontext->tmp_nbytes = (size_t)4 * ebsize;\\n2643       scontext->tmp = my_malloc(scontext->tmp_nbytes);\\n2644       BLOSC_ERROR_NULL(scontext->tmp, BLOSC2_ERROR_MEMORY_ALLO..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "c-blosc2/blosc/blosc2.c",
+          2850
+        ],
+        "kwargs": {},
+        "timestamp": 1633892.54240791,
+        "success": true,
+        "result_summary": "Ok({'contents': \"2751   int32_t leftoverblock;\\n2752   /* Parameters for threads */\\n2753   int32_t blocksize;\\n2754   int32_t ebsize;\\n2755   int32_t srcsize;\\n2756   bool compress = context->do_comp..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "c-blosc2/blosc/blosc2.c",
+          2960
+        ],
+        "kwargs": {},
+        "timestamp": 1633892.543987334,
+        "success": true,
+        "result_summary": "Ok({'contents': '2861       else {\\n2862         // If memcpyed we don\\'t have a bstarts section (because it is not needed)\\n2863         int32_t src_offset = memcpyed ?\\n2864             context->hea..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "c-blosc2/blosc/blosc2.c",
+          668
+        ],
+        "kwargs": {},
+        "timestamp": 1633902.811188973,
+        "success": true,
+        "result_summary": "Ok({'contents': '569   }\\n570 }\\n571 \\n572 \\n573 int next_filter(const uint8_t* filters, int current_filter, char cmode) {\\n574   for (int i = current_filter - 1; i >= 0; i--) {\\n575     if (!do_nothi..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "tmp_nbytes",
+          "c-blosc2/blosc/blosc2.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1633789.083409794,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/blosc2.c', refs=[FileReference(line=850, content='    preparams.ttmp_nbytes = thread_context->tmp_nbytes;', enclosing_definition='pipeline_c'), FileReferen..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "ebsize",
+          "c-blosc2/blosc/blosc2.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1633789.105626519,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/blosc2.c', refs=[FileReference(line=1731, content='  int32_t ebsize;', enclosing_definition='init_thread_context'), FileReference(line=1736, content='  ebs..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "BLOSC2_ERROR_MEMORY_ALLOC",
+          "c-blosc2/blosc/blosc2.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1633792.257908656,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/blosc2.c', refs=[FileReference(line=1386, content='      BLOSC_ERROR_NULL(chunkpath, BLOSC2_ERROR_MEMORY_ALLOC);', enclosing_definition='blosc_d'), FileRef..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "init_thread_context(",
+          "c-blosc2/blosc/blosc2.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1633799.391889878,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='/src/c-blosc2/blosc/blosc2.c', refs=[FileReference(line=1729, content='static int init_thread_context(struct thread_context* thread_context, blosc2_context* context, int3..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "SIZE_MAX",
+          "c-blosc2",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1633892.576245172,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='c-blosc2/blosc/win32/stdint-windows.h', refs=[FileReference(line=207, content='#ifndef SIZE_MAX // [', enclosing_definition='SIG_ATOMIC_MAX')]), FileReferences(file_name=..."
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "c-blosc2/blosc/blosc2.c",
+          "@@ -184,6 +184,28 @@\n }\n \n \n+/* Compute the size of the four temporary regions without overflowing either\n+ * the region size used by the codecs or the allocation size. */\n+static int calculate_tmp_sizes(int32_t blocksize, int32_t typesize,\n+                               size_t* ebsize, size_t* tmp_nbytes) {\n+  const size_t size_max = (size_t)-1;\n+\n+  if (blocksize <= 0 || typesize <= 0) {\n+    return BLOSC2_ERROR_INVALID_PARAM;\n+  }\n+\n+  size_t padding = (size_t)typesize * sizeof(int32_t);\n+  if ((size_t)blocksize > size_max - padding) {\n+    return BLOSC2_ERROR_INVALID_PARAM;\n+  }\n+  *ebsize = (size_t)blocksize + padding;\n+  if (*ebsize > size_max / 4 || *ebsize > INT32_MAX) {\n+    return BLOSC2_ERROR_INVALID_PARAM;\n+  }\n+  *tmp_nbytes = *ebsize * 4;\n+  return 0;\n+}\n+\n+\n /* Release memory booked by my_malloc */\n static void my_free(void* block) {\n@@ -699,6 +721,14 @@\n     BLOSC_TRACE_ERROR(\"`typesize` is zero or greater than max allowed.\");\n     return BLOSC2_ERROR_INVALID_HEADER;\n   }\n+  size_t ebsize;\n+  size_t tmp_nbytes;\n+  if (calculate_tmp_sizes(header->blocksize, header->typesize,\n+                          &ebsize, &tmp_nbytes) < 0) {\n+    BLOSC_TRACE_ERROR(\"Temporary buffer size in header is not representable.\");\n+    return BLOSC2_ERROR_INVALID_HEADER;\n+  }\n \n   /* Read extended header if it is wanted */\n@@ -1728,14 +1758,18 @@\n /* initialize a thread_context that has already been allocated */\n static int init_thread_context(struct thread_context* thread_context, blosc2_context* context, int32_t tid)\n {\n-  int32_t ebsize;\n+  size_t ebsize;\n+  size_t tmp_nbytes;\n \n   thread_context->parent_context = context;\n   thread_context->tid = tid;\n \n-  ebsize = context->blocksize + context->typesize * (signed)sizeof(int32_t);\n-  thread_context->tmp_nbytes = (size_t)4 * ebsize;\n+  int rc = calculate_tmp_sizes(context->blocksize, context->typesize,\n+                               &ebsize, &tmp_nbytes);\n+  if (rc < 0) {\n+    return rc;\n+  }\n+  thread_context->tmp_nbytes = tmp_nbytes;\n   thread_context->tmp = my_malloc(thread_context->tmp_nbytes);\n   BLOSC_ERROR_NULL(thread_context->tmp, BLOSC2_ERROR_MEMORY_ALLOC);\n@@ -1771,7 +1805,8 @@\n   BLOSC_ERROR_NULL(thread_context, NULL);\n   int rc = init_thread_context(thread_context, context, tid);\n   if (rc < 0) {\n+    my_free(thread_context);\n     return NULL;\n   }\n   return thread_context;\n@@ -2572,7 +2607,8 @@\n                    int start, int nitems, void* dest, int32_t destsize) {\n   uint8_t* _src = (uint8_t*)(src);  /* current pos for source buffer */\n   int32_t ntbytes = 0;              /* the number of uncompressed bytes */\n-  int32_t bsize, bsize2, ebsize, leftoverblock;\n+  int32_t bsize, bsize2, leftoverblock;\n+  size_t ebsize, tmp_nbytes;\n   int32_t cbytes;\n@@ -2605,7 +2641,11 @@\n     return BLOSC2_ERROR_READ_BUFFER;\n   }\n \n-  ebsize = header->blocksize + header->typesize * (signed)sizeof(int32_t);\n+  rc = calculate_tmp_sizes(header->blocksize, header->typesize,\n+                           &ebsize, &tmp_nbytes);\n+  if (rc < 0) {\n+    return BLOSC2_ERROR_INVALID_HEADER;\n+  }\n \n   for (j = 0; j < context->nblocks; j++) {\n@@ -2638,10 +2678,12 @@\n \n     /* Resize the temporaries in serial context if needed */\n     if (header->blocksize > scontext->tmp_blocksize) {\n+      uint8_t* new_tmp = my_malloc(tmp_nbytes);\n+      BLOSC_ERROR_NULL(new_tmp, BLOSC2_ERROR_MEMORY_ALLOC);\n       my_free(scontext->tmp);\n-      scontext->tmp_nbytes = (size_t)4 * ebsize;\n-      scontext->tmp = my_malloc(scontext->tmp_nbytes);\n-      BLOSC_ERROR_NULL(scontext->tmp, BLOSC2_ERROR_MEMORY_ALLOC);\n+      scontext->tmp = new_tmp;\n+      scontext->tmp_nbytes = tmp_nbytes;\n       scontext->tmp2 = scontext->tmp + ebsize;\n@@ -2751,7 +2793,8 @@\n   int32_t leftoverblock;\n   /* Parameters for threads */\n   int32_t blocksize;\n-  int32_t ebsize;\n+  int32_t ebsize;\n+  size_t region_size, tmp_nbytes;\n@@ -2767,7 +2810,15 @@\n \n   /* Get parameters for this thread before entering the main loop */\n   blocksize = context->blocksize;\n-  ebsize = blocksize + context->typesize * sizeof(int32_t);\n+  if (calculate_tmp_sizes(blocksize, context->typesize,\n+                          &region_size, &tmp_nbytes) < 0) {\n+    pthread_mutex_lock(&context->count_mutex);\n+    context->thread_giveup_code = BLOSC2_ERROR_INVALID_PARAM;\n+    pthread_mutex_unlock(&context->count_mutex);\n+    return;\n+  }\n+  ebsize = (int32_t)region_size;\n   maxbytes = context->destsize;\n@@ -2778,13 +2829,21 @@\n \n   /* Resize the temporaries if needed */\n   if (blocksize > thcontext->tmp_blocksize) {\n+    uint8_t* new_tmp = my_malloc(tmp_nbytes);\n+    if (new_tmp == NULL) {\n+      pthread_mutex_lock(&context->count_mutex);\n+      context->thread_giveup_code = BLOSC2_ERROR_MEMORY_ALLOC;\n+      pthread_mutex_unlock(&context->count_mutex);\n+      return;\n+    }\n     my_free(thcontext->tmp);\n-    thcontext->tmp_nbytes = (size_t) 4 * ebsize;\n-    thcontext->tmp = my_malloc(thcontext->tmp_nbytes);\n-    thcontext->tmp2 = thcontext->tmp + ebsize;\n-    thcontext->tmp3 = thcontext->tmp2 + ebsize;\n-    thcontext->tmp4 = thcontext->tmp3 + ebsize;\n+    thcontext->tmp = new_tmp;\n+    thcontext->tmp_nbytes = tmp_nbytes;\n+    thcontext->tmp2 = thcontext->tmp + region_size;\n+    thcontext->tmp3 = thcontext->tmp2 + region_size;\n+    thcontext->tmp4 = thcontext->tmp3 + region_size;\n     thcontext->tmp_blocksize = blocksize;\n   }\n@@ -2984,10 +3043,20 @@\n   if (threads_callback) {\n       /* Create thread contexts to store data for callback threads */\n+    if ((size_t)context->nthreads > (size_t)-1 / sizeof(struct thread_context)) {\n+      return BLOSC2_ERROR_MEMORY_ALLOC;\n+    }\n     context->thread_contexts = (struct thread_context *)my_malloc(\n-            context->nthreads * sizeof(struct thread_context));\n+            (size_t)context->nthreads * sizeof(struct thread_context));\n     BLOSC_ERROR_NULL(context->thread_contexts, BLOSC2_ERROR_MEMORY_ALLOC);\n-    for (tid = 0; tid < context->nthreads; tid++)\n-      init_thread_context(context->thread_contexts + tid, context, tid);\n+    for (tid = 0; tid < context->nthreads; tid++) {\n+      int rc = init_thread_context(context->thread_contexts + tid, context, tid);\n+      if (rc < 0) {\n+        while (--tid >= 0) {\n+          destroy_thread_context(context->thread_contexts + tid);\n+        }\n+        my_free(context->thread_contexts);\n+        context->thread_contexts = NULL;\n+        return rc;\n+      }\n+    }\n   }\n"
+        ],
+        "kwargs": {},
+        "timestamp": 1633939.741154249,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1633980.572595681,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

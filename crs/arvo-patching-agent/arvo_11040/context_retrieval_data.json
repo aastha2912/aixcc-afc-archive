@@ -1,0 +1,569 @@
+{
+  "source_questions": [
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Analyze the root cause and best fix for the sampled-frame out-of-bounds write in SkSwizzler::onSetSampleX in skia/src/codec/SkSwizzler.cpp. In particular, explain intended sampling-grid semantics for fDstOffset, fSrcWidth, fSwizzleWidth, and fAllocatedWidth, and identify existing helpers or analogous code/tests.",
+        "The ASan crash occurs for Android sampleX=33 decoding a GIF canvas width 65313 and a 1-pixel frame at x=65312. The allocated sampled width is floor(65313/33)=1979, but onSetSampleX computes destination offset 65312/33=1979 and independently forces sampled frame width to one, leading swizzle_index_to_n32 to write pixel index 1979. I need a root-cause fix in C++ under skia, not a PoC-specific filter. Please inspect relevant code and analogous sampling calculations."
+      ],
+      "kwargs": {},
+      "timestamp": 1516641.407057536,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer=\"## Root cause\\n\\n`SkSwizzler::onSetSampleX()` scales the three frame-related quantities independently:\\n\\n```cpp\\nfDstOffsetBytes = (fDstOffset / sampleX) * fDstBPP;\\n..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Why might the current frame-aware patch to SkSwizzler::onSetSampleX in skia/src/codec/SkSwizzler.cpp fail to stop the reported GIF PoV? Trace SkGifCodec's call to SkSwizzler::CreateSwizzler and determine the actual frame argument and dimensions. Also check arithmetic/logic issues in the proposed global-grid calculation.",
+        "I added a bool fFrameSubset initialized from `frame != nullptr` in CreateSwizzler, and for frame subsets calculate first global sample coordinate >= fDstOffset, frameSamples within [offset, offset+width), available pixels within fAllocatedWidth, and set fSwizzleWidth=min(frameSamples, available), with swizzle returning for width zero. Yet test_patch reports the exact same ASan OOB in swizzle_index_to_n32. The PoV canvas is 65313 wide, sampleX=33, 1x1 frame at x=65312. Please inspect skia/src/codec/SkGifCodec.cpp and skia/src/codec/SkSwizzler.cpp call path and explain why fFrameSubset might be false or dimensions differ."
+      ],
+      "kwargs": {},
+      "timestamp": 1517290.18855067,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='`fFrameSubset` should **not** be false on the GIF path shown in this tree.\\n\\n- `SkGifCodec::initializeSwizzler()` builds a local `swizzleRect` and passes `&swizzleRec..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Propose three alternate source-level fixes for the reported GIF sampled-frame OOB if changes in SkSwizzler::onSetSampleX and even a defensive range clamp in SkSwizzler::swizzle appear not to affect the test result. Focus on skia/src/codec/SkGifCodec.cpp haveDecodedRow/initializeSwizzler, SkSwizzler APIs, or changing the frame geometry passed to sampling. Recommend the smallest robust root-cause fix that guarantees no write beyond fDstRowBytes while preserving sampling semantics.",
+        "I implemented global sampling-grid intersection in skia/src/codec/SkSwizzler.cpp using an explicit fFrameSubset member in skia/src/codec/SkSwizzler.h, and zero-width early return. For the PoV it mathematically yields no samples. test_patch nevertheless reports the identical OOB. I also briefly added an unconditional clamp in swizzle based on fDstOffsetBytes/fDstBPP and fAllocatedWidth, but test still reported identical crash, so I undid only that defensive clamp. Current edits are the frame-aware constructor/member and onSetSampleX logic. Need an alternate approach, likely at GIF call site or before swizzle."
+      ],
+      "kwargs": {},
+      "timestamp": 1517661.40715335,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='The unchanged crash can plausibly be outside `SkSwizzler::swizzle()`. `haveDecodedRow()` independently trusts the same unchecked geometry in two later write paths:\\n\\n..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Give three genuinely different patch strategies at higher layers for this exact sampled GIF frame OOB, and determine whether SkSampledCodec can reject decoding when sampler geometry exceeds the requested output. Inspect skia/src/codec/SkSampledCodec.cpp around sampler->setSampleX and SkGifCodec. I need a strategy that does not depend on the current SkSwizzler frame-width calculation.",
+        "Multiple direct changes to skia/src/codec/SkSwizzler.cpp (global grid, clamp, zero-width return) and skia/src/codec/SkGifCodec.cpp (early return if sampled xBegin beyond scaled destination) have oddly continued to produce the identical ASan trace in test_patch. Current source contains those changes. I want an independent boundary check in SkSampledCodec or decode setup that prevents row decoding when sampler-reported offset/width cannot fit the allocated requested info. PoV requested output width is 1979 for native width 65313 and sampleX 33."
+      ],
+      "kwargs": {},
+      "timestamp": 1518771.658178796,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='Yes, `SkSampledCodec` can reject before any row decode, but **not with the current `SkSampler` interface alone**.\\n\\n### What happens now\\n\\nIn `SkSampledCodec::sample..."
+    }
+  ],
+  "read_definition": [
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "SkSwizzler",
+        "skia/src/codec/SkSwizzler.h",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1516469.778835761,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "onSetSampleX",
+        "skia/src/codec/SkSwizzler.cpp",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1516469.782174624,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1210 int SkSwizzler::onSetSampleX(int sampleX) {, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "onSetSampleX",
+        "skia/src/codec/SkSwizzler.cpp",
+        1210,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1516653.170403214,
+      "success": true,
+      "result_summary": "Ok({'contents': \"1210 int SkSwizzler::onSetSampleX(int sampleX) {\\n1211     SkASSERT(sampleX > 0);\\n1212 \\n1213     fSampleX = sampleX;\\n1214     fSrcOffsetUnits = (get_start_coord(sampleX) + fSrcOffs..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "swizzle",
+        "skia/src/codec/SkSwizzler.cpp",
+        1231,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1516666.078055769,
+      "success": true,
+      "result_summary": "Ok({'contents': '1231 void SkSwizzler::swizzle(void* dst, const uint8_t* SK_RESTRICT src) {\\n1232     SkASSERT(nullptr != dst && nullptr != src);\\n1233     fActualProc(SkTAddOffset<void>(dst, fDstOffs..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "haveDecodedRow",
+        "skia/src/codec/SkGifCodec.cpp",
+        420,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1517533.785615334,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n411 void SkGifCodec::haveDecodedRow(int frameIndex, const unsigned char* rowBegin,, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "initializeSwizzler",
+        "skia/src/codec/SkGifCodec.cpp",
+        230,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1517533.789691245,
+      "success": true,
+      "result_summary": "Ok({'contents': \"230 void SkGifCodec::initializeSwizzler(const SkImageInfo& dstInfo, int frameIndex) {\\n231     const SkGIFFrameContext* frame = fReader->frameContext(frameIndex);\\n232     // This is ..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "haveDecodedRow",
+        "skia/src/codec/SkGifCodec.cpp",
+        411,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1517664.371275147,
+      "success": true,
+      "result_summary": "Ok({'contents': '411 void SkGifCodec::haveDecodedRow(int frameIndex, const unsigned char* rowBegin,\\n412                                 int rowNumber, int repeatCount, bool writeTransparentPixels)\\n4..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "applyXformRow",
+        "skia/src/codec/SkGifCodec.cpp",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1517669.145646232,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n386 void SkGifCodec::applyXformRow(const SkImageInfo& dstInfo, void* dst, const uint8_t* src) const {, extra..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "applyXformRow",
+        "skia/src/codec/SkGifCodec.cpp",
+        386,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1517671.101829921,
+      "success": true,
+      "result_summary": "Ok({'contents': '386 void SkGifCodec::applyXformRow(const SkImageInfo& dstInfo, void* dst, const uint8_t* src) const {\\n387     if (this->xformOnDecode()) {\\n388         SkASSERT(this->colorXform());\\..."
+    }
+  ],
+  "read_source": [
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/codec/SkSwizzler.cpp",
+        1130
+      ],
+      "kwargs": {},
+      "timestamp": 1516653.162696917,
+      "success": true,
+      "result_summary": "Ok({'contents': \"1031                             }\\n1032                         }\\n1033                         break;\\n1034                     case kBGRA_8888_SkColorType:\\n1035                   ..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/codec/SkCodecPriv.h",
+        30
+      ],
+      "kwargs": {},
+      "timestamp": 1516653.164497782,
+      "success": true,
+      "result_summary": "Ok({'contents': '  1 /*\\n  2  * Copyright 2015 The Android Open Source Project\\n  3  *\\n  4  * Use of this source code is governed by a BSD-style license that can be\\n  5  * found in the LICENSE file...."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/codec/SkSwizzler.h",
+        100
+      ],
+      "kwargs": {},
+      "timestamp": 1516653.165412445,
+      "success": true,
+      "result_summary": "Ok({'contents': '  1 /*\\n  2  * Copyright 2015 Google Inc.\\n  3  *\\n  4  * Use of this source code is governed by a BSD-style license that can be\\n  5  * found in the LICENSE file.\\n  6  */\\n  7 \\n  8..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/codec/SkSwizzler.h",
+        185
+      ],
+      "kwargs": {},
+      "timestamp": 1516666.066527455,
+      "success": true,
+      "result_summary": "Ok({'contents': ' 86      *  @param dstRow Row in which to write the resulting pixels.\\n 87      *  @param src Row of src data, in format specified by SrcConfig\\n 88      *  @param dstWidth Width in p..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/codec/SkSwizzler.cpp",
+        1
+      ],
+      "kwargs": {},
+      "timestamp": 1516706.085658641,
+      "success": true,
+      "result_summary": "Ok({'contents': '  1 /*\\n  2  * Copyright 2015 Google Inc.\\n  3  *\\n  4  * Use of this source code is governed by a BSD-style license that can be\\n  5  * found in the LICENSE file.\\n  6  */\\n  7 \\n  8..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/codec/SkGifCodec.cpp",
+        220
+      ],
+      "kwargs": {},
+      "timestamp": 1517299.160442734,
+      "success": true,
+      "result_summary": "Ok({'contents': '121     fReader->parse(SkGifImageReader::SkGIFFrameCountQuery);\\n122     return fReader->imagesCount();\\n123 }\\n124 \\n125 bool SkGifCodec::onGetFrameInfo(int i, SkCodec::FrameInfo* fr..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/codec/SkGifCodec.cpp",
+        475
+      ],
+      "kwargs": {},
+      "timestamp": 1517957.205989619,
+      "success": true,
+      "result_summary": "Ok({'contents': '376         }\\n377         if (fatalError) {\\n378             return kErrorInInput;\\n379         }\\n380         return kIncompleteInput;\\n381     }\\n382 \\n383     return kSuccess;\\n38..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/codec/SkGifCodec.cpp",
+        475
+      ],
+      "kwargs": {},
+      "timestamp": 1518206.235076359,
+      "success": true,
+      "result_summary": "Ok({'contents': '376         }\\n377         if (fatalError) {\\n378             return kErrorInInput;\\n379         }\\n380         return kIncompleteInput;\\n381     }\\n382 \\n383     return kSuccess;\\n38..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "skia/src/codec/SkSampledCodec.cpp",
+        210
+      ],
+      "kwargs": {},
+      "timestamp": 1518652.560682179,
+      "success": true,
+      "result_summary": "Ok({'contents': '111                                                       scaledSubsetWidth, scaledSubsetHeight);\\n112         codecOptions.fSubset = &incrementalSubset;\\n113         const SkCodec::R..."
+    }
+  ],
+  "find_references": [
+    {
+      "tool_name": "find_references",
+      "args": [
+        "SkSwizzler(",
+        "skia/src/codec/SkSwizzler.cpp",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1516686.381863244,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/skia/src/codec/SkSwizzler.cpp', refs=[FileReference(line=1187, content='    return new SkSwizzler(fastProc, proc, ctable, srcOffset, srcWidth, dstOffset, dstWidth,',..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "CreateSwizzler",
+        "skia/src/codec/SkGifCodec.cpp",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1517163.989982935,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='skia/src/codec/SkGifCodec.cpp', refs=[FileReference(line=257, content='    fSwizzler.reset(SkSwizzler::CreateSwizzler(this->getEncodedInfo(),', enclosing_definition='init..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "setSampleX",
+        "skia/src/codec/SkSampledCodec.cpp",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1518633.543948019,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='skia/src/codec/SkSampledCodec.cpp', refs=[FileReference(line=237, content='            if (sampler->setSampleX(sampleX) != info.width()) {', enclosing_definition='sampled..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "fSwizzleWidth",
+        "skia/src/codec/SkSwizzler.cpp",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1518633.558301051,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='skia/src/codec/SkSwizzler.cpp', refs=[FileReference(line=1203, content='    , fSwizzleWidth(srcWidth)', enclosing_definition='CreateSwizzler'), FileReference(line=1216, c..."
+    }
+  ],
+  "apply_patch": [
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/codec/SkSwizzler.h",
+        "@@ -187,6 +187,7 @@\n     //         fSwizzleWidth = fAllcoatedWidth = Scaled width (if we are sampling)\n     const int           fSrcOffset;\n     const int           fDstOffset;\n+    const bool          fFrameSubset;\n     int                 fSrcOffsetUnits;\n     int                 fDstOffsetBytes;\n     const int           fSrcWidth;\n@@ -203,7 +204,8 @@\n     const int           fDstBPP;          // Bytes per pixel for the destination color type\n \n     SkSwizzler(RowProc fastProc, RowProc proc, const SkPMColor* ctable, int srcOffset,\n-            int srcWidth, int dstOffset, int dstWidth, int srcBPP, int dstBPP);\n+            int srcWidth, int dstOffset, int dstWidth, int srcBPP, int dstBPP,\n+            bool frameSubset);\n \n     int onSetSampleX(int) override;\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1516724.092699483,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/codec/SkSwizzler.cpp",
+        "@@ -1184,12 +1184,12 @@\n         srcWidth = frame->width();\n     }\n \n     return new SkSwizzler(fastProc, proc, ctable, srcOffset, srcWidth, dstOffset, dstWidth,\n-            srcBPP, dstBPP);\n+            srcBPP, dstBPP, frame != nullptr);\n }\n \n SkSwizzler::SkSwizzler(RowProc fastProc, RowProc proc, const SkPMColor* ctable, int srcOffset,\n-        int srcWidth, int dstOffset, int dstWidth, int srcBPP, int dstBPP)\n+        int srcWidth, int dstOffset, int dstWidth, int srcBPP, int dstBPP, bool frameSubset)\n     : fFastProc(fastProc)\n     , fSlowProc(proc)\n     , fActualProc(fFastProc ? fFastProc : fSlowProc)\n@@ -1196,6 +1196,7 @@\n     , fColorTable(ctable)\n     , fSrcOffset(srcOffset)\n     , fDstOffset(dstOffset)\n+    , fFrameSubset(frameSubset)\n     , fSrcOffsetUnits(srcOffset * srcBPP)\n     , fDstOffsetBytes(dstOffset * dstBPP)\n     , fSrcWidth(srcWidth)\n@@ -1211,10 +1212,35 @@\n     SkASSERT(sampleX > 0);\n \n     fSampleX = sampleX;\n-    fSrcOffsetUnits = (get_start_coord(sampleX) + fSrcOffset) * fSrcBPP;\n-    fDstOffsetBytes = (fDstOffset / sampleX) * fDstBPP;\n-    fSwizzleWidth = get_scaled_dimension(fSrcWidth, sampleX);\n     fAllocatedWidth = get_scaled_dimension(fDstWidth, sampleX);\n+    if (fFrameSubset) {\n+        // A frame is sampled on the full image's grid, not on a grid local to the frame.\n+        // Find the first grid point in the frame and derive both its source and destination\n+        // offsets from that same point.\n+        const int start = get_start_coord(sampleX);\n+        int first = start;\n+        if (first < fDstOffset) {\n+            first += ((fDstOffset - first + sampleX - 1) / sampleX) * sampleX;\n+        }\n+\n+        fSrcOffsetUnits = (first - fDstOffset) * fSrcBPP;\n+        const int sampledOffset = get_dst_coord(first, sampleX);\n+        fDstOffsetBytes = sampledOffset * fDstBPP;\n+\n+        const int frameRight = fDstOffset + fSrcWidth;\n+        int frameSamples = 0;\n+        if (first < frameRight) {\n+            frameSamples = 1 + (frameRight - 1 - first) / sampleX;\n+        }\n+        const int available = sampledOffset < fAllocatedWidth\n+                ? fAllocatedWidth - sampledOffset : 0;\n+        fSwizzleWidth = frameSamples < available ? frameSamples : available;\n+    } else {\n+        fSrcOffsetUnits = (get_start_coord(sampleX) + fSrcOffset) * fSrcBPP;\n+        fDstOffsetBytes = 0;\n+        fSwizzleWidth = get_scaled_dimension(fSrcWidth, sampleX);\n+    }\n \n     // The optimized swizzler functions do not support sampling.  Sampled swizzles\n@@ -1229,6 +1255,10 @@\n }\n \n void SkSwizzler::swizzle(void* dst, const uint8_t* SK_RESTRICT src) {\n     SkASSERT(nullptr != dst && nullptr != src);\n+    if (0 == fSwizzleWidth) {\n+        return;\n+    }\n+\n     fActualProc(SkTAddOffset<void>(dst, fDstOffsetBytes), src, fSwizzleWidth, fSrcBPP,\n             fSampleX * fSrcBPP, fSrcOffsetUnits, fColorTable);\n }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1516964.948339162,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/codec/SkSwizzler.cpp",
+        "@@ -1255,10 +1255,20 @@\n }\n \n void SkSwizzler::swizzle(void* dst, const uint8_t* SK_RESTRICT src) {\n     SkASSERT(nullptr != dst && nullptr != src);\n-    if (0 == fSwizzleWidth) {\n+\n+    // RowProcs trust their width. Keep the write range within the sampled destination even\n+    // if an unusual frame/subset geometry reaches this point.\n+    const int dstOffset = fDstOffsetBytes / fDstBPP;\n+    if (dstOffset < 0 || dstOffset >= fAllocatedWidth || fSwizzleWidth <= 0) {\n         return;\n     }\n+    int width = fSwizzleWidth;\n+    const int available = fAllocatedWidth - dstOffset;\n+    if (width > available) {\n+        width = available;\n+    }\n \n-    fActualProc(SkTAddOffset<void>(dst, fDstOffsetBytes), src, fSwizzleWidth, fSrcBPP,\n+    fActualProc(SkTAddOffset<void>(dst, fDstOffsetBytes), src, width, fSrcBPP,\n             fSampleX * fSrcBPP, fSrcOffsetUnits, fColorTable);\n }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1517313.121215229,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/codec/SkGifCodec.cpp",
+        "@@ -481,6 +481,18 @@\n     // called.\n     SkASSERT(fCurrColorTableIsReal);\n \n+    // A sampled frame can lie entirely in the discarded tail of the full image.  The\n+    // swizzler historically rounds a narrow frame up to one pixel independently of its\n+    // sampled destination offset, so validate the complete destination span before allowing\n+    // any row write.\n+    const size_t offsetBytes = fSwizzler->swizzleOffsetBytes();\n+    const size_t bytesPerPixel = this->dstInfo().bytesPerPixel();\n+    const size_t swizzleWidth = fSwizzler->swizzleWidth();\n+    if (offsetBytes > fDstRowBytes ||\n+        swizzleWidth > (fDstRowBytes - offsetBytes) / bytesPerPixel) {\n+        return;\n+    }\n+\n     // The swizzler takes care of offsetting into the dst width-wise.\n     void* dstLine = SkTAddOffset<void>(fDst, dstRow * fDstRowBytes);\n \n@@ -496,7 +508,7 @@\n     } else {\n         this->applyXformRow(dstInfo, fTmpBuffer.get(), rowBegin);\n \n-        size_t offsetBytes = fSwizzler->swizzleOffsetBytes();\n+        size_t offsetBytes = fSwizzler->swizzleOffsetBytes();\n         if (dstInfo.colorType() == kRGBA_F16_SkColorType) {\n             // Account for the fact that post-swizzling we converted to F16,\n             // which is twice as wide.\n@@ -521,8 +533,7 @@\n \n     // Tell the frame to copy the row data if need be.\n     if (repeatCount > 1) {\n-        const size_t bytesPerPixel = this->dstInfo().bytesPerPixel();\n-        const size_t bytesToCopy = fSwizzler->swizzleWidth() * bytesPerPixel;\n+        const size_t bytesToCopy = swizzleWidth * bytesPerPixel;\n         void* copiedLine = SkTAddOffset<void>(dstLine, fSwizzler->swizzleOffsetBytes());\n         void* dst = copiedLine;\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1517712.477589637,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/codec/SkGifCodec.cpp",
+        "@@ -481,18 +481,6 @@\n     // called.\n     SkASSERT(fCurrColorTableIsReal);\n \n-    // A sampled frame can lie entirely in the discarded tail of the full image.  The\n-    // swizzler historically rounds a narrow frame up to one pixel independently of its\n-    // sampled destination offset, so validate the complete destination span before allowing\n-    // any row write.\n-    const size_t offsetBytes = fSwizzler->swizzleOffsetBytes();\n-    const size_t bytesPerPixel = this->dstInfo().bytesPerPixel();\n-    const size_t swizzleWidth = fSwizzler->swizzleWidth();\n-    if (offsetBytes > fDstRowBytes ||\n-        swizzleWidth > (fDstRowBytes - offsetBytes) / bytesPerPixel) {\n-        return;\n-    }\n-\n     // The swizzler takes care of offsetting into the dst width-wise.\n     void* dstLine = SkTAddOffset<void>(fDst, dstRow * fDstRowBytes);\n \n@@ -508,7 +496,7 @@\n     } else {\n         this->applyXformRow(dstInfo, fTmpBuffer.get(), rowBegin);\n \n-        size_t offsetBytes = fSwizzler->swizzleOffsetBytes();\n+        size_t offsetBytes = fSwizzler->swizzleOffsetBytes();\n         if (dstInfo.colorType() == kRGBA_F16_SkColorType) {\n             // Account for the fact that post-swizzling we converted to F16,\n             // which is twice as wide.\n@@ -533,7 +521,8 @@\n \n     // Tell the frame to copy the row data if need be.\n     if (repeatCount > 1) {\n-        const size_t bytesToCopy = swizzleWidth * bytesPerPixel;\n+        const size_t bytesPerPixel = this->dstInfo().bytesPerPixel();\n+        const size_t bytesToCopy = fSwizzler->swizzleWidth() * bytesPerPixel;\n         void* copiedLine = SkTAddOffset<void>(dstLine, fSwizzler->swizzleOffsetBytes());\n         void* dst = copiedLine;\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1517950.601014287,
+      "success": true,
+      "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 2 (line 533): The patch context lines have introduced a typographic error. The context you provided removed `)`. Please double check ..."
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/codec/SkGifCodec.cpp",
+        "@@ -481,18 +481,6 @@\n     // called.\n     SkASSERT(fCurrColorTableIsReal);\n \n-    // A sampled frame can lie entirely in the discarded tail of the full image.  The\n-    // swizzler historically rounds a narrow frame up to one pixel independently of its\n-    // sampled destination offset, so validate the complete destination span before allowing\n-    // any row write.\n-    const size_t offsetBytes = fSwizzler->swizzleOffsetBytes();\n-    const size_t bytesPerPixel = this->dstInfo().bytesPerPixel();\n-    const size_t swizzleWidth = fSwizzler->swizzleWidth();\n-    if (offsetBytes > fDstRowBytes ||\n-        swizzleWidth > (fDstRowBytes - offsetBytes) / bytesPerPixel) {\n-        return;\n-    }\n-\n     // The swizzler takes care of offsetting into the dst width-wise.\n     void* dstLine = SkTAddOffset<void>(fDst, dstRow * fDstRowBytes);\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1517964.543046701,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/codec/SkSwizzler.cpp",
+        "@@ -1211,10 +1211,23 @@\n     SkASSERT(sampleX > 0);\n \n     fSampleX = sampleX;\n-    fSrcOffsetUnits = (get_start_coord(sampleX) + fSrcOffset) * fSrcBPP;\n-    fDstOffsetBytes = (fDstOffset / sampleX) * fDstBPP;\n-    fSwizzleWidth = get_scaled_dimension(fSrcWidth, sampleX);\n     fAllocatedWidth = get_scaled_dimension(fDstWidth, sampleX);\n+    const int sampledOffset = fDstOffset / sampleX;\n+    fDstOffsetBytes = sampledOffset * fDstBPP;\n+\n+    // Frame subsets have a non-zero destination offset. Their independently rounded width\n+    // must never extend beyond the sampled full-image allocation.\n+    if (fDstOffset != 0) {\n+        const int remaining = sampledOffset < fAllocatedWidth\n+                ? fAllocatedWidth - sampledOffset : 0;\n+        fSwizzleWidth = SkTMin(get_scaled_dimension(fSrcWidth, sampleX), remaining);\n+    } else {\n+        fSwizzleWidth = get_scaled_dimension(fSrcWidth, sampleX);\n+    }\n+    fSrcOffsetUnits = (get_start_coord(sampleX) + fSrcOffset) * fSrcBPP;\n \n     // The optimized swizzler functions do not support sampling.  Sampled swizzles\n@@ -1230,6 +1243,9 @@\n \n void SkSwizzler::swizzle(void* dst, const uint8_t* SK_RESTRICT src) {\n     SkASSERT(nullptr != dst && nullptr != src);\n+    if (fSwizzleWidth <= 0) {\n+        return;\n+    }\n     fActualProc(SkTAddOffset<void>(dst, fDstOffsetBytes), src, fSwizzleWidth, fSrcBPP,\n             fSampleX * fSrcBPP, fSrcOffsetUnits, fColorTable);\n }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1517997.137926611,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/codec/SkSwizzler.cpp",
+        "@@ -1213,19 +1213,36 @@\n     fSampleX = sampleX;\n     fAllocatedWidth = get_scaled_dimension(fDstWidth, sampleX);\n-    const int sampledOffset = fDstOffset / sampleX;\n-    fDstOffsetBytes = sampledOffset * fDstBPP;\n-\n-    // Frame subsets have a non-zero destination offset. Their independently rounded width\n-    // must never extend beyond the sampled full-image allocation.\n-    if (fDstOffset != 0) {\n-        const int remaining = sampledOffset < fAllocatedWidth\n-                ? fAllocatedWidth - sampledOffset : 0;\n-        fSwizzleWidth = SkTMin(get_scaled_dimension(fSrcWidth, sampleX), remaining);\n+    if (fDstOffset != 0 || fDstWidth != fSrcWidth) {\n+        // Sample frame subsets on the full image's grid. Computing a sampled frame width\n+        // independently (which rounds narrow frames up to one) can place a pixel beyond the\n+        // sampled full-image allocation.\n+        const int64_t start = get_start_coord(sampleX);\n+        const int64_t left = fDstOffset;\n+        const int64_t right = left + fSrcWidth;\n+        int64_t first = start;\n+        if (first < left) {\n+            first += ((left - first + sampleX - 1) / sampleX) * sampleX;\n+        }\n+\n+        const int sampledOffset = static_cast<int>(first / sampleX);\n+        fDstOffsetBytes = sampledOffset * fDstBPP;\n+        fSrcOffsetUnits = static_cast<int>(first - left) * fSrcBPP;\n+\n+        int count = first < right ? static_cast<int>(1 + (right - 1 - first) / sampleX) : 0;\n+        const int available = sampledOffset < fAllocatedWidth\n+                ? fAllocatedWidth - sampledOffset : 0;\n+        fSwizzleWidth = SkTMin(count, available);\n     } else {\n+        fSrcOffsetUnits = (get_start_coord(sampleX) + fSrcOffset) * fSrcBPP;\n+        fDstOffsetBytes = 0;\n         fSwizzleWidth = get_scaled_dimension(fSrcWidth, sampleX);\n     }\n-    fSrcOffsetUnits = (get_start_coord(sampleX) + fSrcOffset) * fSrcBPP;\n \n     // The optimized swizzler functions do not support sampling.  Sampled swizzles\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1518217.865370807,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 4 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "skia/src/codec/SkGifCodec.cpp",
+        "@@ -424,8 +424,17 @@\n     const int xEnd = std::min(xBegin + width, this->dimensions().width());\n     const int yEnd = std::min(yBegin + rowNumber + repeatCount, this->dimensions().height());\n     // FIXME: No need to make the checks on width/xBegin/xEnd for every row. We could instead do\n     // this once in prepareToDecode.\n-    if (!width || (xBegin < 0) || (yBegin < 0) || (xEnd <= xBegin) || (yEnd <= yBegin))\n+    if (!width || (xBegin < 0) || (yBegin < 0) || (xEnd <= xBegin) || (yEnd <= yBegin)) {\n         return;\n+    }\n+\n+    // The sampled destination may have no pixel corresponding to a frame in the discarded\n+    // right edge of the image. Do not ask the swizzler to manufacture a pixel for such a frame.\n+    const int sampleX = fSwizzler->sampleX();\n+    const int sampledX = xBegin / sampleX;\n+    if (sampledX >= get_scaled_dimension(this->dstInfo().width(), sampleX)) {\n+        return;\n+    }\n \n     // yBegin is the first row in the non-sampled image. dstRow will be the row in the output,\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1518424.765278571,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 5 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    }
+  ],
+  "test_patch": [
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1516922.853896061,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'android_codec', 'dedup': 'swizzle_index_to_n32(void*, unsigned char const*, int, int, int, ..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1517154.230398767,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'android_codec', 'dedup': 'swizzle_index_to_n32(void*, unsigned char const*, int, int, int, ..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1517493.632552189,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'android_codec', 'dedup': 'swizzle_index_to_n32(void*, unsigned char const*, int, int, int, ..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1517521.836252873,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'android_codec', 'dedup': 'swizzle_index_to_n32(void*, unsigned char const*, int, int, int, ..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1517899.872990304,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'android_codec', 'dedup': 'swizzle_index_to_n32(void*, unsigned char const*, int, int, int, ..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1518180.63757974,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'android_codec', 'dedup': 'swizzle_index_to_n32(void*, unsigned char const*, int, int, int, ..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1518395.055566815,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'android_codec', 'dedup': 'swizzle_index_to_n32(void*, unsigned char const*, int, int, int, ..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1518615.767466975,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'android_codec', 'dedup': 'swizzle_index_to_n32(void*, unsigned char const*, int, int, int, ..."
+    }
+  ],
+  "undo_last_patch": [
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1517497.525105731,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 2})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1517684.077370431,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 1})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1517685.750445094,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 0})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1518778.343284491,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 4})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1518780.030262281,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 3})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1518783.947309522,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 2})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1518785.958452646,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 1})"
+    }
+  ],
+  "list_current_edits": [
+    {
+      "tool_name": "list_current_edits",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1517163.878279703,
+      "success": true,
+      "result_summary": "Ok({'edits': ['@@ -187,6 +187,7 @@\\n     //         fSwizzleWidth = fAllcoatedWidth = Scaled width (if we are sampling)\\n     const int           fSrcOffset;\\n     const int           fDstOffset;\\n+  ..."
+    },
+    {
+      "tool_name": "list_current_edits",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1517908.993854513,
+      "success": true,
+      "result_summary": "Ok({'edits': ['@@ -481,6 +481,18 @@\\n     // called.\\n     SkASSERT(fCurrColorTableIsReal);\\n \\n+    // A sampled frame can lie entirely in the discarded tail of the full image.  The\\n+    // swizzler..."
+    },
+    {
+      "tool_name": "list_current_edits",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1518183.467013938,
+      "success": true,
+      "result_summary": "Ok({'edits': ['@@ -481,6 +481,18 @@\\n     // called.\\n     SkASSERT(fCurrColorTableIsReal);\\n \\n+    // A sampled frame can lie entirely in the discarded tail of the full image.  The\\n+    // swizzler..."
+    }
+  ]
+}

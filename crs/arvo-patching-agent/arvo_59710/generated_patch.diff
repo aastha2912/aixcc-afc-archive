@@ -1,0 +1,115 @@
+--- a/Packet++/src/DnsLayer.cpp
++++ b/Packet++/src/DnsLayer.cpp
+@@ -139,10 +139,57 @@
+ }
+ 
+ 
++static bool getDnsNameLength(const uint8_t* data, size_t dataLen, size_t offset,
++							 size_t offsetAdjustment, size_t& nameLength)
++{
++	nameLength = 0;
++
++	while (true)
++	{
++		if (offset >= dataLen || nameLength >= 255)
++			return false;
++
++		uint8_t labelLength = data[offset];
++		if (labelLength == 0)
++		{
++			nameLength++;
++			return true;
++		}
++
++		if ((labelLength & 0xc0) == 0xc0)
++		{
++			if (dataLen - offset < sizeof(uint16_t) || nameLength > 253)
++				return false;
++
++			size_t pointerOffset = ((labelLength & 0x3f) << 8) | data[offset + 1];
++			pointerOffset += offsetAdjustment;
++			if (pointerOffset < sizeof(dnshdr) || pointerOffset >= dataLen)
++				return false;
++
++			nameLength += sizeof(uint16_t);
++			return true;
++		}
++
++		// The other two high-bit combinations are reserved, and a DNS label is at most 63 bytes.
++		if ((labelLength & 0xc0) != 0)
++			return false;
++
++		size_t encodedLabelLength = static_cast<size_t>(labelLength) + 1;
++		if (encodedLabelLength > dataLen - offset || encodedLabelLength > 255 - nameLength)
++			return false;
++
++		offset += encodedLabelLength;
++		nameLength += encodedLabelLength;
++	}
++}
++
++
+ void DnsLayer::parseResources()
+ {
+ 	size_t offsetInPacket = getBasicHeaderSize();
+ 	IDnsResource* curResource = m_ResourceList;
++	if (offsetInPacket > m_DataLen)
++		return;
+ 
+ 	uint16_t numOfQuestions = be16toh(getDnsHeader()->numberOfQuestions);
+ 	uint16_t numOfAnswers = be16toh(getDnsHeader()->numberOfAnswers);
+@@ -182,6 +229,31 @@
+ 			numOfAdditional--;
+ 		}
+ 
++		size_t nameLength = 0;
++		if (!getDnsNameLength(m_Data, m_DataLen, offsetInPacket, m_OffsetAdjustment, nameLength))
++			return;
++
++		const size_t fixedFieldsLength = (resType == DnsQueryType)
++				? 2 * sizeof(uint16_t)
++				: 3 * sizeof(uint16_t) + sizeof(uint32_t);
++		const size_t remainingLength = m_DataLen - offsetInPacket;
++		if (nameLength > remainingLength || fixedFieldsLength > remainingLength - nameLength)
++			return;
++
++		size_t resourceSize = nameLength + fixedFieldsLength;
++		if (resType != DnsQueryType)
++		{
++			// RDLENGTH is the last uint16_t in the fixed part of a resource record.
++			uint16_t encodedDataLength = 0;
++			memcpy(&encodedDataLength,
++				   m_Data + offsetInPacket + nameLength + fixedFieldsLength - sizeof(uint16_t),
++				   sizeof(encodedDataLength));
++			size_t dataLength = be16toh(encodedDataLength);
++			if (dataLength > remainingLength - resourceSize)
++				return;
++			resourceSize += dataLength;
++		}
++
+ 		DnsResource* newResource = nullptr;
+ 		DnsQuery* newQuery = nullptr;
+ 		IDnsResource* newGenResource = nullptr;
+@@ -189,21 +261,14 @@
+ 		{
+ 			newQuery = new DnsQuery(this, offsetInPacket);
+ 			newGenResource = newQuery;
+-			offsetInPacket += newQuery->getSize();
+ 		}
+ 		else
+ 		{
+ 			newResource = new DnsResource(this, offsetInPacket, resType);
+ 			newGenResource = newResource;
+-			offsetInPacket += newResource->getSize();
+ 		}
+ 
+-		if (offsetInPacket > m_DataLen)
+-		{
+-			//Parse packet failed, DNS resource is out of bounds. Probably a bad packet
+-			delete newGenResource;
+-			return;
+-		}
++		offsetInPacket += resourceSize;
+ 
+ 		// this resource is the first resource
+ 		if (m_ResourceList == nullptr)

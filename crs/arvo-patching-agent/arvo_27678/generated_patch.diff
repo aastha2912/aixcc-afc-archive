@@ -1,0 +1,65 @@
+--- a/src/core/SkScan_Path.cpp
++++ b/src/core/SkScan_Path.cpp
+@@ -310,27 +310,52 @@
+ public:
+     void setBlitter(SkBlitter* blitter, const SkIRect& clip, int shift) {
+         fBlitter = blitter;
+-        fFirstX = clip.fLeft << shift;
+-        fLastX = clip.fRight << shift;
++        fFirstX = SkLeftShift(clip.fLeft, shift);
++        fLastX = SkLeftShift(clip.fRight, shift);
+     }
+     void prepost(int y, bool isStart) {
+         if (isStart) {
+             fPrevX = fFirstX;
+-        } else {
++        } else if (fPrevX < fLastX) {
+             int invWidth = fLastX - fPrevX;
+-            if (invWidth > 0) {
+-                fBlitter->blitH(fPrevX, y, invWidth);
+-            }
++            fBlitter->blitH(fPrevX, y, invWidth);
+         }
+     }
+ 
+     // overrides
+     void blitH(int x, int y, int width) override {
+-        int invWidth = x - fPrevX;
+-        if (invWidth > 0) {
+-            fBlitter->blitH(fPrevX, y, invWidth);
++        if (width <= 0) {
++            return;
++        }
++
++        // Only the part of the ordinary span inside the inverse clip can affect
++        // the complementary span. Compute its endpoint in 64 bits before
++        // clamping so that x + width cannot overflow.
++        int left = x;
++        if (left < fFirstX) {
++            left = fFirstX;
++        } else if (left > fLastX) {
++            left = fLastX;
++        }
++
++        const int64_t unclippedRight = static_cast<int64_t>(x) + width;
++        int right;
++        if (unclippedRight < fFirstX) {
++            right = fFirstX;
++        } else if (unclippedRight > fLastX) {
++            right = fLastX;
++        } else {
++            right = static_cast<int>(unclippedRight);
++        }
++
++        if (fPrevX < left) {
++            fBlitter->blitH(fPrevX, y, left - fPrevX);
++        }
++        // Keep the consumed endpoint in the clip and monotonic in case spans
++        // overlap or arrive outside the clip.
++        if (fPrevX < right) {
++            fPrevX = right;
+         }
+-        fPrevX = x + width;
+     }
+ 
+     // we do not expect to get called with these entrypoints

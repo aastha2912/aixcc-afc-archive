@@ -1,0 +1,132 @@
+{
+  "source_questions": [
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "In libxml2/HTMLparser.c, analyze htmlParseTryOrFinish (definition starts around line 5498) for the safest minimal root-cause fix to stale `in`/`avail` after callbacks or parser helpers invoke xmlHaltParser. Is there an upstream patch pattern or a particularly suitable control-flow point? Identify all places within a switch iteration where execution can access `in->cur` after a SAX callback/helper could set `ctxt->instate = XML_PARSER_EOF` and replace the input buffer. Recommend whether a general post-switch check suffices or where immediate checks are required.",
+        "The supplied ASan reproducer enters the HTML push parser with `<meta charset=TSCII>` and malformed high bytes. `xmlHaltParser` in libxml2/parserInternals.c frees the input buffer, sets EOF, and sets base/cur/end to the global one-byte empty string. htmlParseTryOrFinish caches `in` and positive `avail` at loop entry. In the XML_PARSER_CONTENT text loop around lines 6084-6092, htmlParseCharData/htmlParseReference may halt, but line 6091 still reads `in->cur[0]`. Other state cases also call SAX callbacks and parsing helpers before accesses. I want a focused C-source fix under libxml2 that addresses changed input state/pointers, ideally consistent with upstream style, rather than only masking the exact PoC."
+      ],
+      "kwargs": {},
+      "timestamp": 1631551.318794556,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='`htmlParseTryOrFinish` caches both `in = ctxt->input` and `avail = in->end - in->cur` at the top of each outer iteration (HTMLparser.c:5561-5563). `xmlHaltParser` does..."
+    }
+  ],
+  "read_definition": [
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "xmlHaltParser",
+        "libxml2/parserInternals.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631423.465918344,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n269 xmlHaltParser(xmlParserCtxtPtr ctxt) {, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "htmlParseTryOrFinish",
+        "libxml2/HTMLparser.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631423.467024185,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n5498 htmlParseTryOrFinish(htmlParserCtxtPtr ctxt, int terminate) {, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "htmlParseTryOrFinish",
+        "libxml2/HTMLparser.c",
+        5498,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631425.480431936,
+      "success": true,
+      "result_summary": "Ok({'contents': '5497 static int\\n5498 htmlParseTryOrFinish(htmlParserCtxtPtr ctxt, int terminate) {\\n5499     int ret = 0;\\n5500     htmlParserInputPtr in;\\n5501     ptrdiff_t avail = 0;\\n5502     xm..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "xmlHaltParser",
+        "libxml2/parserInternals.c",
+        269,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1631425.481742768,
+      "success": true,
+      "result_summary": "Ok({'contents': '268 void\\n269 xmlHaltParser(xmlParserCtxtPtr ctxt) {\\n270     if (ctxt == NULL)\\n271         return;\\n272     ctxt->instate = XML_PARSER_EOF;\\n273     ctxt->disableSAX = 1;\\n274     w..."
+    }
+  ],
+  "read_source": [
+    {
+      "tool_name": "read_source",
+      "args": [
+        "libxml2/HTMLparser.c",
+        6050
+      ],
+      "kwargs": {},
+      "timestamp": 1631425.473045698,
+      "success": true,
+      "result_summary": "Ok({'contents': '5951 \\t\\t\\t\\t\\t\\tctxt->userData, chr, 1);\\n5952 \\t\\t\\t\\t}\\n5953 \\t\\t\\t    } else {\\n5954 \\t\\t\\t\\thtmlCheckParagraph(ctxt);\\n5955 \\t\\t\\t\\tif (ctxt->sax->characters != NULL)\\n5956 \\t\\t\\..."
+    }
+  ],
+  "find_references": [
+    {
+      "tool_name": "find_references",
+      "args": [
+        "htmlParseTryOrFinish",
+        "libxml2/HTMLparser.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1631423.461898859,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='libxml2/HTMLparser.c', refs=[FileReference(line=6294, content='\\t    htmlParseTryOrFinish(ctxt, terminate);', enclosing_definition='htmlParseChunk'), FileReference(line=6..."
+    }
+  ],
+  "apply_patch": [
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "libxml2/HTMLparser.c",
+        "@@ -5607,6 +5607,8 @@\n \t\tif ((ctxt->sax) && (ctxt->sax->startDocument) &&\n \t            (!ctxt->disableSAX))\n \t\t    ctxt->sax->startDocument(ctxt->userData);\n+\t\tif (ctxt->instate == XML_PARSER_EOF)\n+\t\t    goto done;\n \n \t\tcur = in->cur[0];\n \t\tnext = in->cur[1];\n@@ -5623,6 +5625,8 @@\n \t\t\t    \"HPP: Parsing internal subset\\n\");\n #endif\n \t\t    htmlParseDocTypeDecl(ctxt);\n+\t\t    if (ctxt->instate == XML_PARSER_EOF)\n+\t\t\tgoto done;\n \t\t    ctxt->instate = XML_PARSER_PROLOG;\n #ifdef DEBUG_PUSH\n \t\t    xmlGenericError(xmlGenericErrorContext,\n@@ -5665,6 +5669,8 @@\n \t\t\t    \"HPP: Parsing Comment\\n\");\n #endif\n \t\t    htmlParseComment(ctxt);\n+\t\t    if (ctxt->instate == XML_PARSER_EOF)\n+\t\t\tgoto done;\n \t\t    ctxt->instate = XML_PARSER_MISC;\n \t        } else if ((cur == '<') && (next == '?')) {\n \t\t    if ((!terminate) &&\n@@ -5675,6 +5681,8 @@\n \t\t\t    \"HPP: Parsing PI\\n\");\n #endif\n \t\t    htmlParsePI(ctxt);\n+\t\t    if (ctxt->instate == XML_PARSER_EOF)\n+\t\t\tgoto done;\n \t\t    ctxt->instate = XML_PARSER_MISC;\n \t\t} else if ((cur == '<') && (next == '!') &&\n \t\t    (UPP(2) == 'D') && (UPP(3) == 'O') &&\n@@ -5689,6 +5697,8 @@\n \t\t\t    \"HPP: Parsing internal subset\\n\");\n #endif\n \t\t    htmlParseDocTypeDecl(ctxt);\n+\t\t    if (ctxt->instate == XML_PARSER_EOF)\n+\t\t\tgoto done;\n \t\t    ctxt->instate = XML_PARSER_PROLOG;\n #ifdef DEBUG_PUSH\n \t\t    xmlGenericError(xmlGenericErrorContext,\n@@ -5721,6 +5731,8 @@\n \t\t\t    \"HPP: Parsing Comment\\n\");\n #endif\n \t\t    htmlParseComment(ctxt);\n+\t\t    if (ctxt->instate == XML_PARSER_EOF)\n+\t\t\tgoto done;\n \t\t    ctxt->instate = XML_PARSER_PROLOG;\n \t        } else if ((cur == '<') && (next == '?')) {\n \t\t    if ((!terminate) &&\n@@ -5731,6 +5743,8 @@\n \t\t\t    \"HPP: Parsing PI\\n\");\n #endif\n \t\t    htmlParsePI(ctxt);\n+\t\t    if (ctxt->instate == XML_PARSER_EOF)\n+\t\t\tgoto done;\n \t\t    ctxt->instate = XML_PARSER_PROLOG;\n \t\t} else if ((cur == '<') && (next == '!') &&\n \t\t           (avail < 4)) {\n@@ -5764,6 +5778,8 @@\n \t\t\t    \"HPP: Parsing Comment\\n\");\n #endif\n \t\t    htmlParseComment(ctxt);\n+\t\t    if (ctxt->instate == XML_PARSER_EOF)\n+\t\t\tgoto done;\n \t\t    ctxt->instate = XML_PARSER_EPILOG;\n \t        } else if ((cur == '<') && (next == '?')) {\n \t\t    if ((!terminate) &&\n@@ -5774,6 +5790,8 @@\n \t\t\t    \"HPP: Parsing PI\\n\");\n #endif\n \t\t    htmlParsePI(ctxt);\n+\t\t    if (ctxt->instate == XML_PARSER_EOF)\n+\t\t\tgoto done;\n \t\t    ctxt->instate = XML_PARSER_EPILOG;\n \t\t} else if ((cur == '<') && (next == '!') &&\n \t\t           (avail < 4)) {\n@@ -5843,6 +5861,8 @@\n \n \n \t\tfailed = htmlParseStartTag(ctxt);\n+\t\tif (ctxt->instate == XML_PARSER_EOF)\n+\t\t    goto done;\n \t\tname = ctxt->name;\n \t\tif ((failed == -1) ||\n \t\t    (name == NULL)) {\n@@ -5933,6 +5953,8 @@\n \t\t    if ((ctxt->sax != NULL) && (ctxt->sax->characters != NULL))\n \t\t\tctxt->sax->characters(ctxt->userData, chr, 1);\n \t\t    ctxt->token = 0;\n+\t\t    if (ctxt->instate == XML_PARSER_EOF)\n+\t\t\tgoto done;\n \t\t    ctxt->checkIndex = 0;\n \t\t}\n \t\tif ((avail == 1) && (terminate)) {\n@@ -5957,6 +5979,8 @@\n \t\t\t\t\t    ctxt->userData, chr, 1);\n \t\t\t    }\n \t\t\t}\n+\t\t\tif (ctxt->instate == XML_PARSER_EOF)\n+\t\t\t    goto done;\n \t\t\tctxt->token = 0;\n \t\t\tctxt->checkIndex = 0;\n \t\t\tin->cur++;\n@@ -6025,6 +6049,8 @@\n                                 \"HPP: Parsing Comment\\n\");\n #endif\n                         htmlParseComment(ctxt);\n+\t\t\tif (ctxt->instate == XML_PARSER_EOF)\n+\t\t\t    goto done;\n                         ctxt->instate = XML_PARSER_CONTENT;\n                     } else {\n                         if ((!terminate) &&\n@@ -6041,6 +6067,8 @@\n                             \"HPP: Parsing PI\\n\");\n #endif\n                     htmlParsePI(ctxt);\n+\t\t    if (ctxt->instate == XML_PARSER_EOF)\n+\t\t\tgoto done;\n                     ctxt->instate = XML_PARSER_CONTENT;\n                 } else if ((cur == '<') && (next == '/')) {\n                     ctxt->instate = XML_PARSER_END_TAG;\n@@ -6065,6 +6093,8 @@\n                         (ctxt->sax->characters != NULL))\n                         ctxt->sax->characters(ctxt->userData,\n                                               BAD_CAST \"<\", 1);\n+\t\t    if (ctxt->instate == XML_PARSER_EOF)\n+\t\t\tgoto done;\n                     NEXT;\n                 } else {\n@@ -6087,6 +6117,8 @@\n                             htmlParseReference(ctxt);\n                         } else {\n                             htmlParseCharData(ctxt);\n                         }\n+\t\t\tif (ctxt->instate == XML_PARSER_EOF)\n+\t\t\t    goto done;\n                         cur = in->cur[0];\n                     }\n \t\t}\n@@ -6101,6 +6133,8 @@\n \t\t    (htmlParseLookupSequence(ctxt, '>', 0, 0, 0) < 0))\n \t\t    goto done;\n \t\thtmlParseEndTag(ctxt);\n+\t\tif (ctxt->instate == XML_PARSER_EOF)\n+\t\t    goto done;\n \t\tif (ctxt->nameNr == 0) {\n \t\t    ctxt->instate = XML_PARSER_EPILOG;\n \t\t} else {\n@@ -6224,6 +6258,8 @@\n \t\tbreak;\n \n \t}\n+\tif (ctxt->instate == XML_PARSER_EOF)\n+\t    goto done;\n     }\n done:\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1631571.027567088,
+      "success": true,
+      "result_summary": "Err(CRSError(patch did NOT apply successfully: Error in hunk index 1 (line 5623): sw_align failed: Context lines did not match OR matched multiple locations. Please double-check the correctness of the..."
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "libxml2/HTMLparser.c",
+        "@@ -5604,9 +5604,11 @@\n \t\tif ((ctxt->sax) && (ctxt->sax->setDocumentLocator))\n \t\t    ctxt->sax->setDocumentLocator(ctxt->userData,\n \t\t\t\t\t\t  &xmlDefaultSAXLocator);\n \t\tif ((ctxt->sax) && (ctxt->sax->startDocument) &&\n \t            (!ctxt->disableSAX))\n \t\t    ctxt->sax->startDocument(ctxt->userData);\n+\t\tif (ctxt->instate == XML_PARSER_EOF)\n+\t\t    goto done;\n \n \t\tcur = in->cur[0];\n \t\tnext = in->cur[1];\n@@ -5843,6 +5845,8 @@\n \n \n \t\tfailed = htmlParseStartTag(ctxt);\n+\t\tif (ctxt->instate == XML_PARSER_EOF)\n+\t\t    goto done;\n \t\tname = ctxt->name;\n \t\tif ((failed == -1) ||\n \t\t    (name == NULL)) {\n@@ -5930,10 +5934,12 @@\n \t\tif (ctxt->token != 0) {\n \t\t    chr[0] = ctxt->token;\n \t\t    htmlCheckParagraph(ctxt);\n \t\t    if ((ctxt->sax != NULL) && (ctxt->sax->characters != NULL))\n \t\t\tctxt->sax->characters(ctxt->userData, chr, 1);\n \t\t    ctxt->token = 0;\n+\t\t    if (ctxt->instate == XML_PARSER_EOF)\n+\t\t\tgoto done;\n \t\t    ctxt->checkIndex = 0;\n \t\t}\n \t\tif ((avail == 1) && (terminate)) {\n@@ -5957,6 +5963,8 @@\n \t\t\t\t\t    ctxt->userData, chr, 1);\n \t\t\t    }\n \t\t\t}\n+\t\t\tif (ctxt->instate == XML_PARSER_EOF)\n+\t\t\t    goto done;\n \t\t\tctxt->token = 0;\n \t\t\tctxt->checkIndex = 0;\n \t\t\tin->cur++;\n@@ -6063,9 +6071,11 @@\n                 } else if (cur == '<') {\n                     if ((ctxt->sax != NULL) && (!ctxt->disableSAX) &&\n                         (ctxt->sax->characters != NULL))\n                         ctxt->sax->characters(ctxt->userData,\n                                               BAD_CAST \"<\", 1);\n+\t\t    if (ctxt->instate == XML_PARSER_EOF)\n+\t\t\tgoto done;\n                     NEXT;\n                 } else {\n@@ -6084,10 +6094,12 @@\n                     while ((ctxt->instate != XML_PARSER_EOF) &&\n                            (cur != '<') && (in->cur < in->end)) {\n                         if (cur == '&') {\n                             htmlParseReference(ctxt);\n                         } else {\n                             htmlParseCharData(ctxt);\n                         }\n+\t\t\tif (ctxt->instate == XML_PARSER_EOF)\n+\t\t\t    goto done;\n                         cur = in->cur[0];\n                     }\n \t\t}\n@@ -6224,6 +6236,8 @@\n \t\tbreak;\n \n \t}\n+\tif (ctxt->instate == XML_PARSER_EOF)\n+\t    goto done;\n     }\n done:\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1631579.664113597,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    }
+  ],
+  "test_patch": [
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1631616.446885677,
+      "success": true,
+      "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+    }
+  ],
+  "undo_last_patch": [],
+  "list_current_edits": []
+}

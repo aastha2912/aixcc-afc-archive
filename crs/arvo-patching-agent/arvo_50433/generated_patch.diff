@@ -1,0 +1,49 @@
+--- a/blosc/blosc2.c
++++ b/blosc/blosc2.c
+@@ -2505,16 +2505,29 @@
+   blosc_set_timestamp(&last);
+ 
+   if (!memcpyed) {
+-    /* Do the actual compression */
+-    ntbytes = do_job(context);
+-    if (ntbytes < 0) {
+-      return ntbytes;
+-    }
+-    if (ntbytes == 0) {
+-      // Try out with a memcpy later on (last chance for fitting src buffer in dest).
++    /* The block-start table is written by the workers before the compressor gets
++     * a chance to report that the output does not fit.  Make sure the complete
++     * table is inside dest first.  Use subtraction/division to avoid overflowing
++     * while computing header_overhead + sizeof(int32_t) * nblocks. */
++    if (context->bstarts != NULL &&
++        (context->header_overhead > context->destsize || context->nblocks < 0 ||
++         context->nblocks > (context->destsize - context->header_overhead) /
++                            (int32_t)sizeof(int32_t))) {
+       context->header_flags |= (uint8_t)BLOSC_MEMCPYED;
+       memcpyed = true;
+     }
++    else {
++      /* Do the actual compression */
++      ntbytes = do_job(context);
++      if (ntbytes < 0) {
++        return ntbytes;
++      }
++      if (ntbytes == 0) {
++        // Try out with a memcpy later on (last chance for fitting src buffer in dest).
++        context->header_flags |= (uint8_t)BLOSC_MEMCPYED;
++        memcpyed = true;
++      }
++    }
+   }
+ 
+   int dont_split = (context->header_flags & 0x10) >> 4;
+@@ -2530,7 +2543,8 @@
+   }
+ 
+   if (memcpyed) {
+-    if (context->sourcesize + context->header_overhead > context->destsize) {
++    if (context->header_overhead > context->destsize ||
++        context->sourcesize > context->destsize - context->header_overhead) {
+       /* We are exceeding maximum output size */
+       ntbytes = 0;
+     }

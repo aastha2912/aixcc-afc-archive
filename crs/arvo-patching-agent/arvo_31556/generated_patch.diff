@@ -1,0 +1,35 @@
+--- a/blosc/frame.c
++++ b/blosc/frame.c
+@@ -2018,12 +2018,29 @@
+     free(block_csizes);
+   } else {
+     // The chunk is in memory and just one pointer away
+-    *chunk = frame->cframe + header_len + offset;
+-    if ((int64_t)header_len + offset + BLOSC_MIN_HEADER_LENGTH > frame->len) {
++    // Validate the offset before doing pointer arithmetic.  In particular, do
++    // not let an overflowing addition make an out-of-frame offset look valid.
++    if (header_len < 0 || (int64_t)header_len > frame->len || offset < 0 ||
++        offset > frame->len - (int64_t)header_len) {
+       BLOSC_TRACE_ERROR("Cannot read the header for chunk in the (contiguous) frame.");
+       rc = BLOSC2_ERROR_READ_BUFFER;
+     } else {
+-      rc = blosc2_cbuffer_sizes(*chunk, NULL, &lazychunk_cbytes, NULL);
++      int64_t available = frame->len - (int64_t)header_len - offset;
++      if (available < BLOSC_MIN_HEADER_LENGTH) {
++        BLOSC_TRACE_ERROR("Cannot read the header for chunk in the (contiguous) frame.");
++        rc = BLOSC2_ERROR_READ_BUFFER;
++      } else {
++        *chunk = frame->cframe + header_len + offset;
++        rc = blosc2_cbuffer_sizes(*chunk, NULL, &lazychunk_cbytes, NULL);
++        if (rc >= 0 &&
++            (lazychunk_cbytes < 0 || (int64_t)lazychunk_cbytes > available)) {
++          // The compressed size is part of the untrusted chunk header.  The
++          // decompressor must never receive a source size larger than the
++          // actual bytes remaining in the contiguous frame.
++          BLOSC_TRACE_ERROR("Cannot read the chunk out of the (contiguous) frame.");
++          rc = BLOSC2_ERROR_READ_BUFFER;
++        }
++      }
+     }
+   }
+ 

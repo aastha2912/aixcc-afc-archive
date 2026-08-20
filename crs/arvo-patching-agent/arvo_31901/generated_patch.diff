@@ -1,0 +1,66 @@
+--- a/gpac/src/isomedia/box_code_meta.c
++++ b/gpac/src/isomedia/box_code_meta.c
+@@ -260,6 +260,10 @@
+ {
+ 	ISOM_DECL_BOX_ALLOC(GF_ItemLocationBox, GF_ISOM_BOX_TYPE_ILOC);
+ 	tmp->location_entries = gf_list_new();
++	if (!tmp->location_entries) {
++		gf_free(tmp);
++		return NULL;
++	}
+ 	return (GF_Box *)tmp;
+ }
+ 
+@@ -292,6 +296,7 @@
+ GF_Err iloc_box_read(GF_Box *s, GF_BitStream *bs)
+ {
+ 	u32 item_count, extent_count, i, j;
++	GF_Err e;
+ 	GF_ItemLocationBox *ptr = (GF_ItemLocationBox *)s;
+ 
+ 	ISOM_DECREASE_SIZE(ptr, 2)
+@@ -312,10 +317,21 @@
+ 	}
+ 
+ 	for (i = 0; i < item_count; i++) {
+-		GF_ItemLocationEntry *location_entry = (GF_ItemLocationEntry *)gf_malloc(sizeof(GF_ItemLocationEntry));
++		GF_ItemLocationEntry *location_entry;
++		GF_SAFEALLOC(location_entry, GF_ItemLocationEntry);
+ 		if (!location_entry) return GF_OUT_OF_MEM;
+ 
+-		gf_list_add(ptr->location_entries, location_entry);
++		/* Make the entry safe for box cleanup before publishing it. */
++		location_entry->extent_entries = gf_list_new();
++		if (!location_entry->extent_entries) {
++			gf_free(location_entry);
++			return GF_OUT_OF_MEM;
++		}
++		e = gf_list_add(ptr->location_entries, location_entry);
++		if (e) {
++			iloc_entry_del(location_entry);
++			return e;
++		}
+ 		if (ptr->version < 2) {
+ 			ISOM_DECREASE_SIZE(ptr, 2)
+ 			location_entry->item_ID = gf_bs_read_u16(bs);
+@@ -339,12 +355,16 @@
+ 
+ 		ISOM_DECREASE_SIZE(ptr, 2)
+ 		extent_count = gf_bs_read_u16(bs);
+-		location_entry->extent_entries = gf_list_new();
+ 		for (j = 0; j < extent_count; j++) {
+-			GF_ItemExtentEntry *extent_entry = (GF_ItemExtentEntry *)gf_malloc(sizeof(GF_ItemExtentEntry));
++			GF_ItemExtentEntry *extent_entry;
++			GF_SAFEALLOC(extent_entry, GF_ItemExtentEntry);
+ 			if (!extent_entry) return GF_OUT_OF_MEM;
+-			
+-			gf_list_add(location_entry->extent_entries, extent_entry);
++
++			e = gf_list_add(location_entry->extent_entries, extent_entry);
++			if (e) {
++				gf_free(extent_entry);
++				return e;
++			}
+ 			if ((ptr->version == 1 || ptr->version == 2) && ptr->index_size > 0) {
+ 				ISOM_DECREASE_SIZE(ptr, ptr->index_size)
+ 				extent_entry->extent_index = gf_bs_read_int(bs, 8 * ptr->index_size);

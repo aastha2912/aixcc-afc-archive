@@ -1,0 +1,47 @@
+--- a/src/cmsio0.c
++++ b/src/cmsio0.c
+@@ -714,6 +714,9 @@
+     return DWord;
+ }
+ 
++static
++cmsBool IsTypeSupported(cmsTagDescriptor* TagDescriptor, cmsTagTypeSignature Type);
++
+ // Read profile header and validate it
+ cmsBool _cmsReadHeader(_cmsICCPROFILE* Icc)
+ {
+@@ -797,9 +800,31 @@
+            
+             if ((Icc ->TagOffsets[j] == Tag.offset) &&
+                 (Icc ->TagSizes[j]   == Tag.size)) {
+-
+-                // Check types. 
+-                Icc ->TagLinked[Icc ->TagCount] = Icc ->TagNames[j];
++                cmsUInt32Number DirectoryPos = io->Tell(io);
++                cmsTagTypeSignature BaseType = 0;
++                cmsTagDescriptor* TagDescriptor;
++                cmsTagDescriptor* LinkedDescriptor;
++
++                TagDescriptor = _cmsGetTagDescriptor(Icc->ContextID, Tag.sig);
++                LinkedDescriptor = _cmsGetTagDescriptor(Icc->ContextID,
++                                                         Icc->TagNames[j]);
++
++                // Check the actual serialized type, not just the shared range.
++                if (Tag.size >= sizeof(_cmsTagBase) &&
++                    TagDescriptor != NULL && LinkedDescriptor != NULL &&
++                    io->Seek(io, Tag.offset)) {
++                    BaseType = _cmsReadTypeBase(io);
++                }
++
++                // Reading the payload must not disturb tag-directory parsing.
++                if (!io->Seek(io, DirectoryPos)) return FALSE;
++
++                if (BaseType != 0 &&
++                    IsTypeSupported(TagDescriptor, BaseType) &&
++                    IsTypeSupported(LinkedDescriptor, BaseType)) {
++                    Icc ->TagLinked[Icc ->TagCount] = Icc ->TagNames[j];
++                    break;
++                }
+             }
+ 
+         }

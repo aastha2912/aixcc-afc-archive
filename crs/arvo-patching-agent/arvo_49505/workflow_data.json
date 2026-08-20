@@ -1,0 +1,1196 @@
+{
+  "vuln_id": 706,
+  "crash_result": {
+    "output": "==6458==ERROR: AddressSanitizer: heap-buffer-overflow on address 0xed300f38 at pc 0x081c7936 bp 0xff8bb808 sp 0xff8bb800\nREAD of size 8 at 0xed300f38 thread T0\nSCARINESS: 23 (8-byte-read-heap-buffer-overflow)\n    #0 0x81c7935 in _cmsWriteXYZNumber /src/lcms/src/cmsplugin.c:359:102\n    #1 0x8208223 in Type_ViewingConditions_Write /src/lcms/src/cmstypes.c:3958:10\n    #2 0x81bf091 in SaveTags /src/lcms/src/cmsio0.c:1332:18\n    #3 0x81bdeef in cmsSaveProfileToIOhandler /src/lcms/src/cmsio0.c:1405:10",
+    "stack": "#0 0x81c7935 in _cmsWriteXYZNumber lcms/src/cmsplugin.c:359:102\n#1 0x8208223 in Type_ViewingConditions_Write lcms/src/cmstypes.c:3958:10\n#2 0x81bf091 in SaveTags lcms/src/cmsio0.c:1332:18\n#3 0x81bdeef in cmsSaveProfileToIOhandler lcms/src/cmsio0.c:1405:10\n#4 0x81bf7b6 in cmsSaveProfileToFile lcms/src/cmsio0.c:1446:11\n#5 0x81b70f1 in LLVMFuzzerTestOneInput cms_profile_fuzzer.c:45:5\n#6 0x80a199e in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned int) llvm-project/compiler-rt/lib/fuz",
+    "dedup": "_cmsWriteXYZNumber--Type_ViewingConditions_Write--SaveTags"
+  },
+  "pov_run_data": {
+    "task_uuid": "4c9b4879-3f2a-56ff-941e-13f7fba17b4d",
+    "project_name": "lcms",
+    "harness": "cms_profile_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "dedup": "_cmsWriteXYZNumber--Type_ViewingConditions_Write--SaveTags"
+  },
+  "decoded_pov": {
+    "project_name": "lcms",
+    "harness": "cms_profile_fuzzer",
+    "sanitizer": "address",
+    "engine": "libfuzzer",
+    "decoding": "<pov_script>\n\n# Use embedded PoC data\npoc_data = b'                                    acsp        \\xff\\xff\\xff\\xff\\xff\\xff    \\xff\\xff\\xff\\xff                                      \\xff\\xff\\xff\\xff \\xff\\xff\\xff                    \\x00\\x00\\x00                                 \\xff  \\xff\\xff\\xff\\xff \\xff                               view\\x00\\x00\\x01\\xa0\\x00\\x00\\x00,                 \\xff                                      \\xff               gamt\\x00\\x00\\x01\\xa0\\x00\\x00\\x00,                                                                                                              \\xff\\xff\\xff\\xff\\xff\\xffmft1    \\x01\\x01\\x00                     \\xff                                      \\xff\\xff\\xff\\xff                            \\xff                                                                                                                                                                               \\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff \\xff\\xff\\xff\\xff                                                                   \\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff \\xff\\xff\\xff\\xff                                       \\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff \\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff \\xff\\xff\\xff\\xff'\n\nwith open(\"input.bin\", \"wb\") as f:\n    f.write(poc_data)\n\n</pov_script>\n",
+    "dedup": "_cmsWriteXYZNumber--Type_ViewingConditions_Write--SaveTags"
+  },
+  "analyzed_vuln": {
+    "function": "_cmsReadHeader",
+    "file": "lcms/src/cmsio0.c",
+    "description": "While parsing the tag directory, `_cmsReadHeader` treats any later tag with the same offset and size as a link to the earlier tag (lines 795-803), but does not perform the promised type/descriptor compatibility check. Consequently, `_cmsSearchTag(..., TRUE)` aliases storage by directory position even when the two tag signatures require incompatible in-memory representations. In this PoV, `gamt` is linked to the earlier `view` entry. Reading `gamt` follows that link and stores a `cmsPipeline` decoded by `Type_LUT8_Read` into the `view` slot. During profile save, `SaveTags` skips the linked `gamt` entry and serializes the poisoned `view` slot using `Type_ViewingConditions_Write`, which casts the pipeline to `cmsICCViewingConditions`; `_cmsWriteXYZNumber` then performs the heap out-of-bounds read. The patch should reject or avoid creating offset-based links between tag signatures whose supported tag types/in-memory representations are incompatible.",
+    "conditions": "A crafted ICC profile must contain two distinct tag-directory entries with identical nonzero offset and size, with the incompatible tag appearing first. Here `view` and `gamt` both reference offset 0x1a0 and size 44, and the shared payload begins with supported LUT8 type `mft1`. The application must cooked-read the later tag (`cmsReadTag(..., cmsSigGamutTag)`), causing link following and a `cmsPipeline` to be cached in the earlier `view` slot, then save the same profile. Saving dispatches according to the earlier `view` signature rather than the cached object's actual LUT8 type, triggering the invalid structural cast and out-of-bounds read."
+  },
+  "cost_analysis": {
+    "triage": {
+      "total_llm_calls": 8,
+      "total_cost": 0.22728900000000002,
+      "total_input_tokens": 93213,
+      "total_output_tokens": 3013,
+      "total_cached_tokens": 73148,
+      "llm_calls": [
+        {
+          "timestamp": 1787214743.4303663,
+          "model": "gpt-5.6-sol",
+          "cost": 0.028615,
+          "input_tokens": 4367,
+          "output_tokens": 226,
+          "total_tokens": 4593,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_2eoKKNoJwxPgTMGwFh3Bg57R"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_cWu1zH0OGh9LHzYiPnqYfD1J"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_mnnt00ET9Cr2vXaZnXXDtWGE"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Xqr9pf1LMeJa5GZrSa2h873j"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_upm79HR1iUk8ryivlMSQPB4L"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214786.8618765,
+          "model": "gpt-5.6-sol",
+          "cost": 0.012247000000000001,
+          "input_tokens": 4895,
+          "output_tokens": 247,
+          "total_tokens": 5142,
+          "cached_tokens": 4364,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_6Ii7RSuVJRZAtQkfn4JEsPdm"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_XZq6Mb4Hhijy3Ar12NVhLr1g"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_0UnZ5x9CkkoQg6535CSaZyeI"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_OLxVHPk9kBZT7DXNqtTp7FIV"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_nUbleyxJifdPyKRozGC4eO2P"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214796.2818158,
+          "model": "gpt-5.6-sol",
+          "cost": 0.029391,
+          "input_tokens": 8505,
+          "output_tokens": 296,
+          "total_tokens": 8801,
+          "cached_tokens": 4892,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_B7MZc0awU9zfHbaC9AFcv2Qv"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_FN9ZOk0n55IWk0nE2i5VRArY"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_whp9rjmezc9dmVbsDfwkrx2J"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_sKeyljfbdpYFOrpMUR30uXyb"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_q9jBJQrohedWPmwwiGhOO5rH"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214809.6375096,
+          "model": "gpt-5.6-sol",
+          "cost": 0.036731,
+          "input_tokens": 11662,
+          "output_tokens": 556,
+          "total_tokens": 12218,
+          "cached_tokens": 8502,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_GEgyclQcJNCPxMo5xohB8nHj"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_1jWWoSBuSZlMrQ8UsftRguHv"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_S7samZuamSdN1oa8tMy5045E"
+            },
+            {
+              "tool_name": "debug_pov",
+              "tool_call_id": "call_C6wCJD051Dm17rc7bKanfUU4"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214812.3450649,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0145295,
+          "input_tokens": 12139,
+          "output_tokens": 210,
+          "total_tokens": 12349,
+          "cached_tokens": 11659,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_6he9sY4GIpdKx4G7dusLy0YD"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_90RpALIVrWQv1B1n5lrOl5qX"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_Bm3sTIi5P00AbAA9E5hptWgU"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_CrBV11OrxvF3HKDcqPkvHR1d"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_TswiwdB6XMwcab6s1QG77ZBJ"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214822.6021712,
+          "model": "gpt-5.6-sol",
+          "cost": 0.034693,
+          "input_tokens": 14405,
+          "output_tokens": 576,
+          "total_tokens": 14981,
+          "cached_tokens": 12136,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_tFFVRlyjDA8RQHE1doe2Rtw5"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_wsy6U3mDnuWNGv9jefZgZP8u"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_yRQHrUQEvMZkckuDEd80Zp8t"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_29ASyaYUC7Rg2q9OCt97rBpe"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214830.6795106,
+          "model": "gpt-5.6-sol",
+          "cost": 0.032151,
+          "input_tokens": 17196,
+          "output_tokens": 366,
+          "total_tokens": 17562,
+          "cached_tokens": 14402,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_M20JVX9ROJNU44WakCV339HP"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_2jaf4keopGTHigdtydjQXk52"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_4ibjLk2xOIZgdcuoHKYYF0bW"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_V8FsQ3sNBPZS5KORWJR5bwDq"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214841.8589292,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0389315,
+          "input_tokens": 20044,
+          "output_tokens": 536,
+          "total_tokens": 20580,
+          "cached_tokens": 17193,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_d6eBHF599aQ3uaBbbhAsLBiL"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "patching": {
+      "total_llm_calls": 16,
+      "total_cost": 0.6101530000000001,
+      "total_input_tokens": 248231,
+      "total_output_tokens": 8165,
+      "total_cached_tokens": 194656,
+      "llm_calls": [
+        {
+          "timestamp": 1787214845.5806282,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0337,
+          "input_tokens": 5492,
+          "output_tokens": 208,
+          "total_tokens": 5700,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_RuZqpyPMCxSHEM3MqJy8Pk20"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_EKCry6zX9TmwdjtqZ1Vd1LiQ"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_KPM06uklDU4TGQlyivtQ66Y5"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_KZBHkI1wY7Z6oRtepqNGR7UC"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_FsxPCHO9pa91GJpDEMVbw2pP"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214848.969358,
+          "model": "gpt-5.6-sol",
+          "cost": 0.017049500000000002,
+          "input_tokens": 7084,
+          "output_tokens": 211,
+          "total_tokens": 7295,
+          "cached_tokens": 5489,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_8DdBDrVyAUWco0d4Dddkj1BK"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_87R9xgJRW1DgTNqWRhtJizMp"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_DIiaWk1VMizIBTKRkTFoSNLq"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_M46DlJuUnDX1Ndp5gDW6VKOp"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_oD902DfWHkAsffpreJUAI0zL"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214859.814889,
+          "model": "gpt-5.6-sol",
+          "cost": 0.05240550000000001,
+          "input_tokens": 12936,
+          "output_tokens": 653,
+          "total_tokens": 13589,
+          "cached_tokens": 7081,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_VnrJv9pqzD2dbWeSVy2htEBq"
+            },
+            {
+              "tool_name": "source_questions",
+              "tool_call_id": "call_g74Whv7mrAWnBAbXOchmJR29"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_AQtBJHAignDS43ymDRIBe2xp"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_6T33TLDFlGH0OfH4hNwdfB6n"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_SYpvRNqLxm0j2E3KBZa8oGJr"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214865.244427,
+          "model": "gpt-5.6-sol",
+          "cost": 0.014905000000000002,
+          "input_tokens": 1649,
+          "output_tokens": 222,
+          "total_tokens": 1871,
+          "cached_tokens": 0,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_vFPvKzprjFVj0Xlrpjb30w9s"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_GoXYeW070ePwzta37NV7c7y0"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_jrKuVI2nnj3G6HEoRxOH9RMa"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_xSEK8JnpABpEBgKtmoy6ay9i"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_1sIPyIqDzUQ8Iq9kb1VmIDng"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214868.6465216,
+          "model": "gpt-5.6-sol",
+          "cost": 0.013308,
+          "input_tokens": 2325,
+          "output_tokens": 303,
+          "total_tokens": 2628,
+          "cached_tokens": 1646,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 8,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_BxelWLkL3m0TPpIMaNy88KHV"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_dOG28a9za4aOnPHh0QuHfEeY"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_330nzxEP0VRelSs7sDuLxwGt"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_pyVqJ7sls62qK7SLMNtRnrOX"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_Maaz6138zQ5DR9Szs1fmzYkv"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_GPJO6ZuflxaCyKIDxwG3z2gk"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_iAHgHWrCutqjYZei55oQF5d5"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_YBeKMbSAkg06wSRmzN4GcNIW"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214873.475525,
+          "model": "gpt-5.6-sol",
+          "cost": 0.041301000000000004,
+          "input_tokens": 8214,
+          "output_tokens": 356,
+          "total_tokens": 8570,
+          "cached_tokens": 2322,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 8,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_dPgFIAXKivIA3TUjdLH9GObk"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_P4Nsm1x5bHw5A5SuBvvtqf5g"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_vPyw29Ry0Hd1aR59zWOL8sCT"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_JQU9kuZGJE8Avg9hN1wQnTc6"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_YtAtfedrlTur6C17LSzZ9c7k"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_X8kBfv9gSHeQ5UaN3kWgygRp"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_B7Tg5w4T0T2cJbc4JAiZOvmw"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_NdCEAna1ybuo1DK0hNJ04Tlv"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214880.0258229,
+          "model": "gpt-5.6-sol",
+          "cost": 0.045845500000000004,
+          "input_tokens": 14495,
+          "output_tokens": 344,
+          "total_tokens": 14839,
+          "cached_tokens": 8211,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 8,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_xEv3Qy0hBLfKEzz6E1ceoUvd"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_BOeQaItmsyWPsmOwnRnIXyaV"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_pY0eqI9AFjWbriiZnTiExiNY"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_bmUYSY1l2k6DpKzpH2zUR4Ef"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_56ALXQF9KMxA9a6IgtSalWZM"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_CuY2sD0p3hwCNx891Ct9TJkX"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_bJ1BKt0vNDRmCO9KMOIMC6ki"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_uFJ7lvWcZ2S12rbbPibSte99"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214887.089067,
+          "model": "gpt-5.6-sol",
+          "cost": 0.08660600000000002,
+          "input_tokens": 28096,
+          "output_tokens": 378,
+          "total_tokens": 28474,
+          "cached_tokens": 14492,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 5,
+          "tool_calls": [
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_uXIqmEN7uP2kQUEA47YolgVE"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_skIUHhIsv0K59oZDsHXyWNbP"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_I5WF4C8RnGJzZiZzmAV9TIiR"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_XitmN57PbvpqLcNJLIam9Ht8"
+            },
+            {
+              "tool_name": "find_references",
+              "tool_call_id": "call_YqZcwqJt9QUGXCZcpc5SB4Mu"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214928.734517,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0977665,
+          "input_tokens": 31919,
+          "output_tokens": 2153,
+          "total_tokens": 34072,
+          "cached_tokens": 28093,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_yS6HQiFKCQPubukCWltYdi50"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214938.3704631,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0318965,
+          "input_tokens": 14779,
+          "output_tokens": 540,
+          "total_tokens": 15319,
+          "cached_tokens": 12933,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_d8YHYgmAb3oxFZVcoTvgU6Fl"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_g94rEooIXZHztgs7WuOXHA3w"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_CJnfjeTmTXYBDGLwNwtKCXR4"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_cw68KWNsmmei0bHG3JLXj2kA"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214953.2748225,
+          "model": "gpt-5.6-sol",
+          "cost": 0.034213,
+          "input_tokens": 17183,
+          "output_tokens": 493,
+          "total_tokens": 17676,
+          "cached_tokens": 14776,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 4,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_ndXaE9nkKJre89szWetEqb6N"
+            },
+            {
+              "tool_name": "read_source",
+              "tool_call_id": "call_G8MNaTTE1K8CDs7kdy5YDp1V"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_napKZvOQvsBf1pGl8kOpFt46"
+            },
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_kKMt3TLlTvl8ecmF5m0EEV0L"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214955.0110762,
+          "model": "gpt-5.6-sol",
+          "cost": 0.022665,
+          "input_tokens": 19743,
+          "output_tokens": 42,
+          "total_tokens": 19785,
+          "cached_tokens": 17180,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "read_definition",
+              "tool_call_id": "call_eTU14c3770YwAVOxxIhbuesx"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214986.0903943,
+          "model": "gpt-5.6-sol",
+          "cost": 0.07123499999999999,
+          "input_tokens": 19935,
+          "output_tokens": 2013,
+          "total_tokens": 21948,
+          "cached_tokens": 19740,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "apply_patch",
+              "tool_call_id": "call_ed86rUGIyOCGU7X1ikpgWqh7"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787214989.0759137,
+          "model": "gpt-5.6-sol",
+          "cost": 0.017381,
+          "input_tokens": 21331,
+          "output_tokens": 14,
+          "total_tokens": 21345,
+          "cached_tokens": 19932,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "test_patch",
+              "tool_call_id": "call_9xH4LbMVic3Kv70e8wVPkAhs"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787215026.2427845,
+          "model": "gpt-5.6-sol",
+          "cost": 0.017114,
+          "input_tokens": 21436,
+          "output_tokens": 197,
+          "total_tokens": 21633,
+          "cached_tokens": 21328,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_N4OUBZxcjLSvjn1WWfhw4PWk"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        },
+        {
+          "timestamp": 1787215028.480062,
+          "model": "gpt-5.6-sol",
+          "cost": 0.0127615,
+          "input_tokens": 21614,
+          "output_tokens": 38,
+          "total_tokens": 21652,
+          "cached_tokens": 21433,
+          "input_cost_per_token": 5e-06,
+          "output_cost_per_token": 3e-05,
+          "cache_cost_per_token": 5e-07,
+          "has_tool_calls": true,
+          "tool_call_count": 1,
+          "tool_calls": [
+            {
+              "tool_name": "terminate",
+              "tool_call_id": "call_cIB6vnGTl7Cftm4Y3wKF9GKR"
+            }
+          ],
+          "finish_reason": "tool_calls"
+        }
+      ]
+    },
+    "total": {
+      "total_cost": 0.837442,
+      "total_input_tokens": 341444,
+      "total_output_tokens": 11178,
+      "total_llm_calls": 24
+    }
+  },
+  "patch_result": {
+    "success": true,
+    "patch": "--- a/src/cmsio0.c\n+++ b/src/cmsio0.c\n@@ -692,6 +692,44 @@\n // Enforces that the profile version is per. spec.\n // Operates on the big endian bytes from the profile.\n // Called before converting to platform endianness.\n+\n+// Check whether a tag type can be represented by a tag descriptor. This is\n+// also used while building links, before any tag data has been cooked.\n+static\n+cmsBool IsTypeSupportedByDescriptor(const cmsTagDescriptor* TagDescriptor, cmsTagTypeSignature Type)\n+{\n+    cmsUInt32Number i, nMaxTypes;\n+\n+    if (TagDescriptor == NULL) return FALSE;\n+\n+    nMaxTypes = TagDescriptor->nSupportedTypes;\n+    if (nMaxTypes >= MAX_TYPES_IN_LCMS_PLUGIN)\n+        nMaxTypes = MAX_TYPES_IN_LCMS_PLUGIN;\n+\n+    for (i = 0; i < nMaxTypes; i++) {\n+        if (Type == TagDescriptor->SupportedTypes[i]) return TRUE;\n+    }\n+\n+    return FALSE;\n+}\n+\n+// Linked tags share the same cooked object. Therefore both tag signatures\n+// must accept the actual type stored in the shared block and must agree on\n+// the number of elements represented by that object.\n+static\n+cmsBool AreTagDescriptorsCompatible(_cmsICCPROFILE* Icc, cmsTagSignature First,\n+                                    cmsTagSignature Second, cmsTagTypeSignature Type)\n+{\n+    cmsTagDescriptor* FirstDescriptor  = _cmsGetTagDescriptor(Icc->ContextID, First);\n+    cmsTagDescriptor* SecondDescriptor = _cmsGetTagDescriptor(Icc->ContextID, Second);\n+\n+    if (FirstDescriptor == NULL || SecondDescriptor == NULL) return FALSE;\n+    if (FirstDescriptor->ElemCount != SecondDescriptor->ElemCount) return FALSE;\n+\n+    return IsTypeSupportedByDescriptor(FirstDescriptor, Type) &&\n+           IsTypeSupportedByDescriptor(SecondDescriptor, Type);\n+}\n+\n // Byte 0 is BCD major version, so max 9.\n // Byte 1 is 2 BCD digits, one per nibble.\n // Reserved bytes 2 & 3 must be 0.\n@@ -720,9 +758,11 @@\n     cmsTagEntry Tag;\n     cmsICCHeader Header;\n     cmsUInt32Number i, j;\n+    cmsUInt32Number DirectoryPos;\n     cmsUInt32Number HeaderSize;\n     cmsIOHANDLER* io = Icc ->IOhandler;\n     cmsUInt32Number TagCount;\n+    cmsTagTypeSignature BaseType;\n \n \n     // Read the header\n@@ -792,21 +832,35 @@\n         Icc -> TagOffsets[Icc ->TagCount] = Tag.offset;\n         Icc -> TagSizes[Icc ->TagCount]   = Tag.size;\n \n-       // Search for links\n-        for (j=0; j < Icc ->TagCount; j++) {\n-           \n-            if ((Icc ->TagOffsets[j] == Tag.offset) &&\n-                (Icc ->TagSizes[j]   == Tag.size)) {\n+        Icc ->TagCount++;\n+    }\n \n-                // Check types. \n-                Icc ->TagLinked[Icc ->TagCount] = Icc ->TagNames[j];\n-            }\n+    // Search for links. Equal offsets and sizes alone are insufficient: a\n+    // cooked read caches the object in the link target's directory slot, so\n+    // both signatures must use a compatible in-memory representation.\n+    DirectoryPos = io->Tell(io);\n+    for (i = 0; i < Icc->TagCount; i++) {\n+        for (j = 0; j < i; j++) {\n \n+            if ((Icc->TagOffsets[j] == Icc->TagOffsets[i]) &&\n+                (Icc->TagSizes[j]   == Icc->TagSizes[i]) &&\n+                (Icc->TagSizes[i] >= 8)) {\n+\n+                if (!io->Seek(io, Icc->TagOffsets[i])) continue;\n+                BaseType = _cmsReadTypeBase(io);\n+\n+                if (BaseType != 0 &&\n+                    AreTagDescriptorsCompatible(Icc, Icc->TagNames[j],\n+                                                Icc->TagNames[i], BaseType)) {\n+                    Icc->TagLinked[i] = Icc->TagNames[j];\n+                    break;\n+                }\n+            }\n         }\n-\n-        Icc ->TagCount++;\n     }\n \n+    if (!io->Seek(io, DirectoryPos)) return FALSE;\n+\n \n     for (i = 0; i < Icc->TagCount; i++) {\n         for (j = 0; j < Icc->TagCount; j++) {\n@@ -1541,17 +1595,7 @@\n static\n cmsBool IsTypeSupported(cmsTagDescriptor* TagDescriptor, cmsTagTypeSignature Type)\n {\n-    cmsUInt32Number i, nMaxTypes;\n-\n-    nMaxTypes = TagDescriptor->nSupportedTypes;\n-    if (nMaxTypes >= MAX_TYPES_IN_LCMS_PLUGIN)\n-        nMaxTypes = MAX_TYPES_IN_LCMS_PLUGIN;\n-\n-    for (i=0; i < nMaxTypes; i++) {\n-        if (Type == TagDescriptor ->SupportedTypes[i]) return TRUE;\n-    }\n-\n-    return FALSE;\n+    return IsTypeSupportedByDescriptor(TagDescriptor, Type);\n }\n \n \n",
+    "build_artifacts_count": 3,
+    "tested_povs_count": 1,
+    "last_validation": {
+      "status": "validated_patch_accepted",
+      "message": "Patch validation succeeded",
+      "details": {
+        "ran_tests": false,
+        "tested_povs_count": 1
+      }
+    }
+  },
+  "context_retrieval": {
+    "source_questions": [
+      {
+        "tool_name": "source_questions",
+        "args": [
+          "In lcms/src/cmsio0.c, what is the best compatibility condition for creating TagLinked entries in _cmsReadHeader for two directory tags sharing offset and size? Please inspect tag descriptors and built-in descriptor registrations, and identify whether equality of supported type sets and ElemCount is appropriate, or whether checking a common actual on-disk type is sufficient. Note legitimate linked-tag use cases that must remain supported.",
+          "The vulnerability is an offset-based alias between cmsSigViewingConditionsTag ('view') and cmsSigGamutTag ('gamt'). Both share an offset/size whose payload is LUT8. _cmsReadHeader currently links solely by offset/size at lines 795-803. cmsReadTag(gamt) follows to the view directory slot, validates LUT8 against the requested gamt descriptor, decodes cmsPipeline into view storage, and SaveTags later writes that pointer according to view, causing an invalid cast. I need a root-cause patch restricted to lcms C/C++ source. I am considering a helper that compares _cmsGetTagDescriptor results before setting TagLinked, likely requiring compatible supported type signatures and element counts, but need to preserve legitimate ICC shared-data tags."
+        ],
+        "kwargs": {},
+        "timestamp": 1624317.437708771,
+        "success": true,
+        "result_summary": "Ok(SourceQuestionsResult(answer=\"The best condition is **not equality of the complete `SupportedTypes[]` sets**. For an offset/size alias, link only when:\\n\\n1. both tag signatures have descriptors fr..."
+      }
+    ],
+    "read_definition": [
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "cmsReadTag",
+          "lcms/src/cmsio0.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624234.289105476,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1559 void* CMSEXPORT cmsReadTag(cmsHPROFILE hProfile, cmsTagSignature sig), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "_cmsSearchTag",
+          "lcms/src/cmsio0.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624234.289732365,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n595 int _cmsSearchTag(_cmsICCPROFILE* Icc, cmsTagSignature sig, cmsBool lFollowLinks), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "_cmsReadHeader",
+          "lcms/src/cmsio0.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624234.290147173,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n718 cmsBool _cmsReadHeader(_cmsICCPROFILE* Icc), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "cmsReadTag",
+          "lcms/src/cmsio0.c",
+          1559,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624237.695587314,
+        "success": true,
+        "result_summary": "Ok({'contents': '1559 void* CMSEXPORT cmsReadTag(cmsHPROFILE hProfile, cmsTagSignature sig)\\n1560 {\\n1561     _cmsICCPROFILE* Icc = (_cmsICCPROFILE*) hProfile;\\n1562     cmsIOHANDLER* io;\\n1563     cm..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "IsTypeSupported",
+          "lcms/src/cmsio0.c",
+          1542,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624237.697072993,
+        "success": true,
+        "result_summary": "Ok({'contents': '1541 static\\n1542 cmsBool IsTypeSupported(cmsTagDescriptor* TagDescriptor, cmsTagTypeSignature Type)\\n1543 {\\n1544     cmsUInt32Number i, nMaxTypes;\\n1545 \\n1546     nMaxTypes = TagDe..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "_cmsReadHeader",
+          "lcms/src/cmsio0.c",
+          718,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624237.698657633,
+        "success": true,
+        "result_summary": "Ok({'contents': '718 cmsBool _cmsReadHeader(_cmsICCPROFILE* Icc)\\n719 {\\n720     cmsTagEntry Tag;\\n721     cmsICCHeader Header;\\n722     cmsUInt32Number i, j;\\n723     cmsUInt32Number HeaderSize;\\n724..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "_cmsSearchTag",
+          "lcms/src/cmsio0.c",
+          595,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624237.700008899,
+        "success": true,
+        "result_summary": "Ok({'contents': \"595 int _cmsSearchTag(_cmsICCPROFILE* Icc, cmsTagSignature sig, cmsBool lFollowLinks)\\n596 {\\n597     int n;\\n598     cmsTagSignature LinkedSig;\\n599 \\n600     do {\\n601 \\n602        ..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "cmsTagDescriptor",
+          "lcms/src/lcms2_internal.h",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624248.613251826,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: lcms/include/lcms2_plugin.h, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "_cmsReadTypeBase",
+          "lcms/src/cmsio0.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624327.080008681,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: lcms/src/cmsplugin.c, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "cmsTagDescriptor",
+          "lcms/include/lcms2_plugin.h",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624327.081613389,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n441 } cmsTagDescriptor;, extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "cmsOpenProfileFromIOhandlerTHR",
+          "lcms/src/cmsio0.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624327.083431226,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1081 cmsHPROFILE CMSEXPORT cmsOpenProfileFromIOhandlerTHR(cmsContext ContextID, cmsIOHANDLER* io), extra=Non..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "SaveTags",
+          "lcms/src/cmsio0.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624341.980322174,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n1227 cmsBool SaveTags(_cmsICCPROFILE* Icc, _cmsICCPROFILE* FileOrig), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "cmsOpenProfileFromIOhandlerTHR",
+          "lcms/src/cmsio0.c",
+          1081,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624341.981599445,
+        "success": true,
+        "result_summary": "Ok({'contents': '1081 cmsHPROFILE CMSEXPORT cmsOpenProfileFromIOhandlerTHR(cmsContext ContextID, cmsIOHANDLER* io)\\n1082 {\\n1083     _cmsICCPROFILE* NewIcc;\\n1084     cmsHPROFILE hEmpty = cmsCreatePro..."
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "_cmsReadTypeBase",
+          "lcms/src/cmsplugin.c",
+          0,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624341.981748366,
+        "success": true,
+        "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n438 cmsTagTypeSignature CMSEXPORT _cmsReadTypeBase(cmsIOHANDLER* io), extra=None))"
+      },
+      {
+        "tool_name": "read_definition",
+        "args": [
+          "_cmsReadTypeBase",
+          "lcms/src/cmsplugin.c",
+          438,
+          true
+        ],
+        "kwargs": {},
+        "timestamp": 1624343.714854934,
+        "success": true,
+        "result_summary": "Ok({'contents': '438 cmsTagTypeSignature CMSEXPORT _cmsReadTypeBase(cmsIOHANDLER* io)\\n439 {\\n440     _cmsTagBase Base;\\n441 \\n442     _cmsAssert(io != NULL);\\n443 \\n444     if (io -> Read(io, &Base, ..."
+      }
+    ],
+    "read_source": [
+      {
+        "tool_name": "read_source",
+        "args": [
+          "lcms/src/cmsio0.c",
+          770
+        ],
+        "kwargs": {},
+        "timestamp": 1624237.688742924,
+        "success": true,
+        "result_summary": "Ok({'contents': '671         // No, make a new one\\n672         if (Icc -> TagCount >= MAX_TABLE_TAG) {\\n673             cmsSignalError(Icc ->ContextID, cmsERROR_RANGE, \"Too many tags (%d)\", MAX_TABLE..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "lcms/src/cmsio0.c",
+          1
+        ],
+        "kwargs": {},
+        "timestamp": 1624327.075597208,
+        "success": true,
+        "result_summary": "Ok({'contents': '  1 //---------------------------------------------------------------------------------\\n  2 //\\n  3 //  Little Color Management System\\n  4 //  Copyright (c) 1998-2022 Marti Maria Sa..."
+      },
+      {
+        "tool_name": "read_source",
+        "args": [
+          "lcms/include/lcms2_plugin.h",
+          420
+        ],
+        "kwargs": {},
+        "timestamp": 1624341.976139845,
+        "success": true,
+        "result_summary": "Ok({'contents': '321 \\n322 } cmsPluginInterpolation;\\n323 \\n324 //----------------------------------------------------------------------------------------------------------\\n325 \\n326 // Parametric cu..."
+      }
+    ],
+    "find_references": [
+      {
+        "tool_name": "find_references",
+        "args": [
+          "_cmsGetTagDescriptor",
+          "",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1624234.378277894,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='lcms/src/cmsio0.c', refs=[FileReference(line=1293, content='            TagDescriptor = _cmsGetTagDescriptor(Icc-> ContextID, Icc -> TagNames[i]);', enclosing_definition=..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "TagDescriptor",
+          "lcms/src/cmsio0.c",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1624234.40844032,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='lcms/src/cmsio0.c', refs=[FileReference(line=1233, content='    cmsTagDescriptor* TagDescriptor;', enclosing_definition='SaveTags'), FileReference(line=1293, content='   ..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "cmsSigViewingConditionsTag",
+          "lcms/src",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1624248.610149355,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='lcms/src/cmstypes.c', refs=[FileReference(line=5685, content='    { cmsSigViewingConditionsTag,   { 1, 1, { cmsSigViewingConditionsType },  NULL}, &SupportedTags[58]},', ..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "cmsSigGamutTag",
+          "lcms/src",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1624248.611589774,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='lcms/src/cmstypes.c', refs=[FileReference(line=5639, content='    { cmsSigGamutTag,               { 1, 3, { cmsSigLut16Type, cmsSigLutBtoAType, cmsSigLut8Type }, DecideLU..."
+      },
+      {
+        "tool_name": "find_references",
+        "args": [
+          "TagLinked",
+          "lcms/src",
+          false
+        ],
+        "kwargs": {},
+        "timestamp": 1624248.615129877,
+        "success": true,
+        "result_summary": "Ok([FileReferences(file_name='lcms/src/cmsio0.c', refs=[FileReference(line=611, content='        LinkedSig = Icc ->TagLinked[n];', enclosing_definition='_cmsSearchTag'), FileReference(line=802, conten..."
+      }
+    ],
+    "apply_patch": [
+      {
+        "tool_name": "apply_patch",
+        "args": [
+          "lcms/src/cmsio0.c",
+          "@@ -692,6 +692,38 @@\n // Enforces that the profile version is per. spec.\n // Operates on the big endian bytes from the profile.\n // Called before converting to platform endianness.\n+\n+// Check whether a tag type can be represented by a tag descriptor. This is\n+// also used while building links, before any tag data has been cooked.\n+static\n+cmsBool IsTypeSupportedByDescriptor(const cmsTagDescriptor* TagDescriptor, cmsTagTypeSignature Type)\n+{\n+    cmsUInt32Number i, nMaxTypes;\n+\n+    if (TagDescriptor == NULL) return FALSE;\n+\n+    nMaxTypes = TagDescriptor->nSupportedTypes;\n+    if (nMaxTypes >= MAX_TYPES_IN_LCMS_PLUGIN)\n+        nMaxTypes = MAX_TYPES_IN_LCMS_PLUGIN;\n+\n+    for (i = 0; i < nMaxTypes; i++) {\n+        if (Type == TagDescriptor->SupportedTypes[i]) return TRUE;\n+    }\n+\n+    return FALSE;\n+}\n+\n+// Linked tags share the same cooked object. Therefore both tag signatures\n+// must accept the actual type stored in the shared block and must agree on\n+// the number of elements represented by that object.\n+static\n+cmsBool AreTagDescriptorsCompatible(_cmsICCPROFILE* Icc, cmsTagSignature First,\n+                                    cmsTagSignature Second, cmsTagTypeSignature Type)\n+{\n+    cmsTagDescriptor* FirstDescriptor  = _cmsGetTagDescriptor(Icc->ContextID, First);\n+    cmsTagDescriptor* SecondDescriptor = _cmsGetTagDescriptor(Icc->ContextID, Second);\n+\n+    if (FirstDescriptor == NULL || SecondDescriptor == NULL) return FALSE;\n+    if (FirstDescriptor->ElemCount != SecondDescriptor->ElemCount) return FALSE;\n+\n+    return IsTypeSupportedByDescriptor(FirstDescriptor, Type) &&\n+           IsTypeSupportedByDescriptor(SecondDescriptor, Type);\n+}\n+\n // Byte 0 is BCD major version, so max 9.\n // Byte 1 is 2 BCD digits, one per nibble.\n // Reserved bytes 2 & 3 must be 0.\n@@ -720,9 +752,11 @@\n     cmsTagEntry Tag;\n     cmsICCHeader Header;\n     cmsUInt32Number i, j;\n+    cmsUInt32Number DirectoryPos;\n     cmsUInt32Number HeaderSize;\n     cmsIOHANDLER* io = Icc ->IOhandler;\n     cmsUInt32Number TagCount;\n+    cmsTagTypeSignature BaseType;\n \n \n     // Read the header\n@@ -792,18 +826,34 @@\n         Icc -> TagOffsets[Icc ->TagCount] = Tag.offset;\n         Icc -> TagSizes[Icc ->TagCount]   = Tag.size;\n \n-       // Search for links\n-        for (j=0; j < Icc ->TagCount; j++) {\n-           \n-            if ((Icc ->TagOffsets[j] == Tag.offset) &&\n-                (Icc ->TagSizes[j]   == Tag.size)) {\n-\n-                // Check types. \n-                Icc ->TagLinked[Icc ->TagCount] = Icc ->TagNames[j];\n-            }\n-\n-        }\n-\n         Icc ->TagCount++;\n     }\n \n+    // Search for links. Equal offsets and sizes alone are insufficient: a\n+    // cooked read caches the object in the link target's directory slot, so\n+    // both signatures must use a compatible in-memory representation.\n+    DirectoryPos = io->Tell(io);\n+    for (i = 0; i < Icc->TagCount; i++) {\n+        for (j = 0; j < i; j++) {\n+\n+            if ((Icc->TagOffsets[j] == Icc->TagOffsets[i]) &&\n+                (Icc->TagSizes[j]   == Icc->TagSizes[i]) &&\n+                (Icc->TagSizes[i] >= 8)) {\n+\n+                if (!io->Seek(io, Icc->TagOffsets[i])) continue;\n+                BaseType = _cmsReadTypeBase(io);\n+\n+                if (BaseType != 0 &&\n+                    AreTagDescriptorsCompatible(Icc, Icc->TagNames[j],\n+                                                Icc->TagNames[i], BaseType)) {\n+                    Icc->TagLinked[i] = Icc->TagNames[j];\n+                    break;\n+                }\n+            }\n+        }\n+    }\n+\n+    if (!io->Seek(io, DirectoryPos)) return FALSE;\n+\n \n     for (i = 0; i < Icc->TagCount; i++) {\n         for (j = 0; j < Icc->TagCount; j++) {\n@@ -1541,17 +1591,7 @@\n static\n cmsBool IsTypeSupported(cmsTagDescriptor* TagDescriptor, cmsTagTypeSignature Type)\n {\n-    cmsUInt32Number i, nMaxTypes;\n-\n-    nMaxTypes = TagDescriptor->nSupportedTypes;\n-    if (nMaxTypes >= MAX_TYPES_IN_LCMS_PLUGIN)\n-        nMaxTypes = MAX_TYPES_IN_LCMS_PLUGIN;\n-\n-    for (i=0; i < nMaxTypes; i++) {\n-        if (Type == TagDescriptor ->SupportedTypes[i]) return TRUE;\n-    }\n-\n-    return FALSE;\n+    return IsTypeSupportedByDescriptor(TagDescriptor, Type);\n }\n"
+        ],
+        "kwargs": {},
+        "timestamp": 1624374.859920435,
+        "success": true,
+        "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+      }
+    ],
+    "test_patch": [
+      {
+        "tool_name": "test_patch",
+        "args": [],
+        "kwargs": {},
+        "timestamp": 1624409.192641735,
+        "success": true,
+        "result_summary": "Ok(\"The patched code built successfully.\\nThe known PoVs no longer reproduce.\\nThere were no functionality tests available, so we are unsure if the patch breaks functionality. Please carefully consdie..."
+      }
+    ],
+    "undo_last_patch": [],
+    "list_current_edits": []
+  }
+}

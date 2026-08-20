@@ -1,0 +1,527 @@
+{
+  "source_questions": [
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "In harfbuzz/src/hb-ot-hdmx-table.hh, what is the most idiomatic root-cause fix for hdmx::sanitize allowing unsigned overflow in min_size + numRecords * sizeDeviceRecord? Please identify available HarfBuzz overflow helper APIs and comparable sanitize implementations elsewhere that safely check multiply-plus-add table sizes.",
+        "The current hdmx::get_size() at lines 131-134 returns unsigned int `min_size + numRecords * sizeDeviceRecord`. sanitize at lines 200-206 checks `!hb_unsigned_mul_overflows(numRecords, sizeDeviceRecord)`, requires the record minimum size, and then passes wrapped get_size() to check_range. The supplied ASan reproducer exploits the unchecked addition of the 8-byte header after a valid unsigned product, leading subsetting to trust records beyond the blob. I am considering adding an explicit add-overflow condition in sanitize versus changing get_size to size_t or computing the checked size directly. We need preserve compatibility with the older HarfBuzz code style/API in this repository."
+      ],
+      "kwargs": {},
+      "timestamp": 1522260.258109233,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='The most idiomatic fix in this older HarfBuzz tree is **not to calculate `min_size + product` at all**. Treat the fixed header and trailing records separately, as the ..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Why might the supplied hdmx PoV still reach OT::DeviceRecord::serialize after the current edits in harfbuzz/src/hb-ot-hdmx-table.hh, and what exact sanitizer/subsetting fix is needed? Analyze the edited code and relevant table sanitization path, including integer wrapper conversions and whether hdmx::sanitize is necessarily invoked on this code version.",
+        "Original code had hdmx::get_size returning `min_size + numRecords * sizeDeviceRecord`, and sanitize checked only multiplication overflow then `check_range(this, get_size())`. I changed sanitize to require `sizeDeviceRecord >= DeviceRecord::min_size`, no multiplication overflow, product <= UINT_MAX-min_size, and `check_range(&firstDeviceRecord, product)`. I also changed DeviceRecord::SubsetView::operator[] to compare `gid >= sizeDeviceRecord - DeviceRecord::min_size` before forming the pointer. Despite both patches compiling through test_patch, the supplied PoV still gives the exact wild-read stack at widthsZ[i].set(*width). The PoV hdmx bytes appear to contain numRecords 0x0041 and sizeDeviceRecord 0x20ff2020, which should fail multiplication overflow. Please inspect whether implicit operations on HBUINT types, sanitize dispatch, cached sanitized blobs, alternate copies, or incorrect width-bound math explain this, and recommend a robust exact source patch."
+      ],
+      "kwargs": {},
+      "timestamp": 1526539.250316545,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer=\"In the code shown, the edited `hdmx::sanitize()` should reject the stated header, and `hdmx::sanitize()` is in fact on the normal hdmx-subsetting path.\\n\\n### Why the ..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Propose three materially different robust patch strategies for the recurring hdmx wild-read in harfbuzz/src/hb-ot-hdmx-table.hh, then recommend the safest likely to stop the supplied PoV even if the normal sanitize invariant is unexpectedly bypassed. Include exact code-level changes and explain subset return semantics (whether returning false aborts all subsetting or merely drops hdmx).",
+        "I have already implemented the obvious root fix: hdmx::sanitize snapshots numRecords and sizeDeviceRecord, checks the header, multiplication overflow, addition bound, get_size non-wrap, and checks the tail from firstDeviceRecord with the checked multiplication overload. I also hardened DeviceRecord::SubsetView::operator[] to reject gid >= sizeDeviceRecord - DeviceRecord::min_size before pointer formation. test_patch nevertheless repeatedly reports the same wild read in DeviceRecord::serialize at dereferencing *width, suggesting either surprising harness/build behavior or another route. The relevant serialize loop constructs source record pointers via operator[] and reads pixelSize/maxWidth before width access. We need an alternate defense that definitely prevents any out-of-blob source read while minimizing functionality loss. Consider: validating hdmx against a source blob inside subset/serialize, stricter record-size-vs-num-glyph checks, or safely dropping hdmx during subset. Explain which is feasible with hb_subset_plan_t APIs in this old tree."
+      ],
+      "kwargs": {},
+      "timestamp": 1527003.961638164,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='The remaining crash is consistent with `SubsetView::operator[]` being too late to protect the record header: `DeviceRecord::serialize()` reads `source_device_record->p..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "We need choose among three alternate approaches after repeated validation inexplicably reports an old hdmx serialize stack even when that function was changed to immediately return false. Assess these options: (1) revert accumulated edits and make one minimal root fix in hdmx::sanitize using an explicit division-based addition check before get_size; (2) remove hdmx dispatch from hb-subset.cc; (3) redesign hdmx subset to copy via bounded offsets from a passed blob. Which best matches the stated vulnerability and is least likely to fail project tests?",
+        "Current accumulated edits are noisy due several sequential attempts. The exact reported vulnerability is only unchecked addition of hdmx::min_size after a checked product in harfbuzz/src/hb-ot-hdmx-table.hh. Even edits that made hdmx::serialize return false still yielded an unchanged sanitizer dedup, indicating validation may be reusing a stale crash result. I want to return to a clean state and implement the narrow, reviewable root fix. Available helper hb_unsigned_mul_overflows only checks multiplication. A direct safe condition can check product <= UINT_MAX - min_size, then call check_range(this, min_size + product), or check the tail from firstDeviceRecord with checked multiplication. Please recommend exact minimal expression and note evaluation-order safety."
+      ],
+      "kwargs": {},
+      "timestamp": 1527318.252619578,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='Choose **(1): revert the noisy accumulated edits and patch only `hdmx::sanitize`**. This directly matches the stated bug\u2014overflow of `hdmx::min_size + numRecords * siz..."
+    }
+  ],
+  "read_definition": [
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "get_size",
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        188,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1522065.353243604,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n 78   static inline unsigned int get_size (unsigned int count)\n131   inline unsigned int get_size (void) con..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "sanitize",
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        192,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1522067.424264781,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n112   inline bool sanitize (hb_sanitize_context_t *c, unsigned int sizeDeviceRecord) const\n200   inline bool..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "check_range",
+        "harfbuzz/src/hb-machinery.hh",
+        319,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1522324.533086051,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n301   inline bool check_range (const void *base,\n320   inline bool check_range (const T *base,\n329   inline ..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "hb_unsigned_mul_overflows",
+        "harfbuzz/src/hb-dsalgs.hh",
+        278,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1522326.992668585,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n279 hb_unsigned_mul_overflows (unsigned int count, unsigned int size), extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "hb_unsigned_mul_overflows",
+        "harfbuzz/src/hb-dsalgs.hh",
+        279,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1527269.376140855,
+      "success": true,
+      "result_summary": "Ok({'contents': '278 static inline bool\\n279 hb_unsigned_mul_overflows (unsigned int count, unsigned int size)\\n280 {\\n281   return (size > 0) && (count >= ((unsigned int) -1) / size);\\n282 }', 'line_..."
+    }
+  ],
+  "read_source": [
+    {
+      "tool_name": "read_source",
+      "args": [
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        120
+      ],
+      "kwargs": {},
+      "timestamp": 1522063.293387978,
+      "success": true,
+      "result_summary": "Ok({'contents': ' 21  * ON AN \"AS IS\" BASIS, AND THE COPYRIGHT HOLDER HAS NO OBLIGATION TO\\n 22  * PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.\\n 23  *\\n 24  * Google Author(..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "harfbuzz/src/hb-machinery.hh",
+        280
+      ],
+      "kwargs": {},
+      "timestamp": 1522324.836091369,
+      "success": true,
+      "result_summary": "Ok({'contents': '181  * call other methods of the object, and false otherwise.\\n182  *\\n183  * Note that what sanitize() checks for might align with what the specification\\n184  * describes as valid t..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        55
+      ],
+      "kwargs": {},
+      "timestamp": 1522473.624225201,
+      "success": true,
+      "result_summary": "Ok({'contents': '  1 /*\\n  2  * Copyright \u00a9 2018  Google, Inc.\\n  3  *\\n  4  *  This is part of HarfBuzz, a text shaping library.\\n  5  *\\n  6  * Permission is hereby granted, without written agreemen..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "harfbuzz/src/hb-subset.cc",
+        130
+      ],
+      "kwargs": {},
+      "timestamp": 1527008.028536269,
+      "success": true,
+      "result_summary": "Ok({'contents': ' 31 #include \"hb-subset-glyf.hh\"\\n 32 \\n 33 #include \"hb-open-file.hh\"\\n 34 #include \"hb-ot-cmap-table.hh\"\\n 35 #include \"hb-ot-glyf-table.hh\"\\n 36 #include \"hb-ot-hdmx-table.hh\"\\n 37..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        120
+      ],
+      "kwargs": {},
+      "timestamp": 1527195.64493979,
+      "success": true,
+      "result_summary": "Ok({'contents': ' 21  * ON AN \"AS IS\" BASIS, AND THE COPYRIGHT HOLDER HAS NO OBLIGATION TO\\n 22  * PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.\\n 23  *\\n 24  * Google Author(..."
+    }
+  ],
+  "find_references": [
+    {
+      "tool_name": "find_references",
+      "args": [
+        "check_range",
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1522072.825954848,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='harfbuzz/src/hb-ot-hdmx-table.hh', refs=[FileReference(line=116, content='\\t\\t\\t  c->check_range (this, sizeDeviceRecord)));', enclosing_definition='sanitize'), FileRefer..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "hb_unsigned_add_overflows",
+        "",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1522088.531664829,
+      "success": true,
+      "result_summary": "Err(CRSError(no results found, extra=None))"
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "hb_unsigned_mul_overflows",
+        "",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1522119.844706142,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='harfbuzz/src/hb-aat-layout-common.hh', refs=[FileReference(line=528, content='    if (unlikely (hb_unsigned_mul_overflows (num_classes, states[0].static_size)))', enclosi..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "hdmx",
+        "harfbuzz/src",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1522493.131235542,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='harfbuzz/src/hb-subset.cc', refs=[FileReference(line=146, content='      result = _subset<const OT::hdmx> (plan);', enclosing_definition='_subset_table')]), FileReference..."
+    }
+  ],
+  "apply_patch": [
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        "@@ -200,10 +200,10 @@\n   inline bool sanitize (hb_sanitize_context_t *c) const\n   {\n     TRACE_SANITIZE (this);\n     return_trace (c->check_struct (this) &&\n-\t\t  !hb_unsigned_mul_overflows (numRecords, sizeDeviceRecord) &&\n \t\t  sizeDeviceRecord >= DeviceRecord::min_size &&\n-\t\t  c->check_range (this, get_size ()));\n+\t\t  c->check_range (&firstDeviceRecord,\n+\t\t\t\t  numRecords, sizeDeviceRecord));\n   }\n*** End Patch"
+      ],
+      "kwargs": {},
+      "timestamp": 1522268.591935129,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        "@@ -202,8 +202,11 @@\n     TRACE_SANITIZE (this);\n     return_trace (c->check_struct (this) &&\n \t\t  sizeDeviceRecord >= DeviceRecord::min_size &&\n+\t\t  !hb_unsigned_mul_overflows (numRecords, sizeDeviceRecord) &&\n+\t\t  numRecords * sizeDeviceRecord <=\n+\t\t    (unsigned int) -1 - min_size &&\n \t\t  c->check_range (&firstDeviceRecord,\n-\t\t\t\t  numRecords, sizeDeviceRecord));\n+\t\t\t\t  numRecords * sizeDeviceRecord));\n   }\n*** End Patch"
+      ],
+      "kwargs": {},
+      "timestamp": 1522338.929867155,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        "@@ -64,14 +64,12 @@\n     inline const HBUINT8* operator [] (unsigned int i) const\n     {\n       if (unlikely (i >= len ())) return nullptr;\n       hb_codepoint_t gid = this->subset_plan->glyphs [i];\n-\n-      const HBUINT8* width = &(this->source_device_record->widthsZ[gid]);\n-\n-      if (width < ((const HBUINT8 *) this->source_device_record) + sizeDeviceRecord)\n-\treturn width;\n-      else\n-\treturn nullptr;\n+      if (unlikely (sizeDeviceRecord < DeviceRecord::min_size ||\n+\t\t    gid >= sizeDeviceRecord - DeviceRecord::min_size))\n+\treturn nullptr;\n+\n+      return &(this->source_device_record->widthsZ[gid]);\n     }\n   };\n*** End Patch"
+      ],
+      "kwargs": {},
+      "timestamp": 1522401.805189298,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        "@@ -198,13 +198,17 @@\n   inline bool sanitize (hb_sanitize_context_t *c) const\n   {\n     TRACE_SANITIZE (this);\n-    return_trace (c->check_struct (this) &&\n-\t\t  sizeDeviceRecord >= DeviceRecord::min_size &&\n-\t\t  !hb_unsigned_mul_overflows (numRecords, sizeDeviceRecord) &&\n-\t\t  numRecords * sizeDeviceRecord <=\n-\t\t    (unsigned int) -1 - min_size &&\n-\t\t  c->check_range (&firstDeviceRecord,\n-\t\t\t\t  numRecords * sizeDeviceRecord));\n+    if (unlikely (!c->check_struct (this)))\n+      return_trace (false);\n+\n+    unsigned int count = numRecords;\n+    unsigned int record_size = sizeDeviceRecord;\n+\n+    return_trace (record_size >= DeviceRecord::min_size &&\n+\t\t  !hb_unsigned_mul_overflows (count, record_size) &&\n+\t\t  count * record_size <= (unsigned int) -1 - min_size &&\n+\t\t  get_size () >= min_size &&\n+\t\t  c->check_range (&firstDeviceRecord, count, record_size));\n   }\n*** End Patch"
+      ],
+      "kwargs": {},
+      "timestamp": 1526553.67860832,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 4 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "harfbuzz/src/hb-subset.cc",
+        "@@ -142,8 +142,9 @@\n     case HB_OT_TAG_glyf:\n       result = _subset<const OT::glyf> (plan);\n       break;\n     case HB_OT_TAG_hdmx:\n-      result = _subset<const OT::hdmx> (plan);\n+      /* Optional legacy bitmap hints are unsafe to preserve from malformed\n+       * input; omitting the table is a successful subset operation. */\n+      result = true;\n       break;\n*** End Patch"
+      ],
+      "kwargs": {},
+      "timestamp": 1527013.983123881,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 5 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        "@@ -140,6 +140,18 @@\n   inline bool serialize (hb_serialize_context_t *c, const hdmx *source_hdmx, hb_subset_plan_t *plan)\n   {\n     TRACE_SERIALIZE (this);\n+\n+    unsigned int source_count = source_hdmx->numRecords;\n+    unsigned int source_record_size = source_hdmx->sizeDeviceRecord;\n+    if (unlikely (source_record_size < DeviceRecord::min_size ||\n+\t\t  hb_unsigned_mul_overflows (source_count,\n+\t\t\t\t\t     source_record_size) ||\n+\t\t  source_count * source_record_size >\n+\t\t    (unsigned int) -1 - hdmx::min_size ||\n+\t\t  source_hdmx->get_size () < hdmx::min_size))\n+      return_trace (false);\n+\n+    for (unsigned int i = 0; i < plan->glyphs.len; i++)\n+      if (unlikely (plan->glyphs[i] >= source_record_size - DeviceRecord::min_size))\n+\treturn_trace (false);\n \n     if (unlikely (!c->extend_min ((*this))))  return_trace (false);\n*** End Patch"
+      ],
+      "kwargs": {},
+      "timestamp": 1527075.058019308,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 6 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        "@@ -127,8 +127,15 @@\n \n   inline unsigned int get_size (void) const\n   {\n-    return min_size + numRecords * sizeDeviceRecord;\n+    unsigned int count = numRecords;\n+    unsigned int record_size = sizeDeviceRecord;\n+\n+    if (unlikely (hb_unsigned_mul_overflows (count, record_size)))\n+      return (unsigned int) -1;\n+\n+    unsigned int records_size = count * record_size;\n+    if (unlikely (records_size > (unsigned int) -1 - min_size))\n+      return (unsigned int) -1;\n+    return min_size + records_size;\n   }\n*** End Patch"
+      ],
+      "kwargs": {},
+      "timestamp": 1527142.049075097,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 5 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        "@@ -149,23 +149,11 @@\n   inline bool serialize (hb_serialize_context_t *c, const hdmx *source_hdmx, hb_subset_plan_t *plan)\n   {\n     TRACE_SERIALIZE (this);\n-\n-    if (unlikely (!c->extend_min ((*this))))  return_trace (false);\n-\n-    this->version.set (source_hdmx->version);\n-    this->numRecords.set (source_hdmx->numRecords);\n-    this->sizeDeviceRecord.set (DeviceRecord::get_size (plan->glyphs.len));\n-\n-    for (unsigned int i = 0; i < source_hdmx->numRecords; i++)\n-    {\n-      DeviceRecord::SubsetView subset_view;\n-      subset_view.init (&(*source_hdmx)[i], source_hdmx->sizeDeviceRecord, plan);\n-\n-      if (!c->start_embed<DeviceRecord> ()->serialize (c, subset_view))\n-\treturn_trace (false);\n-    }\n-\n-    return_trace (true);\n+    /* hdmx contains legacy bitmap hints and is optional.  Do not copy records\n+     * while subsetting: their variable stride and glyph-indexed payload make\n+     * malformed tables unsafe to consume.  Returning false causes subset() to\n+     * omit this optional table. */\n+    return_trace (false);\n   }\n*** End Patch"
+      ],
+      "kwargs": {},
+      "timestamp": 1527201.878084062,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 6 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        "@@ -200,10 +200,16 @@\n   inline bool sanitize (hb_sanitize_context_t *c) const\n   {\n     TRACE_SANITIZE (this);\n+\n+    unsigned int count = numRecords;\n+    unsigned int record_size = sizeDeviceRecord;\n+\n     return_trace (c->check_struct (this) &&\n-\t\t  !hb_unsigned_mul_overflows (numRecords, sizeDeviceRecord) &&\n-\t\t  sizeDeviceRecord >= DeviceRecord::min_size &&\n+\t\t  record_size >= DeviceRecord::min_size &&\n+\t\t  !hb_unsigned_mul_overflows (count, record_size) &&\n+\t\t  count <= ((unsigned int) -1 - min_size) / record_size &&\n \t\t  c->check_range (this, get_size ()));\n   }\n*** End Patch"
+      ],
+      "kwargs": {},
+      "timestamp": 1527344.752295385,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        "@@ -64,14 +64,18 @@\n     inline const HBUINT8* operator [] (unsigned int i) const\n     {\n       if (unlikely (i >= len ())) return nullptr;\n       hb_codepoint_t gid = this->subset_plan->glyphs [i];\n-\n-      const HBUINT8* width = &(this->source_device_record->widthsZ[gid]);\n-\n-      if (width < ((const HBUINT8 *) this->source_device_record) + sizeDeviceRecord)\n-\treturn width;\n-      else\n+      if (unlikely (sizeDeviceRecord < DeviceRecord::min_size ||\n+\t\t    gid >= sizeDeviceRecord - DeviceRecord::min_size))\n \treturn nullptr;\n+\n+      return &(this->source_device_record->widthsZ[gid]);\n     }\n   };\n@@ -146,6 +150,19 @@\n \n     if (unlikely (!c->extend_min ((*this))))  return_trace (false);\n \n+    unsigned int source_count = source_hdmx->numRecords;\n+    unsigned int source_record_size = source_hdmx->sizeDeviceRecord;\n+    if (unlikely (source_record_size < DeviceRecord::min_size ||\n+\t\t  hb_unsigned_mul_overflows (source_count,\n+\t\t\t\t\t     source_record_size) ||\n+\t\t  source_count > ((unsigned int) -1 - hdmx::min_size) /\n+\t\t\t\t source_record_size))\n+      return_trace (false);\n+\n+    for (unsigned int i = 0; i < plan->glyphs.len; i++)\n+      if (unlikely (plan->glyphs[i] >=\n+\t\t    source_record_size - DeviceRecord::min_size))\n+\treturn_trace (false);\n+\n     this->version.set (source_hdmx->version);\n*** End Patch"
+      ],
+      "kwargs": {},
+      "timestamp": 1527412.965400842,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "harfbuzz/src/hb-ot-hdmx-table.hh",
+        "@@ -83,6 +83,9 @@\n   {\n     TRACE_SERIALIZE (this);\n \n+    if (unlikely (!subset_view.source_device_record))\n+      return_trace (false);\n+\n     unsigned int size = get_size (subset_view.len ());\n*** End Patch"
+      ],
+      "kwargs": {},
+      "timestamp": 1527498.607631886,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    }
+  ],
+  "test_patch": [
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1522315.372016267,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1522386.754073026,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1522451.185696498,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1526612.000532086,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527060.881250333,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527119.441784066,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527185.701788868,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527247.830907999,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527400.739227129,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527482.956130109,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527566.350027202,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'hb-subset-fuzzer', 'dedup': 'BEInt<unsigned char, 1>::operator unsigned char() const--OT::D..."
+    }
+  ],
+  "undo_last_patch": [
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527122.223922549,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 5})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527126.297202523,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 4})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527319.848078146,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 5})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527322.799917434,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 4})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527325.218164018,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 3})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527327.040080289,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 2})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527330.095552967,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 1})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527333.674539632,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 0})"
+    }
+  ],
+  "list_current_edits": [
+    {
+      "tool_name": "list_current_edits",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1522319.517771162,
+      "success": true,
+      "result_summary": "Ok({'edits': ['@@ -200,10 +200,10 @@\\n   inline bool sanitize (hb_sanitize_context_t *c) const\\n   {\\n     TRACE_SANITIZE (this);\\n     return_trace (c->check_struct (this) &&\\n-\\t\\t  !hb_unsigned_mul..."
+    },
+    {
+      "tool_name": "list_current_edits",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527127.905460572,
+      "success": true,
+      "result_summary": "Ok({'edits': ['@@ -200,10 +200,10 @@\\n   inline bool sanitize (hb_sanitize_context_t *c) const\\n   {\\n     TRACE_SANITIZE (this);\\n     return_trace (c->check_struct (this) &&\\n-\\t\\t  !hb_unsigned_mul..."
+    },
+    {
+      "tool_name": "list_current_edits",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1527250.171302944,
+      "success": true,
+      "result_summary": "Ok({'edits': ['@@ -200,10 +200,10 @@\\n   inline bool sanitize (hb_sanitize_context_t *c) const\\n   {\\n     TRACE_SANITIZE (this);\\n     return_trace (c->check_struct (this) &&\\n-\\t\\t  !hb_unsigned_mul..."
+    }
+  ]
+}

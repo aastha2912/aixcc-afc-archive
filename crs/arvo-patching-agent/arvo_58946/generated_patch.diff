@@ -1,0 +1,41 @@
+--- a/src/internal.c
++++ b/src/internal.c
+@@ -10078,6 +10078,9 @@
+ static WC_INLINE int GrowOutputBuffer(WOLFSSL* ssl, int size)
+ {
+     byte* tmp;
++#ifdef WOLFSSL_STATIC_MEMORY
++    word32 i;
++#endif
+ #if WOLFSSL_GENERAL_ALIGNMENT > 0
+     byte  hdrSz = ssl->options.dtls ? DTLS_RECORD_HEADER_SZ :
+                                       RECORD_HEADER_SZ;
+@@ -10111,14 +10114,19 @@
+     /* can be from IO memory pool which does not need copy if same buffer */
+     if (ssl->buffers.outputBuffer.length &&
+             tmp == ssl->buffers.outputBuffer.buffer) {
++        /* Copy forwards because destination precedes overlapping source. */
++        for (i = 0; i < ssl->buffers.outputBuffer.length; i++)
++            tmp[i] = tmp[ssl->buffers.outputBuffer.idx + i];
+         ssl->buffers.outputBuffer.bufferSize =
+             size + ssl->buffers.outputBuffer.length;
++        ssl->buffers.outputBuffer.idx = 0;
+         return 0;
+     }
+ #endif
+ 
+     if (ssl->buffers.outputBuffer.length)
+-        XMEMCPY(tmp, ssl->buffers.outputBuffer.buffer,
++        XMEMCPY(tmp, ssl->buffers.outputBuffer.buffer +
++                     ssl->buffers.outputBuffer.idx,
+                ssl->buffers.outputBuffer.length);
+ 
+     if (ssl->buffers.outputBuffer.dynamicFlag) {
+@@ -10136,6 +10144,7 @@
+         ssl->buffers.outputBuffer.offset = 0;
+ 
+     ssl->buffers.outputBuffer.buffer = tmp;
++    ssl->buffers.outputBuffer.idx = 0;
+     ssl->buffers.outputBuffer.bufferSize = size +
+                                            ssl->buffers.outputBuffer.length;
+     return 0;

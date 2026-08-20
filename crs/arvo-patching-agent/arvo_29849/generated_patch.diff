@@ -1,0 +1,35 @@
+--- a/src/sksl/SkSLCompiler.cpp
++++ b/src/sksl/SkSLCompiler.cpp
+@@ -1352,17 +1352,28 @@
+         case Statement::Kind::kIf: {
+             IfStatement& i = stmt->as<IfStatement>();
+             if (i.test()->kind() == Expression::Kind::kBoolLiteral) {
+-                // constant if, collapse down to a single branch
++                // Constant if: collapse down to a single branch. Keep the discarded statement
++                // alive until optimization is complete; Variables owned by the symbol table can
++                // still refer to VarDeclarations in the eliminated branch.
++                std::unique_ptr<Statement> replacement;
+                 if (i.test()->as<BoolLiteral>().value()) {
+                     SkASSERT(i.ifTrue());
+-                    (*iter)->setStatement(std::move(i.ifTrue()), usage);
++                    replacement = std::move(i.ifTrue());
+                 } else {
+                     if (i.ifFalse()) {
+-                        (*iter)->setStatement(std::move(i.ifFalse()), usage);
++                        replacement = std::move(i.ifFalse());
+                     } else {
+-                        (*iter)->setStatement(std::make_unique<Nop>(), usage);
++                        replacement = std::make_unique<Nop>();
+                     }
+                 }
++
++                // setStatement only returns the old statement when replacing it with a Nop.
++                // Install a temporary Nop so we can retain the old IfStatement, then directly
++                // install the selected branch, which is already accounted for in ProgramUsage.
++                std::unique_ptr<Statement> old =
++                        (*iter)->setStatement(std::make_unique<Nop>(), usage);
++                *(*iter)->statement() = std::move(replacement);
++                optimizationContext->fOwnedStatements.push_back(std::move(old));
+                 optimizationContext->fUpdated = true;
+                 optimizationContext->fNeedsRescan = true;
+                 break;
