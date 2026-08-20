@@ -36,9 +36,19 @@ def main():
     no_patch_reasons: list[tuple[str, str]] = []
 
     for arvo_id in ids:
-        wf_path = SCRIPT_DIR / f"arvo_{arvo_id}" / "workflow_data.json"
+        arvo_dir = SCRIPT_DIR / f"arvo_{arvo_id}"
+        wf_path = arvo_dir / "workflow_data.json"
         if not wf_path.exists():
             continue
+
+        # generated_patch.diff is only ever written on the success path, so its
+        # existence is reliable proof a patch was validated at some point - even if
+        # a *later* --force re-run of the same ID subsequently failed and overwrote
+        # workflow_data.json's patch_result with that later failure. Skip IDs with
+        # a real patch file entirely; they're not a failure or no-patch case.
+        if (arvo_dir / "generated_patch.diff").exists():
+            continue
+
         try:
             data = json.loads(wf_path.read_text())
         except (json.JSONDecodeError, OSError):

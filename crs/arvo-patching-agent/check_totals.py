@@ -38,10 +38,21 @@ def main():
     no_patch: list[str] = []
 
     for arvo_id in ids:
-        wf_path = SCRIPT_DIR / f"arvo_{arvo_id}" / "workflow_data.json"
+        arvo_dir = SCRIPT_DIR / f"arvo_{arvo_id}"
+        wf_path = arvo_dir / "workflow_data.json"
         if not wf_path.exists():
             no_data.append(arvo_id)
             continue
+
+        # generated_patch.diff is only ever written on the success path in
+        # arvo_to_crs_integration.py, so its existence is reliable proof a patch was
+        # validated at some point - even if a *later* --force re-run of the same ID
+        # subsequently failed and overwrote workflow_data.json's patch_result with
+        # that later failure. Trust the file over a possibly-stale JSON field.
+        if (arvo_dir / "generated_patch.diff").exists():
+            patched.append(arvo_id)
+            continue
+
         try:
             data = json.loads(wf_path.read_text())
         except (json.JSONDecodeError, OSError) as exc:
