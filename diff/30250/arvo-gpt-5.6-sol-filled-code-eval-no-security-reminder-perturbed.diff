@@ -1,0 +1,58 @@
+--- a/src/mat73.c
++++ b/src/mat73.c
+@@ -2692,10 +2692,54 @@
+                 dset_id = matvar->internal->id;
+                 H5Iinc_ref(dset_id);
+             }
++            if ( dset_id < 0 ) {
++                return MATIO_E_GENERIC_READ_ERROR;
++            }
+             if ( matvar->nbytes > 0 ) {
++                hid_t type_id = H5Dget_type(dset_id);
++                hid_t space_id = H5Dget_space(dset_id);
++                hid_t plist_id = H5Dget_create_plist(dset_id);
++                hid_t mem_type = DataType2H5T(matvar->data_type);
++                hssize_t npoints = -1;
++
++                /*
++                 * MATLAB character arrays are stored as unsigned integer
++                 * datasets whose element width is given by MATLAB_int_decode.
++                 * Do not let inconsistent file datatype metadata reach
++                 * H5Dread: malformed compact datatypes can otherwise make
++                 * HDF5 copy beyond the compact data buffer.
++                 */
++                if ( type_id < 0 || space_id < 0 || plist_id < 0 || mem_type < 0 ) {
++                    err = MATIO_E_FILE_FORMAT_VIOLATION;
++                } else {
++                    npoints = H5Sget_simple_extent_npoints(space_id);
++                    if ( H5T_INTEGER != H5Tget_class(type_id) ||
++                         H5T_SGN_NONE != H5Tget_sign(type_id) ||
++                         H5Tget_size(type_id) != (size_t)matvar->data_size ||
++                         npoints < 0 || (size_t)npoints != nelems ) {
++                        err = MATIO_E_FILE_FORMAT_VIOLATION;
++                    } else if ( H5D_COMPACT == H5Pget_layout(plist_id) &&
++                                H5Dget_storage_size(dset_id) < (hsize_t)matvar->nbytes ) {
++                        err = MATIO_E_FILE_FORMAT_VIOLATION;
++                    }
++                }
++                if ( plist_id >= 0 ) {
++                    H5Pclose(plist_id);
++                }
++                if ( space_id >= 0 ) {
++                    H5Sclose(space_id);
++                }
++                if ( type_id >= 0 ) {
++                    H5Tclose(type_id);
++                }
++
++                if ( err ) {
++                    H5Dclose(dset_id);
++                    break;
++                }
+                 matvar->data = malloc(matvar->nbytes);
+                 if ( NULL != matvar->data ) {
+-                    herr_t herr = H5Dread(dset_id,DataType2H5T(matvar->data_type),
++                    herr_t herr = H5Dread(dset_id,mem_type,
+                         H5S_ALL,H5S_ALL,H5P_DEFAULT,matvar->data);
+                     if ( herr < 0 ) {
+                         err = MATIO_E_GENERIC_READ_ERROR;

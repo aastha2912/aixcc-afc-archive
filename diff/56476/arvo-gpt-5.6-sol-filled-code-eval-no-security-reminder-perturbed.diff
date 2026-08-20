@@ -1,0 +1,108 @@
+--- a/src/lib/libdwarf/dwarf_rnglists.c
++++ b/src/lib/libdwarf/dwarf_rnglists.c
+@@ -208,12 +208,17 @@
+     Dwarf_Unsigned offset_entry_count = 0;
+     Dwarf_Unsigned localoff = 0;
+     Dwarf_Unsigned lists_len = 0;
++    Dwarf_Unsigned initial_length_size = 0;
++    Dwarf_Small *unit_end = 0;
+ 
+     READ_AREA_LENGTH_CK(dbg,arealen,Dwarf_Unsigned,
+         data,offset_size,exten_size,
+         error,
+         sectionlength,end_data);
+-    if (arealen > sectionlength) {
++    initial_length_size = offset_size + exten_size;
++    /* arealen excludes the bytes occupied by the initial length. */
++    if (data > end_data ||
++        arealen > (Dwarf_Unsigned)(end_data - data)) {
+         dwarfstring m;
+         dwarfstring_constructor(&m);
+         dwarfstring_append_printf_u(&m,
+@@ -221,16 +226,17 @@
+             "area size of 0x%x ",arealen);
+         dwarfstring_append_printf_u(&m,
+             "at offset 0x%x ",offset);
+-        dwarfstring_append_printf_u(&m,
+-            "is larger than the entire section size of "
+-            "0x%x. Corrupt DWARF.",sectionlength);
++        dwarfstring_append(&m,
++            "does not fit after its initial length field. "
++            "Corrupt DWARF.");
+         _dwarf_error_string(dbg,error,DW_DLE_SECTION_SIZE_ERROR,
+             dwarfstring_string(&m));
+         dwarfstring_destructor(&m);
+         return DW_DLV_ERROR;
+     }
++    unit_end = data + arealen;
+ 
+-    buildhere->rc_length = arealen +offset_size+exten_size;
++    buildhere->rc_length = arealen + initial_length_size;
+     buildhere->rc_dbg = dbg;
+     buildhere->rc_index = contextnum;
+     buildhere->rc_header_offset = offset;
+@@ -238,7 +244,7 @@
+     buildhere->rc_extension_size = exten_size;
+     buildhere->rc_magic = RNGLISTS_MAGIC;
+     READ_UNALIGNED_CK(dbg,version,Dwarf_Unsigned,data,
+-        SIZEOFT16,error,end_data);
++        SIZEOFT16,error,unit_end);
+     if (version != DW_CU_VERSION5) {
+         dwarfstring m;
+         dwarfstring_constructor(&m);
+@@ -254,7 +260,7 @@
+     data += SIZEOFT16;
+ 
+     READ_UNALIGNED_CK(dbg,address_size,unsigned,data,
+-        SIZEOFT8,error,end_data);
++        SIZEOFT8,error,unit_end);
+     if (address_size != 4 && address_size != 8 &&
+         address_size != 2) {
+         dwarfstring m;
+@@ -271,19 +277,33 @@
+     data++;
+ 
+     READ_UNALIGNED_CK(dbg,segment_selector_size,unsigned,data,
+-        SIZEOFT8,error,end_data);
++        SIZEOFT8,error,unit_end);
+     buildhere->rc_segment_selector_size = segment_selector_size;
+     data++;
+ 
+     READ_UNALIGNED_CK(dbg,offset_entry_count,Dwarf_Unsigned,data,
+-        SIZEOFT32,error,end_data);
+-    buildhere->rc_offset_entry_count = offset_entry_count;
++        SIZEOFT32,error,unit_end);
+     data += SIZEOFT32;
++
++    /* Validate before multiplying or advancing data.  This both avoids
++       integer overflow and ensures the complete offsets table is in the
++       declared unit (and consequently in the actual section). */
++    if (!offset_size || data > unit_end ||
++        offset_entry_count >
++            (Dwarf_Unsigned)(unit_end - data) /
++                (Dwarf_Unsigned)offset_size) {
++        _dwarf_error_string(dbg,error,DW_DLE_RNGLISTS_ERROR,
++            "DW_DLE_RNGLISTS_ERROR: The rnglists offset table "
++            "does not fit in the declared unit");
++        return DW_DLV_ERROR;
++    }
++    lists_len = (Dwarf_Unsigned)offset_size * offset_entry_count;
++
++    buildhere->rc_offset_entry_count = offset_entry_count;
+     if (offset_entry_count ){
+         buildhere->rc_offsets_array = data;
+     }
+     localoff = data - startdata;
+-    lists_len = offset_size *offset_entry_count;
+ 
+     data += lists_len;
+ 
+@@ -291,7 +311,7 @@
+     buildhere->rc_first_rnglist_offset = offset+localoff+
+         lists_len;
+     buildhere->rc_rnglists_header = startdata;
+-    buildhere->rc_endaddr = startdata +buildhere->rc_length;
++    buildhere->rc_endaddr = unit_end;
+     buildhere->rc_past_last_rnglist_offset =
+         buildhere->rc_header_offset +buildhere->rc_length;
+     *next_offset =  buildhere->rc_past_last_rnglist_offset;

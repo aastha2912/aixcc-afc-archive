@@ -1,0 +1,156 @@
+--- a/blosc/blosc2.c
++++ b/blosc/blosc2.c
+@@ -184,6 +184,33 @@
+ }
+ 
+ 
++/* Compute the size of the four per-thread work buffers without allowing
++ * either the signed sub-buffer size or the allocation size to wrap. */
++static int get_tmp_sizes(int32_t blocksize, int32_t typesize,
++                         int32_t* ebsize, size_t* tmp_nbytes) {
++  size_t extra;
++  size_t extended_blocksize;
++
++  if (blocksize <= 0 || typesize <= 0) {
++    return BLOSC2_ERROR_INVALID_PARAM;
++  }
++
++  extra = (size_t)typesize * sizeof(int32_t);
++  if (extra > (size_t)INT32_MAX ||
++      (size_t)blocksize > (size_t)INT32_MAX - extra) {
++    return BLOSC2_ERROR_INVALID_PARAM;
++  }
++  extended_blocksize = (size_t)blocksize + extra;
++  if (extended_blocksize > (size_t)-1 / 4) {
++    return BLOSC2_ERROR_INVALID_PARAM;
++  }
++
++  *ebsize = (int32_t)extended_blocksize;
++  *tmp_nbytes = extended_blocksize * 4;
++  return 0;
++}
++
++
+ /* Release memory booked by my_malloc */
+ static void my_free(void* block) {
+ #if defined(_WIN32)
+@@ -1729,12 +1756,15 @@
+ static int init_thread_context(struct thread_context* thread_context, blosc2_context* context, int32_t tid)
+ {
+   int32_t ebsize;
++  size_t tmp_nbytes;
+ 
+   thread_context->parent_context = context;
+   thread_context->tid = tid;
+ 
+-  ebsize = context->blocksize + context->typesize * (signed)sizeof(int32_t);
+-  thread_context->tmp_nbytes = (size_t)4 * ebsize;
++  if (get_tmp_sizes(context->blocksize, context->typesize, &ebsize, &tmp_nbytes) < 0) {
++    return BLOSC2_ERROR_INVALID_PARAM;
++  }
++  thread_context->tmp_nbytes = tmp_nbytes;
+   thread_context->tmp = my_malloc(thread_context->tmp_nbytes);
+   BLOSC_ERROR_NULL(thread_context->tmp, BLOSC2_ERROR_MEMORY_ALLOC);
+   thread_context->tmp2 = thread_context->tmp + ebsize;
+@@ -1772,6 +1802,7 @@
+   BLOSC_ERROR_NULL(thread_context, NULL);
+   int rc = init_thread_context(thread_context, context, tid);
+   if (rc < 0) {
++    my_free(thread_context);
+     return NULL;
+   }
+   return thread_context;
+@@ -2573,6 +2604,7 @@
+   uint8_t* _src = (uint8_t*)(src);  /* current pos for source buffer */
+   int32_t ntbytes = 0;              /* the number of uncompressed bytes */
+   int32_t bsize, bsize2, ebsize, leftoverblock;
++  size_t tmp_nbytes;
+   int32_t cbytes;
+   int32_t startb, stopb;
+   int32_t stop = start + nitems;
+@@ -2605,7 +2637,10 @@
+     return BLOSC2_ERROR_READ_BUFFER;
+   }
+ 
+-  ebsize = header->blocksize + header->typesize * (signed)sizeof(int32_t);
++  if (get_tmp_sizes(header->blocksize, header->typesize, &ebsize, &tmp_nbytes) < 0) {
++    BLOSC_TRACE_ERROR("Invalid temporary buffer size.");
++    return BLOSC2_ERROR_INVALID_PARAM;
++  }
+ 
+   for (j = 0; j < context->nblocks; j++) {
+     bsize = header->blocksize;
+@@ -2638,14 +2673,17 @@
+ 
+     /* Resize the temporaries in serial context if needed */
+     if (header->blocksize > scontext->tmp_blocksize) {
++      uint8_t* new_tmp = my_malloc(tmp_nbytes);
++      if (new_tmp == NULL) {
++        return BLOSC2_ERROR_MEMORY_ALLOC;
++      }
+       my_free(scontext->tmp);
+-      scontext->tmp_nbytes = (size_t)4 * ebsize;
+-      scontext->tmp = my_malloc(scontext->tmp_nbytes);
+-      BLOSC_ERROR_NULL(scontext->tmp, BLOSC2_ERROR_MEMORY_ALLOC);
++      scontext->tmp_nbytes = tmp_nbytes;
++      scontext->tmp = new_tmp;
+       scontext->tmp2 = scontext->tmp + ebsize;
+       scontext->tmp3 = scontext->tmp2 + ebsize;
+       scontext->tmp4 = scontext->tmp3 + ebsize;
+-      scontext->tmp_blocksize = (int32_t)header->blocksize;
++      scontext->tmp_blocksize = header->blocksize;
+     }
+ 
+     // Regular decompression.  Put results in tmp2.
+@@ -2752,6 +2790,7 @@
+   /* Parameters for threads */
+   int32_t blocksize;
+   int32_t ebsize;
++  size_t tmp_nbytes;
+   int32_t srcsize;
+   bool compress = context->do_compress != 0;
+   int32_t maxbytes;
+@@ -2767,7 +2806,10 @@
+ 
+   /* Get parameters for this thread before entering the main loop */
+   blocksize = context->blocksize;
+-  ebsize = blocksize + context->typesize * sizeof(int32_t);
++  if (get_tmp_sizes(blocksize, context->typesize, &ebsize, &tmp_nbytes) < 0) {
++    context->thread_giveup_code = BLOSC2_ERROR_INVALID_PARAM;
++    return;
++  }
+   maxbytes = context->destsize;
+   nblocks = context->nblocks;
+   leftover = context->leftover;
+@@ -2778,9 +2820,14 @@
+ 
+   /* Resize the temporaries if needed */
+   if (blocksize > thcontext->tmp_blocksize) {
++    uint8_t* new_tmp = my_malloc(tmp_nbytes);
++    if (new_tmp == NULL) {
++      context->thread_giveup_code = BLOSC2_ERROR_MEMORY_ALLOC;
++      return;
++    }
+     my_free(thcontext->tmp);
+-    thcontext->tmp_nbytes = (size_t) 4 * ebsize;
+-    thcontext->tmp = my_malloc(thcontext->tmp_nbytes);
++    thcontext->tmp_nbytes = tmp_nbytes;
++    thcontext->tmp = new_tmp;
+     thcontext->tmp2 = thcontext->tmp + ebsize;
+     thcontext->tmp3 = thcontext->tmp2 + ebsize;
+     thcontext->tmp4 = thcontext->tmp3 + ebsize;
+@@ -2986,8 +3033,12 @@
+     context->thread_contexts = (struct thread_context *)my_malloc(
+             context->nthreads * sizeof(struct thread_context));
+     BLOSC_ERROR_NULL(context->thread_contexts, BLOSC2_ERROR_MEMORY_ALLOC);
+-    for (tid = 0; tid < context->nthreads; tid++)
+-      init_thread_context(context->thread_contexts + tid, context, tid);
++    for (tid = 0; tid < context->nthreads; tid++) {
++      int rc = init_thread_context(context->thread_contexts + tid, context, tid);
++      if (rc < 0) {
++        return rc;
++      }
++    }
+   }
+   else {
+     #if !defined(_WIN32)

@@ -1,0 +1,60 @@
+--- a/source/m3_compile.c
++++ b/source/m3_compile.c
+@@ -322,11 +322,9 @@
+ static inline
+ void  TouchSlot  (IM3Compilation o, u16 i_slot)
+ {
+-    if (o->function)
+-    {
+-        // op_Entry uses this value to track and detect stack overflow
+-        o->maxStackSlots = M3_MAX (o->maxStackSlots, i_slot + 1);
+-    }
++    // op_Entry uses this for functions; EvaluateExpression checks it before
++    // executing code compiled without an associated function.
++    o->maxStackSlots = M3_MAX (o->maxStackSlots, i_slot + 1);
+ }
+ 
+ static inline
+@@ -1254,18 +1252,31 @@
+ M3Result  ValidateBlockEnd  (IM3Compilation o)
+ {
+     M3Result result = m3Err_none;
+-/*
++
+     u16 numResults = GetFuncTypeNumResults (o->block.type);
+     u16 blockHeight = GetNumBlockValuesOnStack (o);
+ 
+     if (IsStackPolymorphic (o))
+     {
++        // Values pushed after an unreachable instruction are still concrete.
++        // They correspond to the suffix of the block's result types.
++        _throwif (m3Err_typeCountMismatch, blockHeight > numResults);
+     }
+     else
+     {
++        _throwif (m3Err_typeCountMismatch, blockHeight != numResults);
+     }
+ 
+-    _catch: */ return result;
++    u16 firstResult = numResults - blockHeight;
++    for (u16 i = 0; i < blockHeight; ++i)
++    {
++        u8 actualType = GetStackTypeFromBottom (o, o->block.blockStackIndex + i);
++        u8 expectedType = GetFuncTypeResultType (o->block.type, firstResult + i);
++
++        _throwif (m3Err_typeMismatch, actualType != expectedType);
++    }
++
++    _catch: return result;
+ }
+ 
+ static
+@@ -1276,7 +1287,7 @@
+     // function end:
+     if (o->block.depth == 0)
+     {
+-        ValidateBlockEnd (o);
++_       (ValidateBlockEnd (o));
+ 
+ //      if (not IsStackPolymorphic (o))
+         {

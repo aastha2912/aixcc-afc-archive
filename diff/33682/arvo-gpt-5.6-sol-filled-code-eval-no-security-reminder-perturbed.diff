@@ -1,0 +1,76 @@
+--- a/source/m3_parse.c
++++ b/source/m3_parse.c
+@@ -476,14 +476,20 @@
+ M3Result  ParseSection_Custom  (M3Module * io_module, bytes_t i_bytes, cbytes_t i_end)
+ {
+     M3Result result;
++    cstr_t name = NULL;
+ 
+-    cstr_t name;
+-_   (Read_utf8 (& name, & i_bytes, i_end));
+-                                                                                    m3log (parse, "** Custom: '%s'", name);
+-    if (strcmp (name, "name") != 0)
+-        i_bytes = i_end;
++    u32 sectionNameLength;
++_   (ReadLEB_u32 (& sectionNameLength, & i_bytes, i_end));
+ 
+-    m3_Free (name);
++    _throwif (m3Err_missingUTF8, sectionNameLength > d_m3MaxSaneUtf8Length);
++    _throwif (m3Err_wasmUnderrun, (size_t) sectionNameLength > (size_t) (i_end - i_bytes));
++
++    bool isNameSection = sectionNameLength == 4 && memcmp (i_bytes, "name", 4) == 0;
++                                                                                    m3log (parse, "** Custom: '%.*s'", (int) sectionNameLength, i_bytes);
++    i_bytes += sectionNameLength;
++
++    if (not isNameSection)
++        i_bytes = i_end;
+ 
+     while (i_bytes < i_end)
+     {
+@@ -493,19 +499,21 @@
+ _       (ReadLEB_u7 (& nameType, & i_bytes, i_end));
+ _       (ReadLEB_u32 (& payloadLength, & i_bytes, i_end));
+ 
+-        bytes_t start = i_bytes;
++        _throwif (m3Err_wasmSectionOverrun, (size_t) payloadLength > (size_t) (i_end - i_bytes));
++
++        cbytes_t payloadEnd = i_bytes + payloadLength;
+         if (nameType == 1)
+         {
+             u32 numNames;
+-_           (ReadLEB_u32 (& numNames, & i_bytes, i_end));
++_           (ReadLEB_u32 (& numNames, & i_bytes, payloadEnd));
+ 
+             _throwif("too many names", numNames > d_m3MaxSaneFunctionsCount);
+ 
+             for (u32 i = 0; i < numNames; ++i)
+             {
+                 u32 index;
+-_               (ReadLEB_u32 (& index, & i_bytes, i_end));
+-_               (Read_utf8 (& name, & i_bytes, i_end));
++_               (ReadLEB_u32 (& index, & i_bytes, payloadEnd));
++_               (Read_utf8 (& name, & i_bytes, payloadEnd));
+ 
+                 if (index < io_module->numFunctions)
+                 {
+@@ -520,13 +528,18 @@
+                 }
+ 
+                 m3_Free (name);
++                name = NULL;
+             }
++
++            _throwif (m3Err_wasmSectionUnderrun, i_bytes != payloadEnd);
+         }
+ 
+-        i_bytes = start + payloadLength;
++        i_bytes = payloadEnd;
+     }
+ 
+-    _catch: return result;
++    _catch:
++    m3_Free (name);
++    return result;
+ }
+ 
+ 

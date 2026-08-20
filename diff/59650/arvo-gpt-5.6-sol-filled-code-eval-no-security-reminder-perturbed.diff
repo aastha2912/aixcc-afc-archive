@@ -1,0 +1,43 @@
+--- a/Packet++/header/TLVData.h
++++ b/Packet++/header/TLVData.h
+@@ -285,19 +285,34 @@
+ 		{
+ 			TLVRecordType resRec(NULL); // for NRVO optimization
+ 
+-			if (record.isNull())
++			if (record.isNull() || tlvDataBasePtr == NULL)
+ 				return resRec;
+ 
+ 			// record pointer is out-bounds of the TLV records memory
+-			if ((record.getRecordBasePtr() - tlvDataBasePtr) < 0)
++			if (record.getRecordBasePtr() < tlvDataBasePtr)
+ 				return resRec;
+ 
+-			// record pointer is out-bounds of the TLV records memory
+-			if (record.getRecordBasePtr() - tlvDataBasePtr + (int)record.getTotalSize() >= (int)tlvDataLen)
++			const size_t recordOffset = static_cast<size_t>(record.getRecordBasePtr() - tlvDataBasePtr);
++			const size_t recordSize = record.getTotalSize();
++			// Validate using subtraction to avoid overflowing when the record declares a very large size.
++			// There must also be at least one byte following this record for another record to exist.
++			if (recordOffset >= tlvDataLen || recordSize >= tlvDataLen - recordOffset)
++				return resRec;
++
++			resRec.assign(record.getRecordBasePtr() + recordSize);
++			if (resRec.isNull())
+ 				return resRec;
+ 
+-			resRec.assign(record.getRecordBasePtr() + record.getTotalSize());
+-			if (resRec.getTotalSize() == 0)
++			// assign() may adjust the record pointer (for example, to skip protocol padding),
++			// so calculate the actual returned record's offset and validate its declared size.
++			if (resRec.getRecordBasePtr() < tlvDataBasePtr)
++			{
++				resRec.assign(NULL);
++				return resRec;
++			}
++			const size_t resOffset = static_cast<size_t>(resRec.getRecordBasePtr() - tlvDataBasePtr);
++			if (resOffset >= tlvDataLen || resRec.getTotalSize() == 0 ||
++				resRec.getTotalSize() > tlvDataLen - resOffset)
+ 				resRec.assign(NULL);
+ 
+ 			return resRec;

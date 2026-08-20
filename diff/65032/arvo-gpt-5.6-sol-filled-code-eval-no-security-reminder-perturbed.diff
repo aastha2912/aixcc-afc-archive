@@ -1,0 +1,194 @@
+--- a/libxslt/documents.c
++++ b/libxslt/documents.c
+@@ -14,6 +14,8 @@
+ #include <libxml/xmlmemory.h>
+ #include <libxml/tree.h>
+ #include <libxml/hash.h>
++#include <libxml/encoding.h>
++#include <libxml/xmlIO.h>
+ #include <libxml/parser.h>
+ #include <libxml/parserInternals.h>
+ #include "xslt.h"
+@@ -41,6 +43,81 @@
+  *									*
+  ************************************************************************/
+ 
++/*
++ * Extract the encoding name from an ASCII XML declaration.  Non-ASCII
++ * encodings must be converted based on their signature before calling this
++ * function.
++ */
++static int
++xsltGetDeclaredEncoding(const xmlChar *data, size_t size, char *encoding,
++                        size_t encodingSize) {
++    size_t i, start;
++    int quote;
++
++    if ((data == NULL) || (encodingSize == 0))
++        return(0);
++    if ((size >= 3) && (data[0] == 0xEF) && (data[1] == 0xBB) &&
++        (data[2] == 0xBF)) {
++        data += 3;
++        size -= 3;
++    }
++    if ((size < 6) || (memcmp(data, "<?xml", 5) != 0) ||
++        ((data[5] != ' ') && (data[5] != '\t') &&
++         (data[5] != '\r') && (data[5] != '\n')))
++        return(0);
++
++    i = 6;
++    while (i < size) {
++        while ((i < size) && ((data[i] == ' ') || (data[i] == '\t') ||
++               (data[i] == '\r') || (data[i] == '\n')))
++            i++;
++        if ((i + 1 < size) && (data[i] == '?') && (data[i + 1] == '>'))
++            return(0);
++
++        start = i;
++        while ((i < size) && (((data[i] >= 'A') && (data[i] <= 'Z')) ||
++               ((data[i] >= 'a') && (data[i] <= 'z'))))
++            i++;
++        if (i == start)
++            return(0);
++
++        if (((i - start) == 8) &&
++            (memcmp(data + start, "encoding", 8) == 0)) {
++            while ((i < size) && ((data[i] == ' ') || (data[i] == '\t') ||
++                   (data[i] == '\r') || (data[i] == '\n')))
++                i++;
++            if ((i >= size) || (data[i++] != '='))
++                return(0);
++            while ((i < size) && ((data[i] == ' ') || (data[i] == '\t') ||
++                   (data[i] == '\r') || (data[i] == '\n')))
++                i++;
++            if ((i >= size) || ((data[i] != '\'') && (data[i] != '"')))
++                return(0);
++            quote = data[i++];
++            start = i;
++            while ((i < size) && (data[i] != quote) &&
++                   (((data[i] >= 'A') && (data[i] <= 'Z')) ||
++                    ((data[i] >= 'a') && (data[i] <= 'z')) ||
++                    ((data[i] >= '0') && (data[i] <= '9')) ||
++                    (data[i] == '.') || (data[i] == '_') ||
++                    (data[i] == '-')))
++                i++;
++            if ((i == start) || (i >= size) || (data[i] != quote) ||
++                (i - start >= encodingSize))
++                return(0);
++            memcpy(encoding, data + start, i - start);
++            encoding[i - start] = 0;
++            return(1);
++        }
++
++        while ((i < size) && (data[i] != ' ') && (data[i] != '\t') &&
++               (data[i] != '\r') && (data[i] != '\n') &&
++               !((data[i] == '?') && (i + 1 < size) && (data[i + 1] == '>')))
++            i++;
++    }
++    return(0);
++}
++
+ /**
+  * xsltDocDefaultLoaderFunc:
+  * @URI: the URI of the document to load
+@@ -64,7 +141,12 @@
+ {
+     xmlParserCtxtPtr pctxt;
+     xmlParserInputPtr inputStream;
+-    xmlDocPtr doc;
++    xmlParserInputBufferPtr inputBuffer;
++    const xmlChar *content;
++    xmlCharEncoding detected;
++    xmlDocPtr doc = NULL;
++    char encoding[64];
++    int ret;
+ 
+     pctxt = xmlNewParserCtxt();
+     if (pctxt == NULL)
+@@ -87,17 +169,82 @@
+         xmlFreeParserCtxt(pctxt);
+ 	return(NULL);
+     }
+-    inputPush(pctxt, inputStream);
++    if (inputPush(pctxt, inputStream) < 0) {
++        xmlFreeInputStream(inputStream);
++        xmlFreeParserCtxt(pctxt);
++        return(NULL);
++    }
+     if (pctxt->directory == NULL)
+         pctxt->directory = xmlParserGetDirectory((const char *) URI);
+ 
+-    xmlParseDocument(pctxt);
++    /*
++     * Buffer and convert external documents before entering the parser.  A
++     * failed lazy encoding conversion can replace the parser input buffer
++     * while a name is being scanned, invalidating offsets held by libxml2.
++     * With no reader and no unconverted bytes left, parser growth cannot
++     * change the input buffer during such a scan.
++     */
++    inputBuffer = inputStream->buf;
++    if ((inputBuffer == NULL) || (inputBuffer->buffer == NULL))
++        goto parse_failed;
++    do {
++        ret = xmlParserInputBufferRead(inputBuffer, 4096);
++        content = xmlBufContent(inputBuffer->buffer);
++        if (content == NULL)
++            goto parse_failed;
++        inputStream->base = content;
++        inputStream->cur = content;
++        inputStream->end = xmlBufEnd(inputBuffer->buffer);
++    } while (ret > 0);
++    if ((ret < 0) || (inputBuffer->error != XML_ERR_OK))
++        goto parse_failed;
++
++    /* Prevent even an end-of-input callback from trying to grow buffers. */
++    inputBuffer->readcallback = NULL;
++    content = xmlBufContent(inputBuffer->buffer);
++    detected = xmlDetectCharEncoding(content,
++                    xmlBufUse(inputBuffer->buffer) > 4 ? 4 :
++                    (int) xmlBufUse(inputBuffer->buffer));
++    if ((detected != XML_CHAR_ENCODING_NONE) &&
++        (detected != XML_CHAR_ENCODING_UTF8)) {
++        if (xmlSwitchEncoding(pctxt, detected) < 0)
++            goto parse_failed;
++        if ((inputBuffer->error != XML_ERR_OK) ||
++            (pctxt->errNo == XML_ERR_NO_MEMORY) ||
++            ((inputBuffer->raw != NULL) &&
++             (xmlBufUse(inputBuffer->raw) != 0)))
++            goto parse_failed;
++    }
++
++    content = xmlBufContent(inputBuffer->buffer);
++    /*
++     * A signature-selected non-UTF-8 encoder has already converted the
++     * declaration as well as the document.  Don't feed that UTF-8 output
++     * through the declared encoder a second time.
++     */
++    if (((detected == XML_CHAR_ENCODING_NONE) ||
++         (detected == XML_CHAR_ENCODING_UTF8)) &&
++        xsltGetDeclaredEncoding(content, xmlBufUse(inputBuffer->buffer),
++                                encoding, sizeof(encoding))) {
++        if (xmlSwitchEncodingName(pctxt, encoding) < 0)
++            goto parse_failed;
++        if ((inputBuffer->error != XML_ERR_OK) ||
++            (pctxt->errNo == XML_ERR_NO_MEMORY) ||
++            ((inputBuffer->raw != NULL) &&
++             (xmlBufUse(inputBuffer->raw) != 0)))
++            goto parse_failed;
++    }
++
++    if (xmlParseDocument(pctxt) != 0)
++        goto parse_failed;
+ 
+     if (pctxt->wellFormed) {
+         doc = pctxt->myDoc;
++    } else {
++        goto parse_failed;
+     }
+-    else {
+-        doc = NULL;
++parse_failed:
++    if (doc == NULL) {
+         xmlFreeDoc(pctxt->myDoc);
+         pctxt->myDoc = NULL;
+     }

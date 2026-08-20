@@ -1,0 +1,236 @@
+--- a/src/sksl/SkSLCFGGenerator.h
++++ b/src/sksl/SkSLCFGGenerator.h
+@@ -109,11 +109,13 @@
+ 
+     /**
+      * Locates and attempts remove an expression occurring before the expression pointed to by iter.
++     * The expression is identified by its owning unique_ptr slot.
+      * If the expression can be cleanly removed, returns true and resets iter to a valid iterator
+      * pointing to the same expression it did initially. Otherwise returns false (and the CFG will
+      * need to be regenerated).
+      */
+-    bool tryRemoveExpressionBefore(std::vector<BasicBlock::Node>::iterator* iter, Expression* e);
++    bool tryRemoveExpressionBefore(std::vector<BasicBlock::Node>::iterator* iter,
++                                   std::unique_ptr<Expression>* e);
+ 
+     /**
+      * As tryRemoveExpressionBefore, but for lvalues. As lvalues are at most partially evaluated
+--- a/src/sksl/SkSLCFGGenerator.cpp
++++ b/src/sksl/SkSLCFGGenerator.cpp
+@@ -101,15 +101,15 @@
+ #endif
+ 
+ bool BasicBlock::tryRemoveExpressionBefore(std::vector<BasicBlock::Node>::iterator* iter,
+-                                           Expression* e) {
+-    if (e->is<TernaryExpression>()) {
++                                           std::unique_ptr<Expression>* e) {
++    if ((*e)->is<TernaryExpression>()) {
+         return false;
+     }
+     bool result;
+     if ((*iter)->isExpression()) {
+-        SkASSERT((*iter)->expression()->get() != e);
++        SkASSERT((*iter)->expression() != e);
+         // Remember the expression that we started on.
+-        Expression* old = (*iter)->expression()->get();
++        std::unique_ptr<Expression>* old = (*iter)->expression();
+         // Back up `iter` until we find the expression that we want to remove. (If we don't find
+         // that expression at all, fail and rescan.)
+         do {
+@@ -117,19 +117,19 @@
+                 return false;
+             }
+             --(*iter);
+-        } while (!(*iter)->isExpression() || (*iter)->expression()->get() != e);
++        } while (!(*iter)->isExpression() || (*iter)->expression() != e);
+ 
+         // `iter` now points to our expression that needs removal. Erase it.
+         result = this->tryRemoveExpression(iter);
+ 
+         // Move `iter` forward again until we find the expression we started on.
+-        while (!(*iter)->isExpression() || (*iter)->expression()->get() != old) {
++        while (!(*iter)->isExpression() || (*iter)->expression() != old) {
+             SkASSERT(*iter != fNodes.end());
+             ++(*iter);
+         }
+     } else {
+         // Remember the statement that we started on.
+-        Statement* old = (*iter)->statement()->get();
++        std::unique_ptr<Statement>* old = (*iter)->statement();
+         // Back up `iter` until we find the expression that we want to remove. (If we don't find
+         // that expression at all, fail and rescan.)
+         do {
+@@ -137,13 +137,13 @@
+                 return false;
+             }
+             --(*iter);
+-        } while (!(*iter)->isExpression() || (*iter)->expression()->get() != e);
++        } while (!(*iter)->isExpression() || (*iter)->expression() != e);
+ 
+         // `iter` now points to our expression that needs removal. Erase it.
+         result = this->tryRemoveExpression(iter);
+ 
+         // Move `iter` forward again until we find the statement we started on.
+-        while (!(*iter)->isStatement() || (*iter)->statement()->get() != old) {
++        while (!(*iter)->isStatement() || (*iter)->statement() != old) {
+             SkASSERT(*iter != fNodes.end());
+             ++(*iter);
+         }
+@@ -166,11 +166,11 @@
+             if (!this->tryRemoveLValueBefore(iter, indexExpr.base().get())) {
+                 return false;
+             }
+-            return this->tryRemoveExpressionBefore(iter, indexExpr.index().get());
++            return this->tryRemoveExpressionBefore(iter, &indexExpr.index());
+         }
+         case Expression::Kind::kTernary: {
+             TernaryExpression& ternary = lvalue->as<TernaryExpression>();
+-            if (!this->tryRemoveExpressionBefore(iter, ternary.test().get())) {
++            if (!this->tryRemoveExpressionBefore(iter, &ternary.test())) {
+                 return false;
+             }
+             if (!this->tryRemoveLValueBefore(iter, ternary.ifTrue().get())) {
+@@ -195,10 +195,10 @@
+                 if (!this->tryRemoveLValueBefore(iter, b.left().get())) {
+                     return false;
+                 }
+-            } else if (!this->tryRemoveExpressionBefore(iter, b.left().get())) {
++            } else if (!this->tryRemoveExpressionBefore(iter, &b.left())) {
+                 return false;
+             }
+-            if (!this->tryRemoveExpressionBefore(iter, b.right().get())) {
++            if (!this->tryRemoveExpressionBefore(iter, &b.right())) {
+                 return false;
+             }
+             SkASSERT((*iter)->expression()->get() == expr);
+@@ -211,7 +211,7 @@
+         }
+         case Expression::Kind::kFieldAccess: {
+             FieldAccess& f = expr->as<FieldAccess>();
+-            if (!this->tryRemoveExpressionBefore(iter, f.base().get())) {
++            if (!this->tryRemoveExpressionBefore(iter, &f.base())) {
+                 return false;
+             }
+             *iter = fNodes.erase(*iter);
+@@ -219,7 +219,7 @@
+         }
+         case Expression::Kind::kSwizzle: {
+             Swizzle& s = expr->as<Swizzle>();
+-            if (s.base() && !this->tryRemoveExpressionBefore(iter, s.base().get())) {
++            if (s.base() && !this->tryRemoveExpressionBefore(iter, &s.base())) {
+                 return false;
+             }
+             *iter = fNodes.erase(*iter);
+@@ -227,10 +227,10 @@
+         }
+         case Expression::Kind::kIndex: {
+             IndexExpression& idx = expr->as<IndexExpression>();
+-            if (!this->tryRemoveExpressionBefore(iter, idx.base().get())) {
++            if (!this->tryRemoveExpressionBefore(iter, &idx.base())) {
+                 return false;
+             }
+-            if (!this->tryRemoveExpressionBefore(iter, idx.index().get())) {
++            if (!this->tryRemoveExpressionBefore(iter, &idx.index())) {
+                 return false;
+             }
+             *iter = fNodes.erase(*iter);
+@@ -239,7 +239,7 @@
+         case Expression::Kind::kConstructor: {
+             Constructor& c = expr->as<Constructor>();
+             for (auto& arg : c.arguments()) {
+-                if (!this->tryRemoveExpressionBefore(iter, arg.get())) {
++                if (!this->tryRemoveExpressionBefore(iter, &arg)) {
+                     return false;
+                 }
+                 SkASSERT((*iter)->expression()->get() == expr);
+@@ -250,7 +250,7 @@
+         case Expression::Kind::kFunctionCall: {
+             FunctionCall& f = expr->as<FunctionCall>();
+             for (auto& arg : f.arguments()) {
+-                if (!this->tryRemoveExpressionBefore(iter, arg.get())) {
++                if (!this->tryRemoveExpressionBefore(iter, &arg)) {
+                     return false;
+                 }
+                 SkASSERT((*iter)->expression()->get() == expr);
+@@ -258,20 +258,22 @@
+             *iter = fNodes.erase(*iter);
+             return true;
+         }
+-        case Expression::Kind::kPrefix:
+-            if (!this->tryRemoveExpressionBefore(iter,
+-                                                 expr->as<PrefixExpression>().operand().get())) {
++        case Expression::Kind::kPrefix: {
++            PrefixExpression& prefix = expr->as<PrefixExpression>();
++            if (!this->tryRemoveExpressionBefore(iter, &prefix.operand())) {
+                 return false;
+             }
+             *iter = fNodes.erase(*iter);
+             return true;
+-        case Expression::Kind::kPostfix:
+-            if (!this->tryRemoveExpressionBefore(iter,
+-                                                 expr->as<PostfixExpression>().operand().get())) {
++        }
++        case Expression::Kind::kPostfix: {
++            PostfixExpression& postfix = expr->as<PostfixExpression>();
++            if (!this->tryRemoveExpressionBefore(iter, &postfix.operand())) {
+                 return false;
+             }
+             *iter = fNodes.erase(*iter);
+             return true;
++        }
+         case Expression::Kind::kBoolLiteral:  // fall through
+         case Expression::Kind::kFloatLiteral: // fall through
+         case Expression::Kind::kIntLiteral:   // fall through
+--- a/src/sksl/SkSLCompiler.cpp
++++ b/src/sksl/SkSLCompiler.cpp
+@@ -699,14 +699,15 @@
+     optimizationContext->fUpdated = true;
+     std::unique_ptr<Expression>* target = (*iter)->expression();
+     BinaryExpression& bin = (*target)->as<BinaryExpression>();
+-    Expression& left = *bin.left();
++    std::unique_ptr<Expression>& leftPointer = bin.left();
++    Expression& left = *leftPointer;
+     std::unique_ptr<Expression>& rightPointer = bin.right();
+     SkASSERT(!left.hasSideEffects());
+     bool result;
+     if (bin.getOperator() == Token::Kind::TK_EQ) {
+         result = b->tryRemoveLValueBefore(iter, &left);
+     } else {
+-        result = b->tryRemoveExpressionBefore(iter, &left);
++        result = b->tryRemoveExpressionBefore(iter, &leftPointer);
+     }
+     // Remove references within LHS.
+     optimizationContext->fUsage->remove(&left);
+@@ -739,11 +740,12 @@
+     std::unique_ptr<Expression>* target = (*iter)->expression();
+     BinaryExpression& bin = (*target)->as<BinaryExpression>();
+     std::unique_ptr<Expression>& leftPointer = bin.left();
+-    Expression& right = *bin.right();
++    std::unique_ptr<Expression>& rightPointer = bin.right();
++    Expression& right = *rightPointer;
+     SkASSERT(!right.hasSideEffects());
+     // Remove references within RHS.
+     optimizationContext->fUsage->remove(&right);
+-    if (!b->tryRemoveExpressionBefore(iter, &right)) {
++    if (!b->tryRemoveExpressionBefore(iter, &rightPointer)) {
+         *target = std::move(leftPointer);
+         optimizationContext->fNeedsRescan = true;
+         return;
+@@ -1483,7 +1485,7 @@
+                  !varDecl.value()->hasSideEffects())) {
+                 if (varDecl.value()) {
+                     SkASSERT((*iter)->statement()->get() == stmt);
+-                    if (!b.tryRemoveExpressionBefore(iter, varDecl.value().get())) {
++                    if (!b.tryRemoveExpressionBefore(iter, &varDecl.value())) {
+                         optimizationContext->fNeedsRescan = true;
+                     }
+                 }
+@@ -1594,7 +1596,7 @@
+             SkASSERT((*iter)->statement()->get() == &e);
+             if (!e.expression()->hasSideEffects()) {
+                 // Expression statement with no side effects, kill it
+-                if (!b.tryRemoveExpressionBefore(iter, e.expression().get())) {
++                if (!b.tryRemoveExpressionBefore(iter, &e.expression())) {
+                     optimizationContext->fNeedsRescan = true;
+                 }
+                 SkASSERT((*iter)->statement()->get() == stmt);

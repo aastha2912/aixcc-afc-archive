@@ -1,0 +1,119 @@
+--- a/arrow/cpp/src/arrow/array.cc
++++ b/arrow/cpp/src/arrow/array.cc
+@@ -1263,14 +1263,92 @@
+ // ----------------------------------------------------------------------
+ // Implement Array::Accept as inline visitor
+ 
++namespace {
++
++Status ValidateArrayDataBuffers(const ArrayData& data) {
++  if (data.length < 0) {
++    return Status::Invalid("Array length is negative");
++  }
++  if (data.offset < 0) {
++    return Status::Invalid("Array offset is negative");
++  }
++  if (data.offset > std::numeric_limits<int64_t>::max() - data.length) {
++    return Status::Invalid("Array offset plus length overflowed");
++  }
++
++  const auto layout = data.type->layout();
++  if (data.buffers.size() != layout.bit_widths.size()) {
++    return Status::Invalid("Expected ", layout.bit_widths.size(),
++                           " buffers in array of type ", data.type->ToString(), ", got ",
++                           data.buffers.size());
++  }
++
++  const int64_t element_count = data.offset + data.length;
++  for (size_t i = 0; i < data.buffers.size(); ++i) {
++    const int64_t bit_width = layout.bit_widths[i];
++    if (bit_width <= 0) {
++      continue;
++    }
++    if (element_count > std::numeric_limits<int64_t>::max() / bit_width) {
++      return Status::Invalid("Array of type ", data.type->ToString(),
++                             " is too large to validate buffer ", i);
++    }
++    const int64_t required_bits = element_count * bit_width;
++    // Avoid BitUtil::BytesForBits here, since its addition of 7 can overflow
++    // for malformed ArrayData with a very large length or offset.
++    const int64_t required_bytes =
++        required_bits / 8 + static_cast<int64_t>(required_bits % 8 != 0);
++    if (!data.buffers[i]) {
++      // The first buffer is an optional validity bitmap.  Other fixed-width
++      // buffers are required for non-empty arrays.
++      if (i != 0 && required_bytes != 0) {
++        return Status::Invalid("Buffer ", i, " of array of type ",
++                               data.type->ToString(), " is null");
++      }
++    } else if (data.buffers[i]->size() < required_bytes) {
++      return Status::Invalid("Buffer ", i, " of array of type ",
++                             data.type->ToString(),
++                             " is too small: expected at least ", required_bytes,
++                             " byte(s), got ", data.buffers[i]->size());
++    }
++  }
++
++  const int64_t null_count = data.null_count.load();
++  if (null_count < 0 && null_count != kUnknownNullCount) {
++    return Status::Invalid("Null count is negative");
++  }
++  if (null_count > data.length) {
++    return Status::Invalid("Null count exceeds array length");
++  }
++  if (null_count > 0 && !data.buffers[0]) {
++    return Status::Invalid("Null bitmap is null but null count is positive");
++  }
++
++  for (const auto& child : data.child_data) {
++    if (!child) {
++      return Status::Invalid("Array child data is null");
++    }
++    RETURN_NOT_OK(ValidateArrayDataBuffers(*child));
++  }
++  if (data.dictionary) {
++    RETURN_NOT_OK(ValidateArrayDataBuffers(*data.dictionary->data()));
++  }
++  return Status::OK();
++}
++
++}  // namespace
++
+ Status Array::Accept(ArrayVisitor* visitor) const {
+   return VisitArrayInline(*this, visitor);
+ }
+ 
+-Status Array::Validate() const { return internal::ValidateArray(*this); }
++Status Array::Validate() const {
++  RETURN_NOT_OK(ValidateArrayDataBuffers(*data_));
++  return internal::ValidateArray(*this);
++}
+ 
+ Status Array::ValidateFull() const {
+-  RETURN_NOT_OK(internal::ValidateArray(*this));
++  RETURN_NOT_OK(Validate());
+   return internal::ValidateArrayData(*this);
+ }
+ 
+--- a/arrow/cpp/src/arrow/record_batch.cc
++++ b/arrow/cpp/src/arrow/record_batch.cc
+@@ -260,7 +260,7 @@
+                              " type not match schema: ", array.type()->ToString(), " vs ",
+                              schema_type.ToString());
+     }
+-    RETURN_NOT_OK(internal::ValidateArray(array));
++    RETURN_NOT_OK(array.Validate());
+   }
+   return Status::OK();
+ }
+--- a/arrow/cpp/src/arrow/table.cc
++++ b/arrow/cpp/src/arrow/table.cc
+@@ -202,7 +202,7 @@
+   // Validate the chunks themselves
+   for (size_t i = 0; i < chunks_.size(); ++i) {
+     const Array& chunk = *chunks_[i];
+-    const Status st = internal::ValidateArray(chunk);
++    const Status st = chunk.Validate();
+     if (!st.ok()) {
+       return Status::Invalid("In chunk ", i, ": ", st.ToString());
+     }

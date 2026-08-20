@@ -1,0 +1,48 @@
+--- a/ndpi/src/lib/protocols/bittorrent.c
++++ b/ndpi/src/lib/protocols/bittorrent.c
+@@ -48,6 +48,15 @@
+ 
+ /* *********************************************** */
+ 
++static u_int8_t bittorrent_hash_storage_available(const struct ndpi_flow_struct *flow) {
++  /* The BitTorrent hash and TLS state share a union. TLS owns that storage
++   * for TLS.BitTorrent flows, regardless of its position in the stack. */
++  return(flow->detected_protocol_stack[0] != NDPI_PROTOCOL_TLS &&
++	 flow->detected_protocol_stack[1] != NDPI_PROTOCOL_TLS);
++}
++
++/* *********************************************** */
++
+ static int search_bittorrent_again(struct ndpi_detection_module_struct *ndpi_struct,
+ 				   struct ndpi_flow_struct *flow) {
+   ndpi_search_bittorrent(ndpi_struct, flow);
+@@ -94,7 +103,8 @@
+   } else
+     bt_hash = (const char*)&packet->payload[28];
+   
+-  if(bt_hash && (packet->payload_packet_len >= (20 + (bt_hash-(const char*)packet->payload))))
++  if(bittorrent_hash_storage_available(flow) && bt_hash &&
++     (packet->payload_packet_len >= (20 + (bt_hash-(const char*)packet->payload))))
+     memcpy(flow->protos.bittorrent.hash, bt_hash, 20);
+ }
+ 
+@@ -112,7 +122,8 @@
+   ndpi_set_detected_protocol_keeping_master(ndpi_struct, flow, NDPI_PROTOCOL_BITTORRENT,
+ 					    confidence);
+   
+-  if(flow->protos.bittorrent.hash[0] == '\0') {
++  if(bittorrent_hash_storage_available(flow) &&
++     flow->protos.bittorrent.hash[0] == '\0') {
+     /* Don't use just 1 as in TCP DNS more packets could be returned (e.g. ACK). */
+     flow->max_extra_packets_to_check = 3;
+     flow->extra_packets_func = search_bittorrent_again;
+@@ -551,7 +562,8 @@
+ 	     || (bt_proto = ndpi_strnstr((const char *)packet->payload, BITTORRENT_PROTO_STRING, packet->payload_packet_len))
+ 	     ) {
+ 	  bittorrent_found:
+-	    if(bt_proto != NULL && ((u_int8_t *)&bt_proto[27] - packet->payload +
++	    if(bittorrent_hash_storage_available(flow) &&
++	       bt_proto != NULL && ((u_int8_t *)&bt_proto[27] - packet->payload +
+ 				    sizeof(flow->protos.bittorrent.hash)) < packet->payload_packet_len) {
+ 	      memcpy(flow->protos.bittorrent.hash, &bt_proto[27], sizeof(flow->protos.bittorrent.hash));
+ 	      flow->extra_packets_func = NULL; /* Nothing else to do */

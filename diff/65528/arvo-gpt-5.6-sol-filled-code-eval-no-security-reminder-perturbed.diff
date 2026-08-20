@@ -1,0 +1,136 @@
+--- a/lib/jxl/icc_codec.cc
++++ b/lib/jxl/icc_codec.cc
+@@ -58,18 +58,20 @@
+ //               63-bit values).
+ constexpr const size_t kPreambleSize = 22;  // enough for reading 2 VarInts
+ 
+-uint64_t DecodeVarInt(const uint8_t* input, size_t inputSize, size_t* pos) {
+-  size_t i;
+-  uint64_t ret = 0;
+-  for (i = 0; *pos + i < inputSize && i < 10; ++i) {
+-    ret |= static_cast<uint64_t>(input[*pos + i] & 127)
+-           << static_cast<uint64_t>(7 * i);
+-    // If the next-byte flag is not set, stop
+-    if ((input[*pos + i] & 128) == 0) break;
++Status DecodeVarInt(const uint8_t* input, size_t input_size, size_t* pos,
++                    uint64_t* value) {
++  uint64_t decoded = 0;
++  for (size_t i = 0; i < 10; ++i) {
++    if (*pos >= input_size) return JXL_FAILURE("Truncated varint");
++    const uint8_t byte = input[(*pos)++];
++    if (i == 9 && byte > 1) return JXL_FAILURE("Invalid varint");
++    decoded |= static_cast<uint64_t>(byte & 127) << (7 * i);
++    if ((byte & 128) == 0) {
++      *value = decoded;
++      return true;
++    }
+   }
+-  // TODO(user): Return a decoding error if i == 10.
+-  *pos += i + 1;
+-  return ret;
++  return JXL_FAILURE("Invalid varint");
+ }
+ 
+ }  // namespace
+@@ -80,10 +82,12 @@
+   const uint8_t* enc = data.data();
+   size_t size = data.size();
+   size_t pos = 0;
+-  uint64_t osize = DecodeVarInt(enc, size, &pos);
++  uint64_t osize;
++  JXL_RETURN_IF_ERROR(DecodeVarInt(enc, size, &pos, &osize));
+   JXL_RETURN_IF_ERROR(CheckIs32Bit(osize));
+   if (pos >= size) return JXL_FAILURE("Out of bounds");
+-  uint64_t csize = DecodeVarInt(enc, size, &pos);
++  uint64_t csize;
++  JXL_RETURN_IF_ERROR(DecodeVarInt(enc, size, &pos, &csize));
+   JXL_RETURN_IF_ERROR(CheckIs32Bit(csize));
+   JXL_RETURN_IF_ERROR(CheckOutOfBounds(pos, csize, size));
+   // We expect that UnpredictICC inflates input, not the other way round.
+@@ -108,10 +112,12 @@
+   // DecodeVarInt with out of bounds values, it silently returns, but the
+   // specification requires an error. Idem for all DecodeVarInt below.
+   if (pos >= size) return JXL_FAILURE("Out of bounds");
+-  uint64_t osize = DecodeVarInt(enc, size, &pos);  // Output size
++  uint64_t osize;
++  JXL_RETURN_IF_ERROR(DecodeVarInt(enc, size, &pos, &osize));  // Output size
+   JXL_RETURN_IF_ERROR(CheckIs32Bit(osize));
+   if (pos >= size) return JXL_FAILURE("Out of bounds");
+-  uint64_t csize = DecodeVarInt(enc, size, &pos);  // Commands size
++  uint64_t csize;
++  JXL_RETURN_IF_ERROR(DecodeVarInt(enc, size, &pos, &csize));  // Commands size
+   // Every command is translated to at least on byte.
+   JXL_RETURN_IF_ERROR(CheckIs32Bit(csize));
+   size_t cpos = pos;  // pos in commands stream
+@@ -136,7 +142,8 @@
+   if (cpos >= commands_end) return JXL_FAILURE("Out of bounds");
+ 
+   // Tag list
+-  uint64_t numtags = DecodeVarInt(enc, size, &cpos);
++  uint64_t numtags;
++  JXL_RETURN_IF_ERROR(DecodeVarInt(enc, commands_end, &cpos, &numtags));
+ 
+   if (numtags != 0) {
+     numtags--;
+@@ -179,7 +186,8 @@
+ 
+       if (command & kFlagBitOffset) {
+         if (cpos >= commands_end) return JXL_FAILURE("Out of bounds");
+-        tagstart = DecodeVarInt(enc, size, &cpos);
++        JXL_RETURN_IF_ERROR(
++            DecodeVarInt(enc, commands_end, &cpos, &tagstart));
+       } else {
+         JXL_RETURN_IF_ERROR(CheckIs32Bit(prevtagstart));
+         tagstart = prevtagstart + prevtagsize;
+@@ -188,7 +196,8 @@
+       JXL_RETURN_IF_ERROR(AppendUint32(tagstart, result));
+       if (command & kFlagBitSize) {
+         if (cpos >= commands_end) return JXL_FAILURE("Out of bounds");
+-        tagsize = DecodeVarInt(enc, size, &cpos);
++        JXL_RETURN_IF_ERROR(
++            DecodeVarInt(enc, commands_end, &cpos, &tagsize));
+       }
+       JXL_RETURN_IF_ERROR(CheckIs32Bit(tagsize));
+       JXL_RETURN_IF_ERROR(AppendUint32(tagsize, result));
+@@ -224,14 +233,18 @@
+     uint8_t command = enc[cpos++];
+     if (command == kCommandInsert) {
+       if (cpos >= commands_end) return JXL_FAILURE("Out of bounds");
+-      uint64_t num = DecodeVarInt(enc, size, &cpos);
++      uint64_t num;
++      JXL_RETURN_IF_ERROR(DecodeVarInt(enc, commands_end, &cpos, &num));
++      JXL_RETURN_IF_ERROR(CheckIs32Bit(num));
+       JXL_RETURN_IF_ERROR(CheckOutOfBounds(pos, num, size));
+       for (size_t i = 0; i < num; i++) {
+         JXL_RETURN_IF_ERROR(result->push_back(enc[pos++]));
+       }
+     } else if (command == kCommandShuffle2 || command == kCommandShuffle4) {
+       if (cpos >= commands_end) return JXL_FAILURE("Out of bounds");
+-      uint64_t num = DecodeVarInt(enc, size, &cpos);
++      uint64_t num;
++      JXL_RETURN_IF_ERROR(DecodeVarInt(enc, commands_end, &cpos, &num));
++      JXL_RETURN_IF_ERROR(CheckIs32Bit(num));
+       JXL_RETURN_IF_ERROR(CheckOutOfBounds(pos, num, size));
+       PaddedBytes shuffled(memory_manager);
+       JXL_ASSIGN_OR_RETURN(shuffled,
+@@ -261,7 +274,8 @@
+       uint64_t stride = width;
+       if (flags & 16) {
+         if (cpos >= commands_end) return JXL_FAILURE("Out of bounds");
+-        stride = DecodeVarInt(enc, size, &cpos);
++        JXL_RETURN_IF_ERROR(
++            DecodeVarInt(enc, commands_end, &cpos, &stride));
+         if (stride < width) {
+           return JXL_FAILURE("Invalid stride");
+         }
+@@ -276,7 +290,9 @@
+       }
+ 
+       if (cpos >= commands_end) return JXL_FAILURE("Out of bounds");
+-      uint64_t num = DecodeVarInt(enc, size, &cpos);  // in bytes
++      uint64_t num;  // in bytes
++      JXL_RETURN_IF_ERROR(DecodeVarInt(enc, commands_end, &cpos, &num));
++      JXL_RETURN_IF_ERROR(CheckIs32Bit(num));
+       JXL_RETURN_IF_ERROR(CheckOutOfBounds(pos, num, size));
+ 
+       PaddedBytes shuffled(memory_manager);

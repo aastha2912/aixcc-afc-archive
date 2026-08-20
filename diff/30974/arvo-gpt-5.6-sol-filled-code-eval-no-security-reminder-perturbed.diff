@@ -1,0 +1,78 @@
+--- a/blosc/frame.c
++++ b/blosc/frame.c
+@@ -1025,22 +1025,36 @@
+ uint8_t* get_coffsets(blosc2_frame_s *frame, int32_t header_len, int64_t cbytes, int32_t *off_cbytes) {
+   if (frame->coffsets != NULL) {
+     if (off_cbytes != NULL) {
+-      *off_cbytes = *(int32_t *) (frame->coffsets + BLOSC2_CHUNK_CBYTES);
++      *off_cbytes = sw32_(frame->coffsets + BLOSC2_CHUNK_CBYTES);
+     }
+     return frame->coffsets;
+   }
+   if (frame->cframe != NULL) {
+-    int64_t off_pos = header_len + cbytes;
+-    // Check that there is enough room to read Blosc header
+-    if (off_pos < 0 || off_pos + BLOSC_EXTENDED_HEADER_LENGTH < 0 ||
+-        off_pos + BLOSC_EXTENDED_HEADER_LENGTH > frame->len) {
++    /* Check each term before adding it.  Both cbytes and the frame contents are
++     * untrusted, and overflowing the addition here would create a wild pointer. */
++    if (frame->len < 0 || header_len < 0 || cbytes < 0 ||
++        header_len > frame->len || cbytes > frame->len - header_len) {
++      BLOSC_TRACE_ERROR("Cannot read the offsets outside of frame boundary.");
++      return NULL;
++    }
++    int64_t off_pos = (int64_t)header_len + cbytes;
++    int64_t remaining = frame->len - off_pos;
++    // Check that there is enough room to read the complete Blosc header
++    if (remaining < BLOSC_EXTENDED_HEADER_LENGTH) {
+       BLOSC_TRACE_ERROR("Cannot read the offsets outside of frame boundary.");
+       return NULL;
+     }
+     // For in-memory frames, the coffset is just one pointer away
+     uint8_t* off_start = frame->cframe + off_pos;
++    int32_t coffsets_cbytes = sw32_(off_start + BLOSC2_CHUNK_CBYTES);
++    // The complete compressed offsets chunk must be contained in the frame.
++    if (coffsets_cbytes < BLOSC_EXTENDED_HEADER_LENGTH ||
++        (int64_t)coffsets_cbytes > remaining) {
++      BLOSC_TRACE_ERROR("Cannot read the offsets outside of frame boundary.");
++      return NULL;
++    }
+     if (off_cbytes != NULL) {
+-      *off_cbytes = *(int32_t*) (off_start + BLOSC2_CHUNK_CBYTES);
++      *off_cbytes = coffsets_cbytes;
+     }
+     return off_start;
+   }
+@@ -1730,17 +1744,28 @@
+ 
+ int get_coffset(blosc2_frame_s* frame, int32_t header_len, int64_t cbytes, int32_t nchunk, int64_t *offset) {
+   // Get the offset to nchunk
+-  uint8_t *coffsets = get_coffsets(frame, header_len, cbytes, NULL);
++  int32_t coffsets_cbytes;
++  uint8_t *coffsets = get_coffsets(frame, header_len, cbytes, &coffsets_cbytes);
+   if (coffsets == NULL) {
+     BLOSC_TRACE_ERROR("Cannot get the offset for chunk %d for the frame.", nchunk);
+     return BLOSC2_ERROR_DATA;
+   }
+ 
+-  // Get the 64-bit offset
+-  int rc = blosc_getitem(coffsets, nchunk, 1, offset);
++  // Get the 64-bit offset, passing the actual source size to the decompressor.
++  blosc2_dparams off_dparams = BLOSC2_DPARAMS_DEFAULTS;
++  blosc2_context *dctx = blosc2_create_dctx(off_dparams);
++  if (dctx == NULL) {
++    return BLOSC2_ERROR_NULL_POINTER;
++  }
++  int rc = blosc2_getitem_ctx(dctx, coffsets, coffsets_cbytes, nchunk, 1,
++                              offset, (int32_t)sizeof(*offset));
++  blosc2_free_ctx(dctx);
+   if (rc < 0) {
+     BLOSC_TRACE_ERROR("Problems retrieving a chunk offset.");
+-  } else if (*offset > frame->len) {
++  } else if (frame->cframe != NULL && *offset >= 0 &&
++             (frame->len < BLOSC_MIN_HEADER_LENGTH || header_len < 0 ||
++              header_len > frame->len - BLOSC_MIN_HEADER_LENGTH ||
++              *offset > frame->len - header_len - BLOSC_MIN_HEADER_LENGTH)) {
+     BLOSC_TRACE_ERROR("Cannot read chunk %d outside of frame boundary.", nchunk);
+     rc = BLOSC2_ERROR_READ_BUFFER;
+   }

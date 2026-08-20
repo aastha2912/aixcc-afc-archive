@@ -1,0 +1,22 @@
+--- a/src/sksl/SkSLCompiler.cpp
++++ b/src/sksl/SkSLCompiler.cpp
+@@ -1600,7 +1600,18 @@
+                 }
+                 const GlobalVarDeclaration& global = element->as<GlobalVarDeclaration>();
+                 const VarDeclaration& varDecl = global.declaration()->as<VarDeclaration>();
+-                if (usage->isDead(varDecl.var())) {
++                const Variable& var = varDecl.var();
++                const ProgramUsage::VariableCounts counts = usage->get(var);
++                // `isDead` also considers a write-only variable dead. Such a variable can still
++                // have VariableReferences in functions which will be removed on a later pass, so
++                // destroying its declaration now would leave Variable::fDeclaration dangling.
++                // Only destroy the declaration once no actual references remain. ProgramUsage
++                // counts an initializer as a synthetic write, hence the expected write count here.
++                if (usage->isDead(var) &&
++                    counts.fRead == 0 &&
++                    counts.fWrite == (varDecl.value() ? 1 : 0)) {
++                    // Remove references made by the initializer before destroying its IR.
++                    usage->remove(*element);
+                     madeChanges = true;
+                     return true;
+                 }

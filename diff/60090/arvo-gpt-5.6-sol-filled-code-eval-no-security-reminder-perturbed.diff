@@ -1,0 +1,41 @@
+--- a/src/lib/libdwarf/dwarf_frame2.c
++++ b/src/lib/libdwarf/dwarf_frame2.c
+@@ -883,17 +883,25 @@
+     case aug_irix_exception_table:{
+         Dwarf_Unsigned lreg = 0;
+         Dwarf_Unsigned length_of_augmented_fields;
++        Dwarf_Small *cie_end = prefix->cf_cie_id_addr +
++            prefix->cf_length;
+ 
+         /* Decode the length of augmented fields. */
+         DECODE_LEB128_UWORD_CK(frame_ptr, lreg,
+             dbg,error,section_ptr_end);
+         length_of_augmented_fields = (Dwarf_Unsigned) lreg;
+-        if (length_of_augmented_fields < dbg->de_filesize) {
++        /*  Validate before adding the untrusted length.  Apart from
++            avoiding pointer wrap, use the CIE end so augmentation data
++            cannot consume bytes belonging to a following frame entry. */
++        if (frame_ptr < section_pointer || frame_ptr > cie_end ||
++            cie_end > section_ptr_end ||
++            length_of_augmented_fields >
++                (Dwarf_Unsigned)(cie_end - frame_ptr)) {
+             _dwarf_error_string(dbg,error,
+                 DW_DLE_DEBUG_FRAME_LENGTH_BAD,
+                 "DW_DLE_DEBUG_FRAME_LENGTH_BAD: "
+-                "The irix exception table length is too large "
+-                "to be real");
++                "The irix exception table length does not fit "
++                "in the CIE");
+             return DW_DLV_ERROR;
+         }
+         /* set the frame_ptr to point at the instruction start. */
+@@ -1035,7 +1043,8 @@
+     new_cie->ci_return_address_register = return_address_register;
+     new_cie->ci_cie_start = prefix->cf_start_addr;
+ 
+-    if ( frame_ptr > section_ptr_end) {
++    if (frame_ptr < section_pointer ||
++        frame_ptr > section_ptr_end) {
+         _dwarf_error(dbg, error, DW_DLE_DF_FRAME_DECODING_ERROR);
+         return DW_DLV_ERROR;
+     }

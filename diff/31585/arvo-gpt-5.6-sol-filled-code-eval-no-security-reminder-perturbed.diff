@@ -1,0 +1,49 @@
+--- a/blosc/frame.c
++++ b/blosc/frame.c
+@@ -2015,20 +2015,36 @@
+     free(block_csizes);
+   } else {
+     // The chunk is in memory and just one pointer away
+-    int64_t chunk_header_offset = header_len + offset;
+-    int64_t chunk_cbytes_offset = chunk_header_offset + BLOSC_MIN_HEADER_LENGTH;
++    int64_t chunk_header_offset;
+ 
+-    *chunk = frame->cframe + chunk_header_offset;
++    // Validate against the actual size of the backing buffer before doing
++    // either the addition or pointer arithmetic.
++    if ((int64_t)header_len > frame->len || offset > frame->len - header_len) {
++      BLOSC_TRACE_ERROR("Cannot read chunk outside of the (contiguous) frame.");
++      rc = BLOSC2_ERROR_READ_BUFFER;
++      goto end;
++    }
++    chunk_header_offset = header_len + offset;
+ 
+-    if (chunk_cbytes_offset > frame->len) {
++    // There must be enough input for the size parser to read the chunk header.
++    int64_t chunk_bytes_available = frame->len - chunk_header_offset;
++    if (chunk_bytes_available < BLOSC_MIN_HEADER_LENGTH) {
+       BLOSC_TRACE_ERROR("Cannot read the header for chunk in the (contiguous) frame.");
+       rc = BLOSC2_ERROR_READ_BUFFER;
+-    } else {
+-      rc = blosc2_cbuffer_sizes(*chunk, NULL, &lazychunk_cbytes, NULL);
+-      if (rc && chunk_cbytes_offset + lazychunk_cbytes > frame_len) {
+-        BLOSC_TRACE_ERROR("Compressed bytes exceed beyond frame length.");
+-        rc = BLOSC2_ERROR_READ_BUFFER;
+-      }
++      goto end;
++    }
++
++    *chunk = frame->cframe + chunk_header_offset;
++    rc = blosc2_cbuffer_sizes(*chunk, NULL, &lazychunk_cbytes, NULL);
++    if (rc < 0) {
++      goto end;
++    }
++
++    // cbytes includes the chunk header.  Use subtraction so that a malicious
++    // claimed size cannot overflow an end-offset calculation.
++    if (lazychunk_cbytes < BLOSC_MIN_HEADER_LENGTH || lazychunk_cbytes > chunk_bytes_available) {
++      BLOSC_TRACE_ERROR("Compressed bytes exceed beyond frame length.");
++      rc = BLOSC2_ERROR_READ_BUFFER;
+     }
+   }
+ 

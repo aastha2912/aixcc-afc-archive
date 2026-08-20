@@ -1,0 +1,112 @@
+--- a/ndpi/src/lib/protocols/softether.c
++++ b/ndpi/src/lib/protocols/softether.c
+@@ -74,7 +74,6 @@
+                                      struct softether_value *v,
+                                      u_int8_t const *payload,
+                                      u_int16_t payload_len) {
+-  size_t ret = 0;
+   v->type = t;
+   v->value_size = 0;
+ 
+@@ -86,8 +85,7 @@
+ 
+       v->value.value_int = ntohl(get_u_int32_t(payload, 0));
+       v->value_size = sizeof(v->value.value_int);
+-      ret = v->value_size;
+-      break;
++      return v->value_size;
+ 
+     case VALUE_DATA:
+     case VALUE_STR:
+@@ -95,17 +93,19 @@
+       if(payload_len < 4)
+ 	return 0;
+ 
+-      v->value.ptr.raw = payload + 4;
+       u_int32_t siz = ntohl(get_u_int32_t(payload, 0));
+-      if(siz == 0 || (u_int64_t)payload_len < (u_int64_t)siz + 3)
++      if(siz == 0)
+ 	return 0;
+ 
+       if(t == VALUE_DATA)
+ 	siz--;
+ 
++      if(siz > payload_len - 4)
++	return 0;
++
++      v->value.ptr.raw = payload + 4;
+       v->value_size = siz;
+-      ret = siz + sizeof(siz);
+-      break;
++      return (size_t)siz + 4;
+ 
+     case VALUE_INT64:
+       if(payload_len < 8)
+@@ -113,14 +113,10 @@
+ 
+       v->value.value_int64 = ndpi_ntohll(get_u_int64_t(payload, 0));
+       v->value_size = sizeof(v->value.value_int64);
+-      ret = v->value_size;
+-      break;
++      return v->value_size;
+     }
+ 
+-  if(ret > payload_len)
+-    return 0;
+-
+-  return ret;
++  return 0;
+ }
+ 
+ /* ***************************************************** */
+@@ -147,7 +143,7 @@
+                                        struct softether_value *second_value) {
+   enum softether_value_type first_tuple_type;
+   enum softether_value_type second_tuple_type;
+-  size_t value_siz;
++  size_t first_value_siz, second_value_siz;
+   size_t const tuple_type_len = 8;
+ 
+   if(payload_len < tuple_type_len)
+@@ -160,14 +156,18 @@
+   payload += tuple_type_len;
+   payload_len -= tuple_type_len;
+ 
+-  value_siz = dissect_softether_type(first_tuple_type, first_value, payload, payload_len);
++  first_value_siz = dissect_softether_type(first_tuple_type, first_value, payload, payload_len);
++  if(first_value_siz == 0)
++    return 0;
+ 
+-  payload += value_siz;
+-  payload_len -= value_siz;
++  payload += first_value_siz;
++  payload_len -= first_value_siz;
+ 
+-  value_siz += dissect_softether_type(second_tuple_type, second_value, payload, payload_len);
++  second_value_siz = dissect_softether_type(second_tuple_type, second_value, payload, payload_len);
++  if(second_value_siz == 0)
++    return 0;
+ 
+-  return value_siz + tuple_type_len;
++  return first_value_siz + second_value_siz + tuple_type_len;
+ }
+ 
+ /* ***************************************************** */
+@@ -185,7 +185,7 @@
+     return 1;
+ 
+   tuple_count = ntohl(get_u_int32_t(payload, 0));
+-  if(tuple_count == 0 || tuple_count * 8 > payload_len)
++  if(tuple_count == 0 || tuple_count > (payload_len - 4) / 8)
+     return 1;
+ 
+   payload += 4;
+@@ -198,7 +198,7 @@
+   payload += value_siz;
+   payload_len -= value_siz;
+ 
+-  if(strncmp(val1.value.ptr.value_str, "host_name", value_siz) == 0)
++  if(strncmp(val1.value.ptr.value_str, "host_name", val1.value_size) == 0)
+     got_hostname = 1;
+ 
+   for (; tuple_count > 0; --tuple_count) {

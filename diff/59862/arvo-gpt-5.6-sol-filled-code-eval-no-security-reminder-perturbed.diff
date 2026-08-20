@@ -1,0 +1,73 @@
+--- a/Packet++/header/TLVData.h
++++ b/Packet++/header/TLVData.h
+@@ -2,6 +2,7 @@
+ 
+ #include "Layer.h"
+ #include "IpAddress.h"
++#include <cstdint>
+ #include <string.h>
+ 
+ /// @file
+@@ -289,8 +290,9 @@
+ 				return resRec;
+ 
+ 			resRec.assign(tlvDataBasePtr);
+-			// check if there are records at all and the total size is not zero
+-			if (tlvDataLen == 0 || resRec.getTotalSize() == 0)
++			// Make sure the complete record, and not only its fixed header, is in the buffer
++			const size_t recordSize = resRec.getTotalSize();
++			if (recordSize == 0 || recordSize > tlvDataLen)
+ 				resRec.assign(NULL);
+ 
+ 			return resRec;
+@@ -309,25 +311,38 @@
+ 		{
+ 			TLVRecordType resRec(NULL);  // for NRVO optimization
+ 
+-			if (record.isNull())
++			if (record.isNull() || tlvDataBasePtr == NULL)
+ 				return resRec;
+ 
+-			if (!TLVRecordType::canAssign(record.getRecordBasePtr() + record.getTotalSize(),
+-			                              tlvDataBasePtr - record.getRecordBasePtr() + tlvDataLen -
+-			                                  record.getTotalSize()))
++			uint8_t* recordBasePtr = record.getRecordBasePtr();
++			const std::uintptr_t tlvDataAddress = reinterpret_cast<std::uintptr_t>(tlvDataBasePtr);
++			const std::uintptr_t recordAddress = reinterpret_cast<std::uintptr_t>(recordBasePtr);
++
++			// Validate the record offset before using subtraction to calculate the remaining size.
++			// Integer addresses are used here because the supplied record isn't necessarily from this buffer.
++			if (recordAddress < tlvDataAddress)
+ 				return resRec;
+ 
+-			resRec.assign(record.getRecordBasePtr() + record.getTotalSize());
++			const std::uintptr_t recordOffset = recordAddress - tlvDataAddress;
++			if (recordOffset > tlvDataLen)
++				return resRec;
+ 
+-			if (resRec.getTotalSize() == 0)
+-				resRec.assign(NULL);
++			size_t remainingLen = tlvDataLen - static_cast<size_t>(recordOffset);
++			if (!TLVRecordType::canAssign(recordBasePtr, remainingLen))
++				return resRec;
+ 
+-			// resRec pointer is out-bounds of the TLV records memory
+-			if ((resRec.getRecordBasePtr() - tlvDataBasePtr) < 0)
+-				resRec.assign(NULL);
++			const size_t recordSize = record.getTotalSize();
++			if (recordSize == 0 || recordSize > remainingLen)
++				return resRec;
++
++			remainingLen -= recordSize;
++			uint8_t* nextRecordBasePtr = recordBasePtr + recordSize;
++			if (!TLVRecordType::canAssign(nextRecordBasePtr, remainingLen))
++				return resRec;
+ 
+-			// resRec pointer is out-bounds of the TLV records memory
+-			if (!resRec.isNull() && resRec.getRecordBasePtr() + resRec.getTotalSize() > tlvDataBasePtr + tlvDataLen)
++			resRec.assign(nextRecordBasePtr);
++			const size_t nextRecordSize = resRec.getTotalSize();
++			if (nextRecordSize == 0 || nextRecordSize > remainingLen)
+ 				resRec.assign(NULL);
+ 
+ 			return resRec;

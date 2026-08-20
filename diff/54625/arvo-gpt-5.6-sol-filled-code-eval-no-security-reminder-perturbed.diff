@@ -1,0 +1,130 @@
+--- a/libredwg/src/out_json.c
++++ b/libredwg/src/out_json.c
+@@ -285,7 +285,8 @@
+     if (len < 42)                                                             \
+       {                                                                       \
+         char _buf[256];                                                       \
+-        char *p = json_cquote (_buf, (const char *)_obj->nam, _l1);           \
++        char *p = json_cquote_n (_buf, (const char *)_obj->nam, _l1,          \
++                                (size_t)len);                                  \
+         fprintf (dat->fh, "\"%s\"", p);                                       \
+         /*                                                                    \
+         size_t lp = strlen (p);                                               \
+@@ -298,7 +299,8 @@
+     else                                                                      \
+       {                                                                       \
+         char *_buf = (char *)malloc (_l1);                                    \
+-        char *p = json_cquote (_buf, (const char *)_obj->nam, _l1);           \
++        char *p = json_cquote_n (_buf, (const char *)_obj->nam, _l1,          \
++                                (size_t)len);                                  \
+         fprintf (dat->fh, "\"%s\"", p);                                       \
+         free (_buf);                                                          \
+       }                                                                       \
+@@ -1332,35 +1334,51 @@
+ 
+ #endif /* HAVE_NATIVE_WCHAR2 */
+ 
+-char *
+-json_cquote (char *restrict dest, const char *restrict src, const int len)
++/* Quote at most src_len bytes.  TF fields are fixed-size arrays and are not
++   guaranteed to contain a terminating NUL, so their source bound must be
++   independent of the destination capacity. */
++static char *
++json_cquote_n (char *restrict dest, const char *restrict src,
++               const size_t dest_len, const size_t src_len)
+ {
+   unsigned char c;
+-  unsigned char *s = (unsigned char *)src;
+-  const char *endp = dest + len;
++  const unsigned char *s = (const unsigned char *)src;
++  size_t input_left = src_len;
++  size_t output_left = dest_len;
+   char *d = dest;
++
+   if (!src)
+     return (char *)"";
+-  while ((c = *s++))
++  if (!dest || !dest_len)
++    return d;
++  while (input_left && (c = *s++))
+     {
+-      if (dest >= endp)
+-        {
+-          *dest = 0;
+-          return d;
+-        }
+-      if (c == '"' && dest + 1 < endp)
++      size_t needed;
++      input_left--;
++      if (c == '"' || c == '\\' || c == '\n' || c == '\r')
++        needed = 2;
++      else if (c < 0x1f)
++        needed = 6;
++      else
++        needed = 1;
++      /* Preserve one byte for the terminator. */
++      if (needed >= output_left)
++        break;
++
++      if (c == '"')
+         {
+           *dest++ = '\\';
+           *dest++ = c;
+         }
+-      else if (c == '\\' && dest + 2 < endp)
++      else if (c == '\\')
+         {
+-          if (dest + 5 < endp && s[0] == 'U' && s[1] == '+' && ishex (s[2])
++          if (input_left >= 6 && s[0] == 'U' && s[1] == '+' && ishex (s[2])
+               && ishex (s[3]) && ishex (s[4]) && ishex (s[5]))
+             {
+               *dest++ = '\\';
+               *dest++ = 'u';
+               s += 2;
++              input_left -= 2;
+             }
+           else
+             {
+@@ -1368,17 +1386,17 @@
+               *dest++ = c;
+             }
+         }
+-      else if (c == '\n' && dest + 1 < endp)
++      else if (c == '\n')
+         {
+           *dest++ = '\\';
+           *dest++ = 'n';
+         }
+-      else if (c == '\r' && dest + 1 < endp)
++      else if (c == '\r')
+         {
+           *dest++ = '\\';
+           *dest++ = 'r';
+         }
+-      else if (c < 0x1f && dest + 5 < endp)
++      else if (c < 0x1f)
+         {
+           *dest++ = '\\';
+           *dest++ = 'u';
+@@ -1389,11 +1407,20 @@
+         }
+       else
+         *dest++ = c;
++      output_left -= needed;
+     }
+-  *dest = 0; // add final delim, skipped above
++  *dest = 0;
+   return d;
+ }
+ 
++char *
++json_cquote (char *restrict dest, const char *restrict src, const int len)
++{
++  if (len <= 0)
++    return dest;
++  return json_cquote_n (dest, src, (size_t)len, (size_t)-1);
++}
++
+ static int
+ json_3dsolid (Bit_Chain *restrict dat, const Dwg_Object *restrict obj,
+               Dwg_Entity_3DSOLID *restrict _obj)

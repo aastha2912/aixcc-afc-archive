@@ -1,0 +1,56 @@
+--- a/libxslt/documents.c
++++ b/libxslt/documents.c
+@@ -41,6 +41,18 @@
+  *									*
+  ************************************************************************/
+ 
++/*
++ * Parser error handlers are allowed to call xmlStopParser.  Calling them
++ * from inside xmlParseDocument, however, can invalidate input pointers held
++ * by older libxml2 parser frames.  Delay notification until the parser has
++ * unwound.  The parser still records the error in lastError and updates its
++ * error state before invoking the SAX handler.
++ */
++static void
++xsltLoaderDeferError(void *ctx ATTRIBUTE_UNUSED,
++                     const char *msg ATTRIBUTE_UNUSED, ...) {
++}
++
+ /**
+  * xsltDocDefaultLoaderFunc:
+  * @URI: the URI of the document to load
+@@ -64,6 +76,8 @@
+ {
+     xmlParserCtxtPtr pctxt;
+     xmlParserInputPtr inputStream;
++    xmlGenericErrorFunc error;
++    xmlGenericErrorFunc fatalError;
+     xmlDocPtr doc;
+ 
+     pctxt = xmlNewParserCtxt();
+@@ -91,8 +105,25 @@
+     if (pctxt->directory == NULL)
+         pctxt->directory = xmlParserGetDirectory((const char *) URI);
+ 
++    error = pctxt->sax->error;
++    fatalError = pctxt->sax->fatalError;
++    pctxt->sax->error = xsltLoaderDeferError;
++    pctxt->sax->fatalError = xsltLoaderDeferError;
++
+     xmlParseDocument(pctxt);
+ 
++    pctxt->sax->error = error;
++    pctxt->sax->fatalError = fatalError;
++    if ((pctxt->lastError.message != NULL) &&
++        (pctxt->lastError.level != XML_ERR_WARNING)) {
++        xmlGenericErrorFunc report = error;
++
++        if (pctxt->lastError.level == XML_ERR_FATAL)
++            report = fatalError;
++        if (report != NULL)
++            report(pctxt->userData, "%s", pctxt->lastError.message);
++    }
++
+     if (pctxt->wellFormed) {
+         doc = pctxt->myDoc;
+     }

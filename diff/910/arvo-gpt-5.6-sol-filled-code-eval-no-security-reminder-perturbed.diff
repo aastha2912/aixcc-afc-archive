@@ -1,0 +1,105 @@
+--- a/src/cmstypes.c
++++ b/src/cmstypes.c
+@@ -4322,14 +4322,16 @@
+     if (!_cmsReadUInt16Number(io, &InputChans)) return NULL;
+     if (!_cmsReadUInt16Number(io, &OutputChans)) return NULL;
+ 
+-    if (InputChans == 0) goto Error;
+-    if (OutputChans == 0) goto Error;
++    // ICC pipelines and the evaluator use fixed-size channel buffers. Reject
++    // element-local channel counts that cannot be represented by the library.
++    if (InputChans == 0 || InputChans > MAX_INPUT_DIMENSIONS) goto Error;
++    if (OutputChans == 0 || OutputChans >= cmsMAXCHANNELS) goto Error;
+ 
+     if (io ->Read(io, Dimensions8, sizeof(cmsUInt8Number), 16) != 16)
+         goto Error;
+ 
+     // Copy MAX_INPUT_DIMENSIONS at most. Expand to cmsUInt32Number
+-    nMaxGrids = InputChans > MAX_INPUT_DIMENSIONS ? MAX_INPUT_DIMENSIONS : InputChans;
++    nMaxGrids = InputChans;
+ 
+     for (i = 0; i < nMaxGrids; i++) {
+         if (Dimensions8[i] == 1) goto Error; // Impossible value, 0 for no CLUT and then 2 at least
+--- a/src/cmslut.c
++++ b/src/cmslut.c
+@@ -475,10 +475,10 @@
+         dim = Dims[b-1];
+         if (dim == 0) return 0;  // Error
+ 
+-        rv *= dim;
+-
+-        // Check for overflow
++        // Check before multiplying; checking the wrapped result is too late.
+         if (rv > UINT_MAX / dim) return 0;
++
++        rv *= dim;
+     }
+ 
+     return rv;
+@@ -553,7 +553,7 @@
+                                          cmsUInt32Number outputChan,
+                                          const cmsUInt16Number* Table)
+ {
+-    cmsUInt32Number i, n;
++    cmsUInt32Number i, n, cubeSize;
+     _cmsStageCLutData* NewElem;
+     cmsStage* NewMPE;
+ 
+@@ -564,6 +564,14 @@
+         return NULL;
+     }
+ 
++    if (inputChan == 0 || outputChan == 0 || outputChan >= MAX_STAGE_CHANNELS) {
++        cmsSignalError(ContextID, cmsERROR_RANGE, "Invalid number of channels");
++        return NULL;
++    }
++
++    cubeSize = CubeSize(clutPoints, inputChan);
++    if (cubeSize == 0 || outputChan > UINT_MAX / cubeSize) return NULL;
++
+     NewMPE = _cmsStageAllocPlaceholder(ContextID, cmsSigCLutElemType, inputChan, outputChan,
+                                      EvaluateCLUTfloatIn16, CLUTElemDup, CLutElemTypeFree, NULL );
+ 
+@@ -577,7 +585,7 @@
+ 
+     NewMPE ->Data  = (void*) NewElem;
+ 
+-    NewElem -> nEntries = n = outputChan * CubeSize(clutPoints, inputChan);
++    NewElem -> nEntries = n = outputChan * cubeSize;
+     NewElem -> HasFloatValues = FALSE;
+ 
+     if (n == 0) {
+@@ -644,7 +652,7 @@
+ 
+ cmsStage* CMSEXPORT cmsStageAllocCLutFloatGranular(cmsContext ContextID, const cmsUInt32Number clutPoints[], cmsUInt32Number inputChan, cmsUInt32Number outputChan, const cmsFloat32Number* Table)
+ {
+-    cmsUInt32Number i, n;
++    cmsUInt32Number i, n, cubeSize;
+     _cmsStageCLutData* NewElem;
+     cmsStage* NewMPE;
+ 
+@@ -655,6 +663,14 @@
+         return NULL;
+     }
+ 
++    if (inputChan == 0 || outputChan == 0 || outputChan >= MAX_STAGE_CHANNELS) {
++        cmsSignalError(ContextID, cmsERROR_RANGE, "Invalid number of channels");
++        return NULL;
++    }
++
++    cubeSize = CubeSize(clutPoints, inputChan);
++    if (cubeSize == 0 || outputChan > UINT_MAX / cubeSize) return NULL;
++
+     NewMPE = _cmsStageAllocPlaceholder(ContextID, cmsSigCLutElemType, inputChan, outputChan,
+                                              EvaluateCLUTfloat, CLUTElemDup, CLutElemTypeFree, NULL);
+     if (NewMPE == NULL) return NULL;
+@@ -668,8 +684,7 @@
+ 
+     NewMPE ->Data  = (void*) NewElem;
+ 
+-    // There is a potential integer overflow on conputing n and nEntries.
+-    NewElem -> nEntries = n = outputChan * CubeSize(clutPoints, inputChan);
++    NewElem -> nEntries = n = outputChan * cubeSize;
+     NewElem -> HasFloatValues = TRUE;
+ 
+     if (n == 0) {

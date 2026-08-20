@@ -1,0 +1,49 @@
+--- a/blosc/frame.c
++++ b/blosc/frame.c
+@@ -1849,7 +1849,7 @@
+     return ret;
+   }
+ 
+-  if (nchunk >= nchunks) {
++  if (nchunk < 0 || nchunk >= nchunks) {
+     BLOSC_TRACE_ERROR("nchunk ('%d') exceeds the number of chunks "
+                       "('%d') in frame.", nchunk, nchunks);
+     return BLOSC2_ERROR_INVALID_PARAM;
+@@ -1968,9 +1968,34 @@
+     memcpy(trailer_csizes, block_csizes, nblocks * sizeof(int32_t));
+     free(block_csizes);
+   } else {
+-    // The chunk is in memory and just one pointer away
+-    *chunk = frame->cframe + header_len + offset;
+-    lazychunk_cbytes = sw32_(*chunk + BLOSC2_CHUNK_CBYTES);
++    // frame->len is the actual allocation size, so validate both the chunk
++    // header and its complete declared extent before returning a pointer.
++    if (frame_len != frame->len || header_len < 0 || header_len > frame->len ||
++        offset > frame->len - header_len) {
++      BLOSC_TRACE_ERROR("Cannot read chunk %d outside of frame boundary.", nchunk);
++      return BLOSC2_ERROR_READ_BUFFER;
++    }
++
++    int64_t chunk_pos = header_len + offset;
++    int64_t remaining = frame->len - chunk_pos;
++    // cbytes is the last field in the minimum Blosc header.
++    if (remaining < BLOSC_MIN_HEADER_LENGTH) {
++      BLOSC_TRACE_ERROR("Cannot read the header for chunk in the frame.");
++      return BLOSC2_ERROR_READ_BUFFER;
++    }
++
++    uint8_t *chunk_ = frame->cframe + chunk_pos;
++    int32_t chunk_cbytes = (int32_t)sw32_(chunk_ + BLOSC2_CHUNK_CBYTES);
++    if (chunk_cbytes < BLOSC_MIN_HEADER_LENGTH) {
++      BLOSC_TRACE_ERROR("Invalid compressed size in chunk header.");
++      return BLOSC2_ERROR_INVALID_HEADER;
++    }
++    if ((int64_t)chunk_cbytes > remaining) {
++      BLOSC_TRACE_ERROR("Cannot read chunk %d outside of frame boundary.", nchunk);
++      return BLOSC2_ERROR_READ_BUFFER;
++    }
++    *chunk = chunk_;
++    lazychunk_cbytes = (size_t)chunk_cbytes;
+   }
+ 
+   end:

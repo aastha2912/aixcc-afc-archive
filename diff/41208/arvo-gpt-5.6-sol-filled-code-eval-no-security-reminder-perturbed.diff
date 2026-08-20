@@ -1,0 +1,95 @@
+--- a/Zend/zend_vm_def.h
++++ b/Zend/zend_vm_def.h
+@@ -2529,10 +2529,13 @@
+ 	zval *value;
+ 	zval *variable_ptr;
+ 	zval *dim;
++	zval resolved_dim;
++	bool use_resolved_dim = false;
+ 
+ 	SAVE_OPLINE();
+ 	orig_object_ptr = object_ptr = GET_OP1_ZVAL_PTR_PTR_UNDEF(BP_VAR_W);
+ 
++ZEND_VM_C_LABEL(assign_dim_dispatch):
+ 	if (EXPECTED(Z_TYPE_P(object_ptr) == IS_ARRAY)) {
+ ZEND_VM_C_LABEL(try_assign_dim_array):
+ 		SEPARATE_ARRAY(object_ptr);
+@@ -2563,7 +2566,9 @@
+ 				}
+ 			}
+ 		} else {
+-			dim = GET_OP2_ZVAL_PTR_UNDEF(BP_VAR_R);
++			dim = use_resolved_dim
++				? &resolved_dim
++				: GET_OP2_ZVAL_PTR_UNDEF(BP_VAR_R);
+ 			if (OP2_TYPE == IS_CONST) {
+ 				variable_ptr = zend_fetch_dimension_address_inner_W_CONST(Z_ARRVAL_P(object_ptr), dim EXECUTE_DATA_CC);
+ 			} else {
+@@ -2586,7 +2591,9 @@
+ 			}
+ 		}
+ 		if (EXPECTED(Z_TYPE_P(object_ptr) == IS_OBJECT)) {
+-			dim = GET_OP2_ZVAL_PTR(BP_VAR_R);
++			dim = use_resolved_dim
++				? &resolved_dim
++				: GET_OP2_ZVAL_PTR(BP_VAR_R);
+ 			value = GET_OP_DATA_ZVAL_PTR_DEREF(BP_VAR_R);
+ 
+ 			if (OP2_TYPE == IS_CONST && Z_EXTRA_P(dim) == ZEND_EXTRA_VALUE) {
+@@ -2601,12 +2608,33 @@
+ 				FREE_OP_DATA();
+ 				UNDEF_RESULT();
+ 			} else {
+-				dim = GET_OP2_ZVAL_PTR(BP_VAR_R);
++				dim = use_resolved_dim
++					? &resolved_dim
++					: GET_OP2_ZVAL_PTR(BP_VAR_R);
+ 				value = GET_OP_DATA_ZVAL_PTR_DEREF(BP_VAR_R);
+ 				zend_assign_to_string_offset(object_ptr, dim, value OPLINE_CC EXECUTE_DATA_CC);
+ 				FREE_OP_DATA();
+ 			}
+ 		} else if (EXPECTED(Z_TYPE_P(object_ptr) <= IS_FALSE)) {
++			/* Resolve an undefined CV dimension before publishing the new array.
++			 * The warning may invoke user code that replaces OP1 through $GLOBALS. */
++			if (OP2_TYPE == IS_CV && !use_resolved_dim) {
++				dim = GET_OP2_ZVAL_PTR_UNDEF(BP_VAR_R);
++				if (UNEXPECTED(Z_TYPE_P(dim) == IS_UNDEF)) {
++					ZVAL_UNDEFINED_OP2();
++					if (UNEXPECTED(EG(exception))) {
++						ZEND_VM_C_GOTO(assign_dim_error);
++					}
++					ZVAL_NULL(&resolved_dim);
++					use_resolved_dim = true;
++
++					/* The warning callback may have changed OP1. */
++					orig_object_ptr = object_ptr =
++						GET_OP1_ZVAL_PTR_PTR_UNDEF(BP_VAR_W);
++					ZEND_VM_C_GOTO(assign_dim_dispatch);
++				}
++			}
++
+ 			if (Z_TYPE_P(object_ptr) == IS_FALSE) {
+ 				zend_false_to_array_deprecated();
+ 			}
+@@ -2614,7 +2642,9 @@
+ 			if (Z_ISREF_P(orig_object_ptr)
+ 			 && ZEND_REF_HAS_TYPE_SOURCES(Z_REF_P(orig_object_ptr))
+ 			 && !zend_verify_ref_array_assignable(Z_REF_P(orig_object_ptr))) {
+-				dim = GET_OP2_ZVAL_PTR(BP_VAR_R);
++				dim = use_resolved_dim
++					? &resolved_dim
++					: GET_OP2_ZVAL_PTR(BP_VAR_R);
+ 				FREE_OP_DATA();
+ 				UNDEF_RESULT();
+ 			} else {
+@@ -2623,7 +2653,9 @@
+ 			}
+ 		} else {
+ 			zend_use_scalar_as_array();
+-			dim = GET_OP2_ZVAL_PTR(BP_VAR_R);
++			dim = use_resolved_dim
++				? &resolved_dim
++				: GET_OP2_ZVAL_PTR(BP_VAR_R);
+ ZEND_VM_C_LABEL(assign_dim_error):
+ 			FREE_OP_DATA();
+ 			if (UNEXPECTED(RETURN_VALUE_USED(opline))) {
