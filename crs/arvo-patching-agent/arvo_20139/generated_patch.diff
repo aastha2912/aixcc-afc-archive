@@ -1,0 +1,79 @@
+--- a/arrow/cpp/src/arrow/ipc/reader.cc
++++ b/arrow/cpp/src/arrow/ipc/reader.cc
+@@ -96,8 +96,9 @@
+ /// Accessor class for flatbuffers metadata
+ class IpcComponentSource {
+  public:
+-  IpcComponentSource(const flatbuf::RecordBatch* metadata, io::RandomAccessFile* file)
+-      : metadata_(metadata), file_(file) {}
++  IpcComponentSource(const flatbuf::RecordBatch* metadata, io::RandomAccessFile* file,
++                     int64_t body_length)
++      : metadata_(metadata), file_(file), body_length_(body_length) {}
+ 
+   Status GetBuffer(int buffer_index, std::shared_ptr<Buffer>* out) {
+     auto buffers = metadata_->buffers();
+@@ -105,22 +106,41 @@
+       return Status::IOError(
+           "Buffers-pointer of flatbuffer-encoded RecordBatch is null.");
+     }
+-    if (buffer_index >= static_cast<int>(buffers->size())) {
++    if (buffer_index < 0 || buffer_index >= static_cast<int>(buffers->size())) {
+       return Status::IOError("buffer_index out of range.");
+     }
+     const flatbuf::Buffer* buffer = buffers->Get(buffer_index);
++    const int64_t offset = buffer->offset();
++    const int64_t length = buffer->length();
+ 
+-    if (buffer->length() == 0) {
++    // Buffer offsets are relative to the start of the record batch body.  Check
++    // subtraction rather than offset + length so malformed metadata cannot
++    // overflow while being validated.
++    if (offset < 0 || length < 0 || offset > body_length_ ||
++        length > body_length_ - offset) {
++      return Status::Invalid("Buffer ", buffer_index,
++                             " is outside the record batch body: offset = ", offset,
++                             ", length = ", length,
++                             ", body length = ", body_length_);
++    }
++
++    if (length == 0) {
+       // Should never return a null buffer here.
+       // (zero-sized buffer allocations are cheap)
+       return AllocateBuffer(0, out);
+     } else {
+-      if (!BitUtil::IsMultipleOf8(buffer->offset())) {
++      if (!BitUtil::IsMultipleOf8(offset)) {
+         return Status::Invalid(
+             "Buffer ", buffer_index,
+-            " did not start on 8-byte aligned offset: ", buffer->offset());
++            " did not start on 8-byte aligned offset: ", offset);
++      }
++      ARROW_ASSIGN_OR_RAISE(auto data, file_->ReadAt(offset, length));
++      if (data->size() != length) {
++        return Status::IOError("Expected to read ", length, " bytes for buffer ",
++                               buffer_index, " but got ", data->size());
+       }
+-      return file_->ReadAt(buffer->offset(), buffer->length()).Value(out);
++      *out = std::move(data);
++      return Status::OK();
+     }
+   }
+ 
+@@ -144,6 +164,7 @@
+  private:
+   const flatbuf::RecordBatch* metadata_;
+   io::RandomAccessFile* file_;
++  int64_t body_length_;
+ };
+ 
+ /// Bookkeeping struct for loading array objects from their constituent pieces of raw data
+@@ -397,7 +418,8 @@
+                                      const IpcOptions& options,
+                                      io::RandomAccessFile* file,
+                                      std::shared_ptr<RecordBatch>* out) {
+-  IpcComponentSource source(metadata, file);
++  ARROW_ASSIGN_OR_RAISE(const int64_t body_length, file->GetSize());
++  IpcComponentSource source(metadata, file, body_length);
+   return LoadRecordBatchFromSource(schema, metadata->length(),
+                                    options.max_recursion_depth, &source, dictionary_memo,
+                                    out);
