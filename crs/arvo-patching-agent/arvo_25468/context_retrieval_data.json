@@ -3,151 +3,181 @@
     {
       "tool_name": "source_questions",
       "args": [
-        "Investigate the invalid free in ndpi_free_flow at src/lib/ndpi_main.c involving flow->protos.stun_ssl.ssl.tls_supported_versions. Identify the struct/union definition, every allocation/assignment/free of TLS pointer-bearing union fields, and recommend the smallest robust independent ownership tracking fix, including initialization implications and ABI concerns.",
-        "The supplied ASan report says a crafted IPv4 packet causes non-TLS parser metadata to populate bytes overlapping the shared protocol union, while final classification becomes TLS/QUIC. ndpi_free_flow then uses detected_protocol_stack as a proxy for whether TLS union pointers are valid and frees tls_supported_versions as a wild address. The flow starts zeroed in fuzz/fuzz_process_packet.c and is freed immediately after packet processing. We need modify only C/C++ source, not harnesses, and should fix ownership at its root rather than special-case the payload. Please inspect src/lib/ndpi_main.c and relevant headers/protocol parsers."
+        "In ndpi/src/lib/protocols/kerberos.c, what is the intended classification behavior for a valid AS-REQ (msg_type 0x0A), and is there any reason not to call ndpi_int_kerberos_add_connection after successfully recognizing/parsing one? Compare this with TGS-REQ and response paths and identify the smallest safe root-cause fix for union corruption.",
+        "The sanitizer reproducer sends a UDP packet on Kerberos port 88 that reaches the detailed parser and causes the AS-REQ branch to copy attacker-controlled cname into flow->protos.kerberos.username. That field lives in a protocol union and overlaps TLS/QUIC allocated pointer fields. Unlike TGS-REQ, this AS-REQ branch then returns without calling ndpi_int_kerberos_add_connection, so another dissector recognizes TLS/QUIC and ndpi_free_flow frees the forged pointer. I am considering either parsing into locals and committing before copying, or simply classifying the AS-REQ as Kerberos once the existing structural msg_type checks pass, before/after metadata writes. Please assess intended behavior and any false-positive or control-flow concerns."
       ],
       "kwargs": {},
-      "timestamp": 1575775.356442638,
+      "timestamp": 1643622.86231803,
       "success": true,
-      "result_summary": "Ok(SourceQuestionsResult(answer='### Root cause and layout\\n\\n`struct ndpi_flow_struct` is defined in `src/include/ndpi_typedefs.h` starting at line 1169. Its protocol metadata is a shared `union prot..."
+      "result_summary": "Ok(SourceQuestionsResult(answer=\"A valid `msg_type == 0x0A` is intended to be treated as Kerberos, with the AS-REQ parser merely enriching the result with `hostname`/`username` and `domain` metadata. ..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Why might calling ndpi_int_kerberos_add_connection inside the AS-REQ cname-success block in ndpi/src/lib/protocols/kerberos.c still allow the supplied UDP PoV to finish classified as TLS/QUIC and crash in ndpi_free_flow? Analyze ndpi_set_detected_protocol semantics and detector dispatch. Recommend an exact robust patch that prevents all AS-REQ writes to flow->protos union unless durable ownership is guaranteed, while preserving classification where possible.",
+        "I inserted an unconditional ndpi_int_kerberos_add_connection(ndpi_struct, flow) immediately before the AS-REQ branch's first write to flow->protos.kerberos.hostname/username (after cname parsing and realm_offset calculation, around original line 254). test_patch reports the identical ASan invalid-free dedup, so merely setting detected protocol at that location does not prevent later TLS/QUIC reinterpretation. The supplied PoV is one UDP packet on port 88 and ndpi_free_flow crashes on an overlapped forged pointer. We need revise the patch at the root. Potential options are not writing AS-REQ metadata at all, classifying and returning before metadata, or buffering locally and only committing under a reliable discriminator condition. Please explain exact control flow and safest minimal C-source change."
+      ],
+      "kwargs": {},
+      "timestamp": 1643811.541767367,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='`ndpi_int_kerberos_add_connection()` is not an ownership/commit primitive. It only calls:\\n\\n```c\\nndpi_set_detected_protocol(ndpi_struct, flow,\\n                     ..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Given the current edits to ndpi/src/lib/protocols/kerberos.c remove both AS-REQ writes to flow->protos.kerberos and classify at branch entry, yet the supplied PoV still gets the identical invalid free in ndpi_free_flow, identify every remaining write or out-of-bounds operation in the AS-REQ path that could place attacker bytes into overlapping flow->protos memory, and assess whether the test build may use another copy/path. Focus especially on parser OOB indexing, stack corruption, and all protocol union writers reachable for the same packet.",
+        "Initial patch classified only after cname parsing and test still crashed. Revised patch now calls ndpi_int_kerberos_add_connection immediately at entry to msg_type 0x0A and removes the snprintf writes to hostname/username and domain from that entire branch. The local cname and realm parsing remains. test_patch again reports the exact ASan allocator invalid-free dedup. Source is under ndpi/src/lib/protocols/kerberos.c, which tools resolve as /src/ndpi/src/lib/protocols/kerberos.c. Need determine whether remaining local parsing itself has memory bugs, whether another branch writes union fields on this packet, or whether safest fix is immediate return at AS-REQ branch entry (with packet payload restoration for TCP reassembly)."
+      ],
+      "kwargs": {},
+      "timestamp": 1644007.579296139,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer=\"The edited AS-REQ branch in the relative-tree file no longer contains any write to `flow->protos`, and its remaining local parsing does not have a stack-buffer overflo..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Resolve the repository path discrepancy for kerberos.c: which relative path is compiled by fuzz_process_packet, src/lib/protocols/kerberos.c or ndpi/src/lib/protocols/kerberos.c? Explain why edits applied to ndpi/src/lib/protocols/kerberos.c appear in read_source while global references still show old code at /src/ndpi/src/lib/protocols/kerberos.c.",
+        "Four increasingly broad edits to relative path ndpi/src/lib/protocols/kerberos.c all had zero effect on the identical PoV invalid-free. The project is named ndpi and likely rooted at /src/ndpi. Global find_references reports stale writes at absolute /src/ndpi/src/lib/protocols/kerberos.c, strongly suggesting I accidentally edited a nested /src/ndpi/ndpi/src copy and the build compiles relative src/lib/protocols/kerberos.c. I need confirm this before undoing the wrong-copy edits and applying the root fix to the compiled file."
+      ],
+      "kwargs": {},
+      "timestamp": 1644193.322345859,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='The two spellings are relative to different roots; they are not evidence of two copies.\\n\\n- In the source-tool/repository root, the file is **`ndpi/src/lib/protocols/..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Propose three concrete alternate fixes for the Kerberos/TLS protocol-union invalid free that would remain effective even if ndpi_set_detected_protocol does not prevent final reclassification. Include (1) moving Kerberos metadata out of the union, (2) adding an explicit TLS pointer-validity/ownership discriminator used by ndpi_free_flow, and (3) removing AS-REQ writes. Recommend the smallest ABI-compatible robust option and exact fields/functions to change.",
+        "I reverted four unsuccessful kerberos.c patches after repeated identical PoV crashes. The known root issue is flow->protos.kerberos.username overlapping flow->protos.stun_ssl.ssl.tls_supported_versions, followed by final TLS/QUIC classification and invalid free. Directly removing AS-REQ writes appeared ineffective in test, perhaps due build caching, so I want a structural defense in the destructor/union ownership. We can edit C/C++ source under the project but should avoid broad ABI disruption. Need identify an existing state bit proving TLS allocated its pointer fields, or suggest adding one outside the union and setting it at allocations."
+      ],
+      "kwargs": {},
+      "timestamp": 1644364.52456506,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='The crash is caused by treating final classification as union ownership. `ndpi_free_flow()` checks only `flow_is_proto(...TLS/QUIC)` and then frees all six pointer fie..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "The PoV still reports invalid free after ndpi_free_flow in ndpi/src/lib/ndpi_main.c was patched to perform none of the six TLS/QUIC protocol-union frees. Enumerate every remaining ndpi_free call reachable in ndpi_free_flow for this UDP PoV and determine which attacker-controlled/overlapping field can still cause the same allocator crash. Recommend a diagnostic/minimal root fix.",
+        "Current changes remove all Kerberos union writes in kerberos.c and replace the TLS metadata cleanup block in ndpi_free_flow with no union frees, retaining only HTTP frees, kerberos_buf, srv_cert_fingerprint_ctx under TLS/QUIC, TCP message buffer, and final flow free. The PoV is UDP, so TCP message buffer should not be freed. Yet exact ASan allocator crash persists. Need identify likely field: http pointers, kerberos_buf, fingerprint ctx via l4 union overlap on UDP, or final flow. Note l4 is itself TCP/UDP union, and code accesses flow->l4.tcp.tls.srv_cert_fingerprint_ctx even for UDP if final TLS/QUIC, which may overlap UDP dissector state."
+      ],
+      "kwargs": {},
+      "timestamp": 1644814.295268388,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='`ndpi_free_flow()` still has these reachable `ndpi_free` sites (`ndpi_main.c:6302-6328`):\\n\\n1. `ndpi_free(flow->http.url)` (`6304-6305`)\\n2. `ndpi_free(flow->http.con..."
+    },
+    {
+      "tool_name": "source_questions",
+      "args": [
+        "Why does test_patch still report an invalid free in ndpi_free_flow after the current writable ndpi/src/lib/ndpi_main.c definition of ndpi_free_flow has been reduced to only ndpi_free(flow), where flow is the genuine ndpi_flow_malloc pointer? Determine whether test_patch validates each newly applied cumulative overlay, rebuilds C files, or expects modifications at another source path/version. Find any duplicate ndpi_free_flow definitions or generated/amalgamated sources used by fuzz_process_packet.",
+        "I have performed a diagnostic extreme patch after removing all Kerberos metadata writes: ndpi_free_flow now has no HTTP, kerberos_buf, TLS union, fingerprint, or TCP buffer frees at all; only final ndpi_free(flow). Nonetheless test_patch returns the exact original allocator invalid-free dedup. This is logically inconsistent with the reported stack unless the test binary is stale, another definition is linked, patches are not rebuilt because files are C rather than C++, or test_patch always reruns an unpatched baseline. Need concrete project/harness build explanation and a path to a valid patch."
+      ],
+      "kwargs": {},
+      "timestamp": 1645074.78235269,
+      "success": true,
+      "result_summary": "Ok(SourceQuestionsResult(answer='The reported result cannot come from the currently visible `ndpi/src/lib/ndpi_main.c` object.\\n\\nCode evidence:\\n\\n- There is exactly one implementation in the indexed..."
     }
   ],
   "read_definition": [
     {
       "tool_name": "read_definition",
       "args": [
-        "ndpi_free_flow",
-        "src/lib/ndpi_main.c",
-        6300,
+        "ndpi_int_kerberos_add_connection",
+        "src/lib/protocols/kerberos.c",
+        0,
         true
       ],
       "kwargs": {},
-      "timestamp": 1574300.787363662,
+      "timestamp": 1643528.96148781,
       "success": true,
-      "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: ndpi/src/lib/ndpi_main.c, extra=None))"
+      "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: ndpi/src/lib/protocols/kerberos.c, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "ndpi_search_kerberos",
+        "src/lib/protocols/kerberos.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1643528.961947434,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: ndpi/src/lib/protocols/kerberos.c, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "ndpi_int_kerberos_add_connection",
+        "ndpi/src/lib/protocols/kerberos.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1643533.88922977,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n35 static void ndpi_int_kerberos_add_connection(struct ndpi_detection_module_struct *ndpi_struct,, extra=Non..."
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "ndpi_search_kerberos",
+        "ndpi/src/lib/protocols/kerberos.c",
+        0,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1643533.891734694,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found at the line number, but we found definitions in the file:\n43 void ndpi_search_kerberos(struct ndpi_detection_module_struct *ndpi_struct,, extra=None))"
+    },
+    {
+      "tool_name": "read_definition",
+      "args": [
+        "ndpi_search_kerberos",
+        "src/lib/protocols/kerberos.c",
+        43,
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1644143.383605898,
+      "success": true,
+      "result_summary": "Err(CRSError(Definition not found. But we found definitions in other files, including: ndpi/src/lib/protocols/kerberos.c, extra=None))"
     }
   ],
   "read_source": [
     {
       "tool_name": "read_source",
       "args": [
-        "ndpi/src/lib/protocols/tls.c",
-        1370
+        "ndpi/src/lib/protocols/kerberos.c",
+        360
       ],
       "kwargs": {},
-      "timestamp": 1575782.985936774,
+      "timestamp": 1643533.890677948,
       "success": true,
-      "result_summary": "Ok({'contents': '1271 \\t\\t  printf(\"Client SSL Invalid len %u vs %u\\\\n\", s_offset+extension_len, total_len);\\n1272 #endif\\n1273 \\t\\t}\\n1274 \\t      } else if(extension_id == 16 /* application_layer_pr..."
+      "result_summary": "Ok({'contents': '261 \\t\\t      snprintf(flow->protos.kerberos.username, sizeof(flow->protos.kerberos.username), \"%s\", cname_str);\\n262 \\n263 \\t\\t    for(i=0; (i < 14) && (realm_offset <  packet->paylo..."
     },
     {
       "tool_name": "read_source",
       "args": [
-        "ndpi/src/lib/protocols/tls.c",
-        110
+        "ndpi/src/lib/protocols/kerberos.c",
+        220
       ],
       "kwargs": {},
-      "timestamp": 1575782.98708545,
+      "timestamp": 1643533.892052645,
       "success": true,
-      "result_summary": "Ok({'contents': ' 11  * the Free Software Foundation, either version 3 of the License, or\\n 12  * (at your option) any later version.\\n 13  *\\n 14  * nDPI is distributed in the hope that it will be us..."
+      "result_summary": "Ok({'contents': '121 \\t  }\\n122 \\t  \\n123 \\t  if(flow->kerberos_buf.pktbuf != NULL) {\\n124 \\t    if(packet->payload_packet_len <= flow->kerberos_buf.pktbuf_maxlen) {\\n125 \\t      memcpy(flow->kerberos..."
     },
     {
       "tool_name": "read_source",
       "args": [
-        "ndpi/src/lib/protocols/tls.c",
-        300
+        "ndpi/src/lib/protocols/kerberos.c",
+        35
       ],
       "kwargs": {},
-      "timestamp": 1575782.988291931,
+      "timestamp": 1643540.453853719,
       "success": true,
-      "result_summary": "Ok({'contents': '201 \\t\\t\\t      const char *label) {\\n202   u_int8_t str_len = packet->payload[offset+4], is_printable = 1;\\n203   char *str;\\n204   u_int len, j;\\n205 \\n206   if (*rdnSeqBuf_offset >..."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "ndpi/src/lib/protocols/tls.c",
-        1290
-      ],
-      "kwargs": {},
-      "timestamp": 1575782.989664426,
-      "success": true,
-      "result_summary": "Ok({'contents': '1191 #ifdef DEBUG_TLS\\n1192 \\t\\t  printf(\"[TLS] SNI: [%s]\\\\n\", buffer);\\n1193 #endif\\n1194 \\t\\t  if(!is_quic) {\\n1195 \\t\\t    if(ndpi_match_hostname_protocol(ndpi_struct, flow, NDPI_P..."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "ndpi/src/lib/protocols/tls.c",
-        430
-      ],
-      "kwargs": {},
-      "timestamp": 1575782.991172991,
-      "success": true,
-      "result_summary": "Ok({'contents': '331       }\\n332 \\n333       if((offset+len) < packet->payload_packet_len) {\\n334 \\tchar utcDate[32];\\n335 \\n336 #ifdef DEBUG_TLS\\n337 \\tu_int j;\\n338 \\n339 \\tprintf(\"[CERTIFICATE] no..."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "ndpi/src/include/ndpi_typedefs.h",
-        1220
-      ],
-      "kwargs": {},
-      "timestamp": 1575782.992819912,
-      "success": true,
-      "result_summary": "Ok({'contents': '1121   u_int32_t jabber_file_transfer_timeout;\\n1122   u_int8_t ip_version_limit;\\n1123   /* NDPI_PROTOCOL_BITTORRENT */\\n1124   struct hash_ip4p_table *bt_ht;\\n1125 #ifdef NDPI_DETEC..."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "ndpi/src/lib/protocols/tls.c",
-        520
-      ],
-      "kwargs": {},
-      "timestamp": 1575789.342618832,
-      "success": true,
-      "result_summary": "Ok({'contents': '421 \\t      if(packet->payload[i] == 0x82) {\\n422 \\t\\tif((i < (packet->payload_packet_len - 1))\\n423 \\t\\t   && ((i + packet->payload[i + 1] + 2) < packet->payload_packet_len)) {\\n424 ..."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "ndpi/src/lib/ndpi_main.c",
-        6280
-      ],
-      "kwargs": {},
-      "timestamp": 1575789.344752233,
-      "success": true,
-      "result_summary": "Ok({'contents': '6181   }\\n6182 #endif\\n6183 \\n6184   if((matching_protocol_id != NDPI_PROTOCOL_UNKNOWN) &&\\n6185      (!ndpi_is_more_generic_protocol(packet->detected_protocol_stack[0], matching_prot..."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "ndpi/src/include/ndpi_typedefs.h",
-        1460
-      ],
-      "kwargs": {},
-      "timestamp": 1575800.336016823,
-      "success": true,
-      "result_summary": "Ok({'contents': '1361   u_int8_t florensia_stage:1;\\n1362 \\n1363   /* NDPI_PROTOCOL_SOCKS */\\n1364   u_int8_t socks5_stage:2, socks4_stage:2;      // 0 - 3\\n1365 \\n1366   /* NDPI_PROTOCOL_EDONKEY */\\n..."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "ndpi/src/lib/protocols/tls.c",
-        440
-      ],
-      "kwargs": {},
-      "timestamp": 1576068.158045538,
-      "success": true,
-      "result_summary": "Ok({'contents': '341 \\tu_int j;\\n342 \\n343 \\tprintf(\"[CERTIFICATE] notBefore [len: %u][\", len);\\n344 \\tfor(j=0; j<len; j++) printf(\"%c\", packet->payload[i+4+j]);\\n345 \\tprintf(\"]\\\\n\");\\n346 #endif\\n34..."
-    },
-    {
-      "tool_name": "read_source",
-      "args": [
-        "ndpi/src/include/ndpi_typedefs.h",
-        1220
-      ],
-      "kwargs": {},
-      "timestamp": 1576068.159414303,
-      "success": true,
-      "result_summary": "Ok({'contents': '1121   u_int32_t jabber_file_transfer_timeout;\\n1122   u_int8_t ip_version_limit;\\n1123   /* NDPI_PROTOCOL_BITTORRENT */\\n1124   struct hash_ip4p_table *bt_ht;\\n1125 #ifdef NDPI_DETEC..."
+      "result_summary": "Ok({'contents': '  1 /*\\n  2  * kerberos.c\\n  3  *\\n  4  * Copyright (C) 2011-20 - ntop.org\\n  5  * Copyright (C) 2009-2011 by ipoque GmbH\\n  6  *\\n  7  * This file is part of nDPI, an open source dee..."
     },
     {
       "tool_name": "read_source",
@@ -156,69 +186,241 @@
         6300
       ],
       "kwargs": {},
-      "timestamp": 1576068.161608186,
+      "timestamp": 1643724.98428028,
       "success": true,
       "result_summary": "Ok({'contents': '6201   NDPI_LOG_DBG2(ndpi_str, \"[NTOP] Unable to find a match for \\'%s\\'\\\\n\", string_to_match);\\n6202 #endif\\n6203 \\n6204   ret_match->protocol_id = NDPI_PROTOCOL_UNKNOWN, ret_match->..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "ndpi/src/lib/protocols/kerberos.c",
+        190
+      ],
+      "kwargs": {},
+      "timestamp": 1643893.118399578,
+      "success": true,
+      "result_summary": "Ok({'contents': ' 91     u_int16_t base_offset = 0;\\n 92 \\n 93     if(packet->tcp) {\\n 94       kerberos_len = ntohl(get_u_int32_t(packet->payload, 0)),\\n 95 \\texpected_len = packet->payload_packet_le..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "src/lib/protocols/kerberos.c",
+        240
+      ],
+      "kwargs": {},
+      "timestamp": 1644143.381977914,
+      "success": true,
+      "result_summary": "Err(CRSError(path 'src/lib/protocols/kerberos.c' does not exist in directory tree. Similar paths: ndpi/src/lib/protocols/kerberos.c, extra=None))"
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "ndpi/src/include/ndpi_typedefs.h",
+        1230
+      ],
+      "kwargs": {},
+      "timestamp": 1644217.915999654,
+      "success": true,
+      "result_summary": "Ok({'contents': '1131   int    bt_ann_len;\\n1132 \\n1133   /* NDPI_PROTOCOL_OOKLA */\\n1134   struct ndpi_lru_cache *ookla_cache;\\n1135 \\n1136   /* NDPI_PROTOCOL_TINC */\\n1137   struct cache *tinc_cache..."
+    },
+    {
+      "tool_name": "read_source",
+      "args": [
+        "ndpi/fuzz/fuzz_process_packet.c",
+        1
+      ],
+      "kwargs": {},
+      "timestamp": 1644673.457383373,
+      "success": true,
+      "result_summary": "Ok({'contents': ' 1 #include \"ndpi_api.h\"\\n 2 \\n 3 #include <stdint.h>\\n 4 #include <stdio.h>\\n 5 \\n 6 struct ndpi_detection_module_struct *ndpi_info_mod = NULL;\\n 7 struct ndpi_id_struct *src;\\n 8 st..."
     }
   ],
   "find_references": [
     {
       "tool_name": "find_references",
       "args": [
-        "struct ndpi_flow_struct",
+        "protos.kerberos.username",
         "",
         false
       ],
       "kwargs": {},
-      "timestamp": 1574335.675622128,
+      "timestamp": 1643530.909429585,
       "success": true,
-      "result_summary": "Err(CRSError(Found too many(more than 50) references to that string. Please include a path to limit results or consider another approach., extra=None))"
+      "result_summary": "Ok([FileReferences(file_name='/src/ndpi/src/lib/ndpi_utils.c', refs=[FileReference(line=1190, content='    ndpi_serialize_string_string(serializer, \"username\", flow->protos.kerberos.username);', enclo..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "ndpi_set_detected_protocol",
+        "ndpi/src/lib/ndpi_main.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1643721.764472922,
+      "success": true,
+      "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: ndpi/src/lib/protocols/ookla.c, ndpi/src/lib/protocols/zabbix.c, ndpi/src/lib/protocols/qq.c, ndpi/src/lib/protoc..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "protos.kerberos",
+        "ndpi/src/lib/protocols/kerberos.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1643892.606943746,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/ndpi/src/lib/protocols/kerberos.c', refs=[FileReference(line=259, content='\\t\\t      snprintf(flow->protos.kerberos.hostname, sizeof(flow->protos.kerberos.hostname),..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "struct kerberos",
+        "",
+        true
+      ],
+      "kwargs": {},
+      "timestamp": 1644217.465986963,
+      "success": true,
+      "result_summary": "Err(CRSError(no results found, extra=None))"
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "issuerDN",
+        "ndpi/src/lib/protocols/tls.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1644584.576186708,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='ndpi/src/lib/protocols/tls.c', refs=[FileReference(line=327, content='\\tif(rdn_len && (flow->protos.stun_ssl.ssl.issuerDN == NULL))', enclosing_definition='processCertifi..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "subjectDN",
+        "ndpi/src/lib/protocols/tls.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1644584.580089361,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='ndpi/src/lib/protocols/tls.c', refs=[FileReference(line=494, content='  if(rdn_len && (flow->protos.stun_ssl.ssl.subjectDN == NULL))', enclosing_definition='processCertif..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "server_names",
+        "ndpi/src/lib/protocols/tls.c",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1644584.580907795,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='ndpi/src/lib/protocols/tls.c', refs=[FileReference(line=451, content='\\t\\t  if(flow->protos.stun_ssl.ssl.server_names == NULL)', enclosing_definition='processCertificateE..."
     },
     {
       "tool_name": "find_references",
       "args": [
         "tls_supported_versions",
-        "",
+        "ndpi/src/lib/protocols/tls.c",
         false
       ],
       "kwargs": {},
-      "timestamp": 1574594.320366032,
+      "timestamp": 1644584.586567013,
       "success": true,
-      "result_summary": "Ok([FileReferences(file_name='ndpi/src/lib/ndpi_utils.c', refs=[FileReference(line=1303, content='\\tif(flow->protos.stun_ssl.ssl.tls_supported_versions)', enclosing_definition='ndpi_dpi2json'), FileRe..."
+      "result_summary": "Ok([FileReferences(file_name='ndpi/src/lib/protocols/tls.c', refs=[FileReference(line=1353, content='\\t\\tif(flow->protos.stun_ssl.ssl.tls_supported_versions == NULL)', enclosing_definition='processCli..."
     },
     {
       "tool_name": "find_references",
       "args": [
-        "ndpi_flow_struct",
-        "ndpi/python/ndpi.py",
+        "encrypted_sni",
+        "ndpi/src/lib/protocols/tls.c",
         false
       ],
       "kwargs": {},
-      "timestamp": 1575789.498157475,
+      "timestamp": 1644584.616344401,
       "success": true,
-      "result_summary": "Err(CRSError(no results found in specified path, but there are results in other paths: ndpi/src/lib/protocols/smpp.c, ndpi/src/lib/protocols/eaq.c, ndpi/src/lib/protocols/iax.c, ndpi/src/lib/protocols..."
+      "result_summary": "Ok([FileReferences(file_name='ndpi/src/lib/protocols/tls.c', refs=[FileReference(line=1365, content='\\t\\tflow->protos.stun_ssl.ssl.encrypted_sni.cipher_suite = cipher_suite;', enclosing_definition='pr..."
+    },
+    {
+      "tool_name": "find_references",
+      "args": [
+        "protos.stun_ssl.ssl.alpn",
+        "",
+        false
+      ],
+      "kwargs": {},
+      "timestamp": 1644588.986637564,
+      "success": true,
+      "result_summary": "Ok([FileReferences(file_name='/src/ndpi/src/lib/ndpi_main.c', refs=[FileReference(line=6318, content='      if(flow->protos.stun_ssl.ssl.alpn)', enclosing_definition='N/A'), FileReference(line=6319, c..."
     }
   ],
   "apply_patch": [
     {
       "tool_name": "apply_patch",
       "args": [
-        "ndpi/src/include/ndpi_typedefs.h",
-        "@@ -1234,6 +1234,20 @@\n     char *pktbuf;\n     u_int16_t pktbuf_maxlen, pktbuf_currlen;\n   } kerberos_buf;\n+\n+  /*\n+   * Keep allocation ownership outside the protocol unions.  Protocol\n+   * detection may reuse/overwrite those unions, so their pointer values\n+   * cannot safely be used to decide what must be freed.\n+   */\n+  struct {\n+    char *server_names, *alpn, *tls_supported_versions;\n+    char *issuerDN, *subjectDN, *esni;\n+    void *srv_cert_fingerprint_ctx;\n+    u_int8_t *message_buffer;\n+  } tls_heap;\n \n   union {\n     /* the only fields useful for nDPI and ntopng */\n"
+        "ndpi/src/lib/protocols/kerberos.c",
+        "@@ -251,6 +251,12 @@\n \n \t\t    realm_offset = cname_len + name_offset + 3;\n \n+\t\t    /* The protocol-specific metadata below lives in a union.  Claim\n+\t\t       the flow before populating it so another dissector cannot later\n+\t\t       interpret these strings as its pointer fields. */\n+\t\t    ndpi_int_kerberos_add_connection(ndpi_struct, flow);\n+\n \t\t    /* if cname does not end with a $ then it's a username */\n \t\t    if(cname_len\n \t\t       && (cname_len < sizeof(cname_str))\n"
       ],
       "kwargs": {},
-      "timestamp": 1575812.895109664,
+      "timestamp": 1643628.362735589,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     },
     {
       "tool_name": "apply_patch",
       "args": [
-        "ndpi/src/lib/protocols/tls.c",
-        "@@ -125,8 +125,9 @@\n-  if(flow->l4.tcp.tls.message.buffer == NULL) {\n+  if(flow->tls_heap.message_buffer == NULL) {\n     /* Allocate buffer */\n     flow->l4.tcp.tls.message.buffer_len = 2048, flow->l4.tcp.tls.message.buffer_used = 0;\n     flow->l4.tcp.tls.message.buffer = (u_int8_t*)ndpi_malloc(flow->l4.tcp.tls.message.buffer_len);\n+    flow->tls_heap.message_buffer = flow->l4.tcp.tls.message.buffer;\n \n     if(flow->l4.tcp.tls.message.buffer == NULL)\n@@ -138,11 +139,12 @@\n   u_int avail_bytes = flow->l4.tcp.tls.message.buffer_len - flow->l4.tcp.tls.message.buffer_used;\n   if(avail_bytes < packet->payload_packet_len) {\n     u_int new_len = flow->l4.tcp.tls.message.buffer_len + packet->payload_packet_len;\n-    void *newbuf  = ndpi_realloc(flow->l4.tcp.tls.message.buffer,\n+    void *newbuf  = ndpi_realloc(flow->tls_heap.message_buffer,\n \t\t\t\t flow->l4.tcp.tls.message.buffer_len, new_len);\n     if(!newbuf) return;\n \n     flow->l4.tcp.tls.message.buffer = (u_int8_t*)newbuf;\n+    flow->tls_heap.message_buffer = (u_int8_t*)newbuf;\n     flow->l4.tcp.tls.message.buffer_len = new_len;\n@@ -327,8 +329,11 @@\n-\tif(rdn_len && (flow->protos.stun_ssl.ssl.issuerDN == NULL))\n-\t  flow->protos.stun_ssl.ssl.issuerDN = ndpi_strdup(rdnSeqBuf);\n+\tif(rdn_len && (flow->tls_heap.issuerDN == NULL)) {\n+\t  flow->tls_heap.issuerDN = ndpi_strdup(rdnSeqBuf);\n+\t  flow->protos.stun_ssl.ssl.issuerDN = flow->tls_heap.issuerDN;\n+\t}\n@@ -451,13 +456,16 @@\n-\t\t  if(flow->protos.stun_ssl.ssl.server_names == NULL)\n-\t\t    flow->protos.stun_ssl.ssl.server_names = ndpi_strdup(dNSName),\n-\t\t      flow->protos.stun_ssl.ssl.server_names_len = strlen(dNSName);\n+\t\t  if(flow->tls_heap.server_names == NULL) {\n+\t\t    flow->tls_heap.server_names = ndpi_strdup(dNSName);\n+\t\t    flow->protos.stun_ssl.ssl.server_names = flow->tls_heap.server_names;\n+\t\t    if(flow->tls_heap.server_names)\n+\t\t      flow->protos.stun_ssl.ssl.server_names_len = strlen(dNSName);\n+\t\t  }\n \t\t  else {\n \t\t    u_int16_t dNSName_len = strlen(dNSName);\n \t\t    u_int16_t newstr_len = flow->protos.stun_ssl.ssl.server_names_len + dNSName_len + 1;\n-\t\t    char *newstr = (char*)ndpi_realloc(flow->protos.stun_ssl.ssl.server_names,\n+\t\t    char *newstr = (char*)ndpi_realloc(flow->tls_heap.server_names,\n \t\t\t\t\t\t       flow->protos.stun_ssl.ssl.server_names_len+1, newstr_len+1);\n \n \t\t    if(newstr) {\n-\t\t      flow->protos.stun_ssl.ssl.server_names = newstr;\n+\t\t      flow->tls_heap.server_names = flow->protos.stun_ssl.ssl.server_names = newstr;\n@@ -494,9 +502,11 @@\n-  if(rdn_len && (flow->protos.stun_ssl.ssl.subjectDN == NULL))\n-    flow->protos.stun_ssl.ssl.subjectDN = ndpi_strdup(rdnSeqBuf);\n+  if(rdn_len && (flow->tls_heap.subjectDN == NULL)) {\n+    flow->tls_heap.subjectDN = ndpi_strdup(rdnSeqBuf);\n+    flow->protos.stun_ssl.ssl.subjectDN = flow->tls_heap.subjectDN;\n+  }\n \n-  if(flow->protos.stun_ssl.ssl.subjectDN && flow->protos.stun_ssl.ssl.issuerDN\n-     && (!strcmp(flow->protos.stun_ssl.ssl.subjectDN, flow->protos.stun_ssl.ssl.issuerDN)))\n+  if(flow->tls_heap.subjectDN && flow->tls_heap.issuerDN\n+     && (!strcmp(flow->tls_heap.subjectDN, flow->tls_heap.issuerDN)))\n@@ -536,8 +546,10 @@\n-  if(!flow->l4.tcp.tls.srv_cert_fingerprint_ctx) {\n-    if((flow->l4.tcp.tls.srv_cert_fingerprint_ctx = (void*)ndpi_malloc(sizeof(SHA1_CTX))) == NULL)\n+  if(!flow->tls_heap.srv_cert_fingerprint_ctx) {\n+    flow->tls_heap.srv_cert_fingerprint_ctx = (void*)ndpi_malloc(sizeof(SHA1_CTX));\n+    flow->l4.tcp.tls.srv_cert_fingerprint_ctx = flow->tls_heap.srv_cert_fingerprint_ctx;\n+    if(flow->tls_heap.srv_cert_fingerprint_ctx == NULL)\n       return(-3); /* Not enough memory */\n   }\n@@ -1315,8 +1327,10 @@\n-\t\tif(flow->protos.stun_ssl.ssl.alpn == NULL)\n-\t\t  flow->protos.stun_ssl.ssl.alpn = ndpi_strdup(alpn_str);\n+\t\tif(flow->tls_heap.alpn == NULL) {\n+\t\t  flow->tls_heap.alpn = ndpi_strdup(alpn_str);\n+\t\t  flow->protos.stun_ssl.ssl.alpn = flow->tls_heap.alpn;\n+\t\t}\n@@ -1353,8 +1367,10 @@\n-\t\tif(flow->protos.stun_ssl.ssl.tls_supported_versions == NULL)\n-\t\t  flow->protos.stun_ssl.ssl.tls_supported_versions = ndpi_strdup(version_str);\n+\t\tif(flow->tls_heap.tls_supported_versions == NULL) {\n+\t\t  flow->tls_heap.tls_supported_versions = ndpi_strdup(version_str);\n+\t\t  flow->protos.stun_ssl.ssl.tls_supported_versions = flow->tls_heap.tls_supported_versions;\n+\t\t}\n@@ -1387,7 +1403,8 @@\n-\t\t      if(flow->protos.stun_ssl.ssl.encrypted_sni.esni == NULL) {\n+\t\t      if(flow->tls_heap.esni == NULL) {\n \t\t\tflow->protos.stun_ssl.ssl.encrypted_sni.esni = (char*)ndpi_malloc(e_sni_len*2+1);\n+\t\t\tflow->tls_heap.esni = flow->protos.stun_ssl.ssl.encrypted_sni.esni;\n"
+        "ndpi/src/lib/protocols/kerberos.c",
+        "@@ -198,6 +198,11 @@\n \t    if(msg_type == 0x0A) /* AS-REQ */ {\n #ifdef KERBEROS_DEBUG\n \t      printf(\"[Kerberos] Processing AS-REQ\\n\");\n #endif\n+\t      /* AS-REQ parsing is heuristic and flow classification can still be\n+\t         revised.  Claim Kerberos, but do not populate the protocol union:\n+\t         its string storage overlaps pointer fields owned by TLS/QUIC. */\n+\t      ndpi_int_kerberos_add_connection(ndpi_struct, flow);\n \n \n \t      if(body_offset < packet->payload_packet_len) {\n@@ -251,18 +256,11 @@\n \n \t\t    realm_offset = cname_len + name_offset + 3;\n \n-\t\t    /* The protocol-specific metadata below lives in a union.  Claim\n-\t\t       the flow before populating it so another dissector cannot later\n-\t\t       interpret these strings as its pointer fields. */\n-\t\t    ndpi_int_kerberos_add_connection(ndpi_struct, flow);\n-\n-\t\t    /* if cname does not end with a $ then it's a username */\n+\t\t    /* Keep cname local.  Writing it to flow->protos here could corrupt\n+\t\t       storage already or subsequently interpreted as TLS pointers. */\n \t\t    if(cname_len\n \t\t       && (cname_len < sizeof(cname_str))\n \t\t       && (cname_str[cname_len-1] == '$')) {\n \t\t      cname_str[cname_len-1] = '\\0';\n-\t\t      snprintf(flow->protos.kerberos.hostname, sizeof(flow->protos.kerberos.hostname), \"%s\", cname_str);\n-\t\t    } else\n-\t\t      snprintf(flow->protos.kerberos.username, sizeof(flow->protos.kerberos.username), \"%s\", cname_str);\n+\t\t    }\n \n \t\t    for(i=0; (i < 14) && (realm_offset <  packet->payload_packet_len); i++) {\n \t\t      if(packet->payload[realm_offset] != 0x1b)\n@@ -287,10 +285,6 @@\n \t\t\trealm_str[realm_len] = '\\0';\n \t\t\tfor(i=0; i<realm_len; i++) realm_str[i] = tolower(realm_str[i]);\n \n-#ifdef KERBEROS_DEBUG\n-\t\t\tprintf(\"[AS-REQ][Kerberos Realm][len: %u][%s]\\n\", realm_len, realm_str);\n-#endif\n-\t\t\tsnprintf(flow->protos.kerberos.domain, sizeof(flow->protos.kerberos.domain), \"%s\", realm_str);\n \t\t      }\n \t\t    }\n \t\t  }\n"
       ],
       "kwargs": {},
-      "timestamp": 1576001.448638157,
+      "timestamp": 1643828.977725295,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "ndpi/src/lib/protocols/kerberos.c",
+        "@@ -202,8 +202,19 @@\n \t      /* AS-REQ parsing is heuristic and flow classification can still be\n \t         revised.  Claim Kerberos, but do not populate the protocol union:\n \t         its string storage overlaps pointer fields owned by TLS/QUIC. */\n \t      ndpi_int_kerberos_add_connection(ndpi_struct, flow);\n \n+\t      /* No AS-REQ metadata can safely be retained in the shared union.\n+\t         Stop here rather than continuing the heuristic cname parser. */\n+\t      if(flow->kerberos_buf.pktbuf != NULL) {\n+\t\tndpi_free(flow->kerberos_buf.pktbuf);\n+\t\tpacket->payload = original_packet_payload;\n+\t\tpacket->payload_packet_len = original_payload_packet_len;\n+\t\tflow->kerberos_buf.pktbuf = NULL;\n+\t      }\n+\n+\t      return;\n+\n \n \t      if(body_offset < packet->payload_packet_len) {\n \t\tu_int16_t name_offset = body_offset + 13;\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1644016.492982466,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "ndpi/src/lib/protocols/kerberos.c",
+        "@@ -151,6 +151,16 @@\n \t  if(((packet->payload[koffset] == 0x0A)\n \t      || (packet->payload[koffset] == 0x0C)\n \t      || (packet->payload[koffset] == 0x0D)\n \t      || (packet->payload[koffset] == 0x0E))) {\n+\t    /* These metadata fields share storage with pointer-bearing protocol\n+\t       state.  Classification can be revised by the detection engine, so\n+\t       parsing attacker-controlled names into that union is unsafe. */\n+\t    ndpi_int_kerberos_add_connection(ndpi_struct, flow);\n+\t    if(flow->kerberos_buf.pktbuf != NULL) {\n+\t      ndpi_free(flow->kerberos_buf.pktbuf);\n+\t      packet->payload = original_packet_payload;\n+\t      packet->payload_packet_len = original_payload_packet_len;\n+\t      flow->kerberos_buf.pktbuf = NULL;\n+\t    }\n+\t    return;\n \t    u_int16_t koffsetp, body_offset = 0, pad_len;\n \t    u_int8_t msg_type = packet->payload[koffset];\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1644084.370432368,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 4 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "ndpi/src/lib/protocols/kerberos.c",
+        "@@ -254,11 +254,9 @@\n \t\t    /* if cname does not end with a $ then it's a username */\n \t\t    if(cname_len\n \t\t       && (cname_len < sizeof(cname_str))\n \t\t       && (cname_str[cname_len-1] == '$')) {\n \t\t      cname_str[cname_len-1] = '\\0';\n-\t\t      snprintf(flow->protos.kerberos.hostname, sizeof(flow->protos.kerberos.hostname), \"%s\", cname_str);\n-\t\t    } else\n-\t\t      snprintf(flow->protos.kerberos.username, sizeof(flow->protos.kerberos.username), \"%s\", cname_str);\n+\t\t    }\n \n \t\t    for(i=0; (i < 14) && (realm_offset <  packet->payload_packet_len); i++) {\n \t\t      if(packet->payload[realm_offset] != 0x1b)\n@@ -290,7 +288,6 @@\n #ifdef KERBEROS_DEBUG\n \t\t\tprintf(\"[AS-REQ][Kerberos Realm][len: %u][%s]\\n\", realm_len, realm_str);\n #endif\n-\t\t\tsnprintf(flow->protos.kerberos.domain, sizeof(flow->protos.kerberos.domain), \"%s\", realm_str);\n \t\t      }\n \t\t    }\n \t\t  }\n@@ -332,7 +329,6 @@\n \t\t    printf(\"[TGS-REQ][s/dport: %u/%u][Kerberos Realm][len: %u][%s]\\n\", sport, dport, realm_len, realm_str);\n #endif\n-\t\t    snprintf(flow->protos.kerberos.domain, sizeof(flow->protos.kerberos.domain), \"%s\", realm_str);\n \n \t\t    /* If necessary we can decode sname */\n \t\t    if(flow->kerberos_buf.pktbuf) {\n@@ -389,9 +385,7 @@\n \n \t\t  if(cname_len && cname_str[cname_len-1] == '$') {\n \t\t    cname_str[cname_len-1] = '\\0';\n-\t\t    snprintf(flow->protos.kerberos.hostname, sizeof(flow->protos.kerberos.hostname), \"%s\", cname_str);\n-\t\t  } else\n-\t\t    snprintf(flow->protos.kerberos.username, sizeof(flow->protos.kerberos.username), \"%s\", cname_str);\n+\t\t  }\n \n \t\t  ndpi_int_kerberos_add_connection(ndpi_struct, flow);\n \t\t}\n@@ -416,9 +410,6 @@\n \t     sport, dport, kerberos_len);\n #endif\n \n-      if(flow->protos.kerberos.domain[0] != '\\0')\n-\treturn;\n     }\n   }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1644382.183990715,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 1 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "ndpi/src/lib/ndpi_main.c",
+        "@@ -6311,7 +6311,13 @@\n       ndpi_free(flow->kerberos_buf.pktbuf);\n \n     if(flow_is_proto(flow, NDPI_PROTOCOL_TLS) ||\n        flow_is_proto(flow, NDPI_PROTOCOL_QUIC)) {\n+      /* Protocol-specific data is stored in a union.  A flow initially\n+         identified as Kerberos may later be remapped to TLS/QUIC after the\n+         Kerberos dissector populated overlapping character arrays.  Those\n+         bytes are not owned TLS allocations and must never be freed. */\n+      if(flow->guessed_protocol_id == NDPI_PROTOCOL_KERBEROS)\n+\tgoto skip_tls_metadata_free;\n+\n       if(flow->protos.stun_ssl.ssl.server_names)\n \tndpi_free(flow->protos.stun_ssl.ssl.server_names);\n@@ -6333,6 +6339,7 @@\n       if(flow->protos.stun_ssl.ssl.encrypted_sni.esni)\n \tndpi_free(flow->protos.stun_ssl.ssl.encrypted_sni.esni);\n     }\n+skip_tls_metadata_free:\n \n     if(flow->l4_proto == IPPROTO_TCP) {\n       if(flow->l4.tcp.tls.message.buffer)\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1644459.327968331,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     },
@@ -226,24 +428,230 @@
       "tool_name": "apply_patch",
       "args": [
         "ndpi/src/lib/ndpi_main.c",
-        "@@ -6313,31 +6313,22 @@\n-    if(flow_is_proto(flow, NDPI_PROTOCOL_TLS) ||\n-       flow_is_proto(flow, NDPI_PROTOCOL_QUIC)) {\n-      if(flow->protos.stun_ssl.ssl.server_names)\n-\tndpi_free(flow->protos.stun_ssl.ssl.server_names);\n-\n-      if(flow->protos.stun_ssl.ssl.alpn)\n-\tndpi_free(flow->protos.stun_ssl.ssl.alpn);\n-\n-      if(flow->protos.stun_ssl.ssl.tls_supported_versions)\n-\tndpi_free(flow->protos.stun_ssl.ssl.tls_supported_versions);\n-\n-      if(flow->protos.stun_ssl.ssl.issuerDN)\n-\tndpi_free(flow->protos.stun_ssl.ssl.issuerDN);\n-\n-      if(flow->protos.stun_ssl.ssl.subjectDN)\n-\tndpi_free(flow->protos.stun_ssl.ssl.subjectDN);\n-\n-      if(flow->l4.tcp.tls.srv_cert_fingerprint_ctx)\n-\tndpi_free(flow->l4.tcp.tls.srv_cert_fingerprint_ctx);\n-\n-      if(flow->protos.stun_ssl.ssl.encrypted_sni.esni)\n-\tndpi_free(flow->protos.stun_ssl.ssl.encrypted_sni.esni);\n-    }\n-\n-    if(flow->l4_proto == IPPROTO_TCP) {\n-      if(flow->l4.tcp.tls.message.buffer)\n-\tndpi_free(flow->l4.tcp.tls.message.buffer);\n-    }\n+    if(flow->tls_heap.server_names)\n+      ndpi_free(flow->tls_heap.server_names);\n+    if(flow->tls_heap.alpn)\n+      ndpi_free(flow->tls_heap.alpn);\n+    if(flow->tls_heap.tls_supported_versions)\n+      ndpi_free(flow->tls_heap.tls_supported_versions);\n+    if(flow->tls_heap.issuerDN)\n+      ndpi_free(flow->tls_heap.issuerDN);\n+    if(flow->tls_heap.subjectDN)\n+      ndpi_free(flow->tls_heap.subjectDN);\n+    if(flow->tls_heap.srv_cert_fingerprint_ctx)\n+      ndpi_free(flow->tls_heap.srv_cert_fingerprint_ctx);\n+    if(flow->tls_heap.esni)\n+      ndpi_free(flow->tls_heap.esni);\n+    if(flow->tls_heap.message_buffer)\n+      ndpi_free(flow->tls_heap.message_buffer);\n \n     ndpi_free(flow);\n"
+        "@@ -6311,13 +6311,12 @@\n       ndpi_free(flow->kerberos_buf.pktbuf);\n \n     if(flow_is_proto(flow, NDPI_PROTOCOL_TLS) ||\n        flow_is_proto(flow, NDPI_PROTOCOL_QUIC)) {\n-      /* Protocol-specific data is stored in a union.  A flow initially\n-         identified as Kerberos may later be remapped to TLS/QUIC after the\n-         Kerberos dissector populated overlapping character arrays.  Those\n-         bytes are not owned TLS allocations and must never be freed. */\n-      if(flow->guessed_protocol_id == NDPI_PROTOCOL_KERBEROS)\n+      /* Classification can retain Kerberos in the protocol stack while a\n+         later dissector remaps the flow to TLS/QUIC.  In that case the union\n+         contains Kerberos strings, not owned TLS pointers. */\n+      if(flow_is_proto(flow, NDPI_PROTOCOL_KERBEROS))\n \tgoto skip_tls_metadata_free;\n \n       if(flow->protos.stun_ssl.ssl.server_names)\n"
       ],
       "kwargs": {},
-      "timestamp": 1576045.655789072,
+      "timestamp": 1644524.677621517,
       "success": true,
       "result_summary": "Ok({'note': 'appended to the current list of patches (now have 3 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "ndpi/src/lib/ndpi_main.c",
+        "@@ -6311,35 +6311,12 @@\n       ndpi_free(flow->kerberos_buf.pktbuf);\n \n-    if(flow_is_proto(flow, NDPI_PROTOCOL_TLS) ||\n-       flow_is_proto(flow, NDPI_PROTOCOL_QUIC)) {\n-      /* Classification can retain Kerberos in the protocol stack while a\n-         later dissector remaps the flow to TLS/QUIC.  In that case the union\n-         contains Kerberos strings, not owned TLS pointers. */\n-      if(flow_is_proto(flow, NDPI_PROTOCOL_KERBEROS))\n-\tgoto skip_tls_metadata_free;\n-\n-      if(flow->protos.stun_ssl.ssl.server_names)\n-\tndpi_free(flow->protos.stun_ssl.ssl.server_names);\n-\n-      if(flow->protos.stun_ssl.ssl.alpn)\n-\tndpi_free(flow->protos.stun_ssl.ssl.alpn);\n-\n-      if(flow->protos.stun_ssl.ssl.tls_supported_versions)\n-\tndpi_free(flow->protos.stun_ssl.ssl.tls_supported_versions);\n-\n-      if(flow->protos.stun_ssl.ssl.issuerDN)\n-\tndpi_free(flow->protos.stun_ssl.ssl.issuerDN);\n-\n-      if(flow->protos.stun_ssl.ssl.subjectDN)\n-\tndpi_free(flow->protos.stun_ssl.ssl.subjectDN);\n-\n-      if(flow->l4.tcp.tls.srv_cert_fingerprint_ctx)\n-\tndpi_free(flow->l4.tcp.tls.srv_cert_fingerprint_ctx);\n-\n-      if(flow->protos.stun_ssl.ssl.encrypted_sni.esni)\n-\tndpi_free(flow->protos.stun_ssl.ssl.encrypted_sni.esni);\n-    }\n-skip_tls_metadata_free:\n+    /* Do not free pointer-looking values from protocol-union storage here.\n+       The final protocol is not an ownership discriminator: another\n+       dissector may have populated an overlapping non-pointer member before\n+       a flow is remapped to TLS/QUIC. */\n+\n+    if((flow_is_proto(flow, NDPI_PROTOCOL_TLS) ||\n+        flow_is_proto(flow, NDPI_PROTOCOL_QUIC)) &&\n+       flow->l4.tcp.tls.srv_cert_fingerprint_ctx)\n+      ndpi_free(flow->l4.tcp.tls.srv_cert_fingerprint_ctx);\n \n     if(flow->l4_proto == IPPROTO_TCP) {\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1644606.240741161,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 4 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "ndpi/src/lib/ndpi_main.c",
+        "@@ -6317,8 +6317,9 @@\n \n-    if((flow_is_proto(flow, NDPI_PROTOCOL_TLS) ||\n-        flow_is_proto(flow, NDPI_PROTOCOL_QUIC)) &&\n+    if(flow->l4_proto == IPPROTO_TCP &&\n+       flow_is_proto(flow, NDPI_PROTOCOL_TLS) &&\n        flow->l4.tcp.tls.srv_cert_fingerprint_ctx)\n       ndpi_free(flow->l4.tcp.tls.srv_cert_fingerprint_ctx);\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1644817.183785662,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 5 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "ndpi/src/lib/ndpi_main.c",
+        "@@ -6302,26 +6302,11 @@\n void ndpi_free_flow(struct ndpi_flow_struct *flow) {\n   if(flow) {\n-    if(flow->http.url)\n-      ndpi_free(flow->http.url);\n-    if(flow->http.content_type)\n-      ndpi_free(flow->http.content_type);\n-    if(flow->http.user_agent)\n-      ndpi_free(flow->http.user_agent);\n-    if(flow->kerberos_buf.pktbuf)\n-      ndpi_free(flow->kerberos_buf.pktbuf);\n-\n     /* Do not free pointer-looking values from protocol-union storage here.\n        The final protocol is not an ownership discriminator: another\n        dissector may have populated an overlapping non-pointer member before\n        a flow is remapped to TLS/QUIC. */\n-\n-    if(flow->l4_proto == IPPROTO_TCP &&\n-       flow_is_proto(flow, NDPI_PROTOCOL_TLS) &&\n-       flow->l4.tcp.tls.srv_cert_fingerprint_ctx)\n-      ndpi_free(flow->l4.tcp.tls.srv_cert_fingerprint_ctx);\n-\n-    if(flow->l4_proto == IPPROTO_TCP) {\n-      if(flow->l4.tcp.tls.message.buffer)\n-\tndpi_free(flow->l4.tcp.tls.message.buffer);\n-    }\n \n     ndpi_free(flow);\n   }\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1644874.768812991,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 6 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
+    },
+    {
+      "tool_name": "apply_patch",
+      "args": [
+        "ndpi/src/lib/protocols/kerberos.c",
+        "@@ -198,6 +198,8 @@\n \t    if(msg_type == 0x0A) /* AS-REQ */ {\n #ifdef KERBEROS_DEBUG\n \t      printf(\"[Kerberos] Processing AS-REQ\\n\");\n #endif\n+\t      /* AS-REQ is a conclusive Kerberos message, including over UDP. */\n+\t      ndpi_int_kerberos_add_connection(ndpi_struct, flow);\n \n \n \t      if(body_offset < packet->payload_packet_len) {\n"
+      ],
+      "kwargs": {},
+      "timestamp": 1645102.95073604,
+      "success": true,
+      "result_summary": "Ok({'note': 'appended to the current list of patches (now have 2 patches)\\nyou may want to check that the change compiles successfully before continuing!'})"
     }
   ],
-  "test_patch": [],
-  "undo_last_patch": [],
+  "test_patch": [
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1643707.164210689,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_process_packet', 'dedup': 'atomic_compare_exchange_strong<__sanitizer::atomic_uint8_t>..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1643880.392585907,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_process_packet', 'dedup': 'atomic_compare_exchange_strong<__sanitizer::atomic_uint8_t>..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1644064.754227321,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_process_packet', 'dedup': 'atomic_compare_exchange_strong<__sanitizer::atomic_uint8_t>..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1644134.640830621,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_process_packet', 'dedup': 'atomic_compare_exchange_strong<__sanitizer::atomic_uint8_t>..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1644442.978501391,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_process_packet', 'dedup': 'atomic_compare_exchange_strong<__sanitizer::atomic_uint8_t>..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1644508.121585937,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_process_packet', 'dedup': 'atomic_compare_exchange_strong<__sanitizer::atomic_uint8_t>..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1644577.529422076,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_process_packet', 'dedup': 'atomic_compare_exchange_strong<__sanitizer::atomic_uint8_t>..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1644658.431990401,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_process_packet', 'dedup': 'atomic_compare_exchange_strong<__sanitizer::atomic_uint8_t>..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1644864.7734104,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_process_packet', 'dedup': 'atomic_compare_exchange_strong<__sanitizer::atomic_uint8_t>..."
+    },
+    {
+      "tool_name": "test_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1644938.275607977,
+      "success": true,
+      "result_summary": "Err(CRSError(A PoV still triggered a sanitizer, extra={'validation_status': 'pov_still_crashes', 'harness': 'fuzz_process_packet', 'dedup': 'atomic_compare_exchange_strong<__sanitizer::atomic_uint8_t>..."
+    }
+  ],
+  "undo_last_patch": [
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1644200.023658625,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 3})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1644202.799238562,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 2})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1644204.743477567,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 1})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1644207.019278989,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 0})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1645083.066023253,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 5})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1645085.530188528,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 4})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1645088.381406768,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 3})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1645092.919732478,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 2})"
+    },
+    {
+      "tool_name": "undo_last_patch",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1645095.251598268,
+      "success": true,
+      "result_summary": "Ok({'total_edits': 1})"
+    }
+  ],
   "list_current_edits": [
     {
       "tool_name": "list_current_edits",
       "args": [],
       "kwargs": {},
-      "timestamp": 1576054.195814064,
+      "timestamp": 1643890.08055724,
       "success": true,
-      "result_summary": "Ok({'edits': ['@@ -1234,6 +1234,20 @@\\n     char *pktbuf;\\n     u_int16_t pktbuf_maxlen, pktbuf_currlen;\\n   } kerberos_buf;\\n+\\n+  /*\\n+   * Keep allocation ownership outside the protocol unions.  Pr..."
+      "result_summary": "Ok({'edits': [\"@@ -251,6 +251,12 @@\\n \\n \\t\\t    realm_offset = cname_len + name_offset + 3;\\n \\n+\\t\\t    /* The protocol-specific metadata below lives in a union.  Claim\\n+\\t\\t       the flow before ..."
+    },
+    {
+      "tool_name": "list_current_edits",
+      "args": [],
+      "kwargs": {},
+      "timestamp": 1644669.427729947,
+      "success": true,
+      "result_summary": "Ok({'edits': ['@@ -254,11 +254,9 @@\\n \\t\\t    /* if cname does not end with a $ then it\\'s a username */\\n \\t\\t    if(cname_len\\n \\t\\t       && (cname_len < sizeof(cname_str))\\n \\t\\t       && (cname_s..."
     }
   ]
 }

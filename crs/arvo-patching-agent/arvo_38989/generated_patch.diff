@@ -1,0 +1,45 @@
+--- a/mruby/mrbgems/mruby-compiler/core/codegen.c
++++ b/mruby/mrbgems/mruby-compiler/core/codegen.c
+@@ -626,9 +626,11 @@
+       else {
+         struct mrb_insn_data data0 = mrb_decode_insn(mrb_prev_pc(s, data.addr));
+         if (data0.insn != OP_MOVE || data0.a != data.a || data0.b != dst) goto normal;
+-        s->pc = addr_pc(s, data0.addr);
+         /* constant folding */
+         data0 = mrb_decode_insn(mrb_prev_pc(s, data0.addr));
++        /* Rewriting across a jump target can move the target into an operand. */
++        if (addr_pc(s, data0.addr) < s->lastlabel) goto normal;
++        s->pc = addr_pc(s, mrb_prev_pc(s, data.addr));
+         mrb_int n;
+         if (data0.a == dst && get_int_operand(s, &data0, &n)) {
+           if ((data.insn == OP_ADDI && !mrb_int_add_overflow(n, data.b, &n)) ||
+@@ -770,7 +772,8 @@
+     }
+     struct mrb_insn_data data0 = mrb_decode_insn(mrb_prev_pc(s, data.addr));
+     mrb_int n0;
+-    if (addr_pc(s, data.addr) == s->lastlabel || !get_int_operand(s, &data0, &n0)) {
++    if (addr_pc(s, data.addr) == s->lastlabel || addr_pc(s, data0.addr) < s->lastlabel ||
++        !get_int_operand(s, &data0, &n0)) {
+       /* OP_ADDI/OP_SUBI takes upto 16bits */
+       if (n > INT16_MAX) goto normal;
+       rewind_pc(s);
+@@ -809,7 +812,8 @@
+       goto normal;
+     }
+     struct mrb_insn_data data0 = mrb_decode_insn(mrb_prev_pc(s, data.addr));
+-    if (!get_int_operand(s, &data0, &n0) || n == 0) {
++    if (addr_pc(s, data0.addr) < s->lastlabel ||
++        !get_int_operand(s, &data0, &n0) || n == 0) {
+       goto normal;
+     }
+     if (op == OP_MUL) {
+@@ -838,7 +842,8 @@
+       return FALSE;
+     }
+     struct mrb_insn_data data0 = mrb_decode_insn(mrb_prev_pc(s, data.addr));
+-    if (!get_int_operand(s, &data0, &n0)) {
++    if (addr_pc(s, data0.addr) < s->lastlabel ||
++        !get_int_operand(s, &data0, &n0)) {
+       return FALSE;
+     }
+     if (op == MRB_OPSYM_2(s->mrb, lshift)) {
