@@ -147,7 +147,15 @@ class ClangSearcher:
         hash = await vfs.hash()
         return (self.proj.data_dir / f"parsed_clang_ast_{hash.hex()}.json")
 
-    @alru_cache(maxsize=None, filter=only_ok)
+    # (aastham) no filter=only_ok here, unlike defn_lookup() above: a failure to build the
+    # clang AST index (e.g. bear itself unavailable, or the parse genuinely failing for this
+    # project) is deterministic for the rest of this run, not transient - observed directly:
+    # a project stuck re-attempting this exact container spin-up + clang_ast.py run every
+    # ~10s continuously for 20+ minutes, because every distinct caller of get_clang_def_sites()
+    # (find_defs, is_file_in_cu, is_file_referenced, defn_lookup, ...) re-triggers the same
+    # doomed attempt from scratch since the failure was never remembered. Caching the failure
+    # too means it's attempted once per project per run instead of once per call.
+    @alru_cache(maxsize=None)
     @requireable
     async def get_clang_def_sites(self) -> Result[tuple[dict[Path, list[SourceDefSite]], set[Path]]]:
         def from_raw(defns: dict[str, Any], referenced_files: list[str]):
