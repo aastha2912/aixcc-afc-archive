@@ -174,7 +174,13 @@ class Debugger():
             require(await self._init_ant_debug())
         return Ok(None)
 
-    @alru_cache(maxsize=None, filter=only_ok)
+    # (aastham) no filter=only_ok here, unlike init() above: a failed debug build is
+    # deterministic for the rest of this run (same reasoning as coverage.py's artifacts()),
+    # not transient. With filter=only_ok, every gdb_exec call re-triggers this full build
+    # (+ its fallback) from scratch - observed directly: two complete build-and-fallback
+    # cycles firing within 2 seconds because two concurrent gdb_exec calls both missed an
+    # uncached failure. Caching the failure means it's attempted once per project per run.
+    @alru_cache(maxsize=None)
     async def artifacts(self):
         cfg = self.project.info.debug_build_config.model_copy()
         # (aastham) Handle macOS Docker compatibility - use host path when using host Docker daemon
