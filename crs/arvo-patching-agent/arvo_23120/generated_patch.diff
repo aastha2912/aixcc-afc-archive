@@ -1,0 +1,53 @@
+--- a/valid.c
++++ b/valid.c
+@@ -2973,8 +2973,10 @@
+ xmlAddRef(xmlValidCtxtPtr ctxt, xmlDocPtr doc, const xmlChar *value,
+     xmlAttrPtr attr) {
+     xmlRefPtr ret;
++    xmlParserCtxtPtr pctxt = NULL;
+     xmlRefTablePtr table;
+     xmlListPtr ref_list;
++    int streaming;
+ 
+     if (doc == NULL) {
+         return(NULL);
+@@ -3006,10 +3008,27 @@
+     }
+ 
+     /*
++     * vstateNr normally indicates streaming validation, but it is the
++     * validation stack depth and can be zero after validation errors.  A
++     * reader still recycles nodes in that case, so also check the parser
++     * mode of validation contexts embedded in a parser context.
++     */
++    if ((ctxt != NULL) && (ctxt->userData != NULL) &&
++        ((ctxt->finishDtd == XML_CTXT_FINISH_DTD_0) ||
++         (ctxt->finishDtd == XML_CTXT_FINISH_DTD_1))) {
++        long delta = (char *) ctxt - (char *) ctxt->userData;
++
++        if ((delta > 0) && (delta < 250))
++            pctxt = ctxt->userData;
++    }
++    streaming = ((ctxt != NULL) && (ctxt->vstateNr != 0)) ||
++                ((pctxt != NULL) && (pctxt->parseMode == XML_PARSE_READER));
++
++    /*
+      * fill the structure.
+      */
+     ret->value = xmlStrdup(value);
+-    if ((ctxt != NULL) && (ctxt->vstateNr != 0)) {
++    if (streaming) {
+ 	/*
+ 	 * Operating in streaming mode, attr is gonna disappear
+ 	 */
+@@ -3019,6 +3038,10 @@
+ 	ret->name = NULL;
+ 	ret->attr = attr;
+     }
++    if ((ret->value == NULL) || (streaming && (ret->name == NULL))) {
++        xmlVErrMemory(ctxt, "xmlAddRef");
++        goto failed;
++    }
+     ret->lineno = xmlGetLineNo(attr->parent);
+ 
+     /* To add a reference :-

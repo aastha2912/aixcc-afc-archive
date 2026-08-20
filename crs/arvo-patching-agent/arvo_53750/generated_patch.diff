@@ -1,0 +1,59 @@
+--- a/libredwg/src/dec_macros.h
++++ b/libredwg/src/dec_macros.h
+@@ -1380,15 +1380,26 @@
+   }
+ 
+ #define UNKNOWN_UNTIL(pos)                                                    \
+-  if (dat->byte < pos)                                                        \
++  do                                                                          \
+     {                                                                         \
+-      int len = pos - dat->byte;                                              \
+-      BITCODE_TF unknown = bit_read_TF (dat, len);                            \
+-      LOG_TRACE ("unknown (%d): ", len);                                      \
+-      LOG_TRACE_TF (unknown, len);                                            \
+-      free (unknown);                                                         \
++      unsigned long _unknown_pos = (unsigned long)(pos);                      \
++      if (_unknown_pos > dat->size)                                           \
++        {                                                                     \
++          LOG_ERROR ("Invalid skip to 0x%lx (size 0x%lx)",                    \
++                     _unknown_pos, (unsigned long)dat->size);                 \
++          return DWG_ERR_VALUEOUTOFBOUNDS;                                    \
++        }                                                                     \
++      if (dat->byte < _unknown_pos)                                           \
++        {                                                                     \
++          int len = (int)(_unknown_pos - dat->byte);                          \
++          BITCODE_TF unknown = bit_read_TF (dat, len);                        \
++          LOG_TRACE ("unknown (%d): ", len);                                  \
++          LOG_TRACE_TF (unknown, len);                                        \
++          free (unknown);                                                     \
++        }                                                                     \
++      dat->byte = _unknown_pos;                                               \
+     }                                                                         \
+-  dat->byte = pos
++  while (0)
+ 
+ #define SECTION_STRING_STREAM                                                 \
+   {                                                                           \
+--- a/libredwg/src/decode_r11.c
++++ b/libredwg/src/decode_r11.c
+@@ -745,13 +745,19 @@
+   LOG_INFO ("==========================================\n")
+   error |= decode_preR13_header_variables (dat, dwg);
+   LOG_TRACE ("@0x%lx\n", dat->byte);
+-  if (error >= DWG_ERR_CRITICAL)
++  if ((error & DWG_ERR_VALUEOUTOFBOUNDS) || error >= DWG_ERR_CRITICAL)
+     return error;
+   SINCE (R_11)
+     {
+       // crc16 + DWG_SENTINEL_R11_HEADER_END
+       BITCODE_RS crc, crcc;
+       BITCODE_TF r11_sentinel;
++      if (dat->byte > dat->size)
++        {
++          LOG_ERROR ("Invalid header end 0x%lx (size 0x%lx)", dat->byte,
++                     (unsigned long)dat->size);
++          return error | DWG_ERR_VALUEOUTOFBOUNDS;
++        }
+       crcc = bit_calc_CRC (0xC0C1, &dat->chain[0], dat->byte); // from 0 to now
+       crc = bit_read_RS (dat);
+       LOG_TRACE ("crc: %04X [RSx] from 0-0x%lx\n", crc, dat->byte - 2);
