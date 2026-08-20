@@ -422,6 +422,19 @@ class CoverageAnalyzer():
 
         parser = JACOCO_PARSER if self.project.info.language == "jvm" else LCOV_PARSER
 
+        # fail fast, with no container launch at all, if any of the tools we're about to
+        # mount into the coverage container don't actually exist on disk yet. Previously
+        # this always launched a container anyway, which docker's own mount-source-creation
+        # then rejected (the external/ host dir is mounted read-only into docker-daemon) -
+        # observed directly as 5 fresh containers spun up per query_coverage batch, every
+        # single batch, forever. There's nothing to cache around this like a build result:
+        # `.run()` has to launch a live container each call by nature, and the mount is
+        # deterministically going to fail every time until the file exists for real - so
+        # check first instead of paying for a doomed container launch every time.
+        missing = [p for p in (CRS_LOAD_OPTIONS, LLVM_COV, parser) if not await p.exists()]
+        if missing:
+            return Err(CRSError(f"coverage tooling missing on host, skipping container launch: {[str(p) for p in missing]}"))
+
         try:
             async with require(await self.artifacts()).run(
                 env=env,
